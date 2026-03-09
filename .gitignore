@@ -1,0 +1,59 @@
+# Flutter / Dart
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+build/
+*.g.dart
+*.freezed.dart
+
+# Environment & Secrets
+.env
+.env.local
+.env.staging
+.env.production
+google-services.json
+GoogleService-Info.plist
+lib/core/firebase_options.dart
+
+# IDE
+.idea/
+.vscode/
+*.iml
+*.ipr
+*.iws
+.DS_Store
+Thumbs.db
+
+# Android
+android/.gradle/
+android/captures/
+android/key.properties
+*.keystore
+*.jks
+
+# iOS
+ios/Pods/
+ios/.symlinks/
+ios/Flutter/flutter_export_environment.sh
+
+# Coverage
+coverage/
+lcov.info
+
+# Logs
+*.log
+
+# Build artifacts
+*.apk
+*.aab
+*.ipa
+*.zip
+airon_bot_extension_*.zip
+
+# Node (functions)
+functions/node_modules/
+functions/lib/
+
+# macOS
+.DS_Store

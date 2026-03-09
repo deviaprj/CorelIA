@@ -1,0 +1,61 @@
+{
+  "manifest_version": 3,
+  "name": "AironBot",
+  "short_name": "AironBot",
+  "version": "1.0.0",
+  "description": "Assistant IA DeepSeek-V3 — chat, voix, projets.",
+  "icons": {
+    "16":  "icons/icon-16.png",
+    "48":  "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+
+  "action": {
+    "default_icon": "icons/icon-48.png",
+    "default_popup": "index.html",
+    "default_title": "AironBot"
+  },
+
+  "side_panel": {
+    "default_path": "index.html"
+  },
+
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content_script.js"],
+      "run_at": "document_idle"
+    }
+  ],
+
+  "permissions": [
+    "storage",
+    "sidePanel",
+    "contextMenus",
+    "scripting",
+    "activeTab"
+  ],
+
+  "host_permissions": [
+    "https://api.deepseek.com/*",
+    "https://openrouter.ai/*",
+    "https://*.firebaseio.com/*",
+    "https://*.googleapis.com/*"
+  ],
+
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'; worker-src 'self';"
+  },
+
+  "web_accessible_resources": [
+    {
+      "resources": ["*.js", "*.dart.js", "assets/**", "canvaskit/**"],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}
