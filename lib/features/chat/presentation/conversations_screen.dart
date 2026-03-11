@@ -7,6 +7,7 @@ import '../domain/conversation.dart';
 import 'chat_notifier.dart';
 import '../data/firestore_chat_repository.dart';
 import '../../../core/providers/firebase_providers.dart';
+import '../../../shared/widgets/loading_widget.dart';
 
 class ConversationsScreen extends ConsumerWidget {
   const ConversationsScreen({super.key});
@@ -32,7 +33,12 @@ class ConversationsScreen extends ConsumerWidget {
       ),
       body: asyncConversations.when(
         loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => Center(child: Text('Erreur: $e')),
+        error: (e, _) => Center(
+          child: ErrorDisplayWidget(
+            message: 'Erreur: $e',
+            onRetry: () => ref.invalidate(conversationsStreamProvider(user.uid)),
+          ),
+        ),
         data: (conversations) => conversations.isEmpty
             ? _EmptyState(onNewChat: () => _createNewConversation(context, ref, user.uid))
             : _ConversationList(

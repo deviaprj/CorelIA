@@ -55,8 +55,10 @@ class FirebaseAuthRepository implements AuthRepository {
       email: email,
       password: password,
     );
-    await cred.user?.updateDisplayName(name);
-    await _createUserDocument(cred.user!);
+    if (cred.user != null) {
+      await cred.user!.updateDisplayName(name);
+      await _createUserDocument(cred.user!);
+    }
   }
 
   @override

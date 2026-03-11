@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'auth_notifier.dart';
+import '../../../shared/extensions/string_extensions.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});
@@ -24,8 +25,29 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
   Future<void> _submit() async {
     final email = _emailCtrl.text.trim();
-    final pass = _passCtrl.text.trim();
-    if (email.isEmpty || pass.isEmpty) return;
+    final pass = _passCtrl.text;
+
+    // Validation
+    if (email.isEmpty || pass.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Veuillez remplir tous les champs')),
+      );
+      return;
+    }
+
+    if (!email.isValidEmail) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Email invalide')),
+      );
+      return;
+    }
+
+    if (_isRegister && pass.length < 6) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Le mot de passe doit faire au moins 6 caractères')),
+      );
+      return;
+    }
 
     if (_isRegister) {
       await ref

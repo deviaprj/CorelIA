@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 import 'package:flutter_tts/flutter_tts.dart';
@@ -77,12 +78,18 @@ class VoiceServiceNotifier extends Notifier<VoiceState> {
   }
 
   Future<void> speak(String text) async {
+    if (text.isEmpty) return;
     if (state.isSpeaking) await _tts.stop();
     state = state.copyWith(isSpeaking: true);
-    await _tts.speak(text);
-    _tts.setCompletionHandler(() {
+    try {
+      await _tts.speak(text);
+      _tts.setCompletionHandler(() {
+        state = state.copyWith(isSpeaking: false);
+      });
+    } catch (e) {
       state = state.copyWith(isSpeaking: false);
-    });
+      debugPrint('[TTS] Error: $e');
+    }
   }
 
   Future<void> stopSpeaking() async {

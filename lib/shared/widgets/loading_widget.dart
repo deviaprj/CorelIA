@@ -21,8 +21,8 @@ class LoadingWidget extends StatelessWidget {
   }
 }
 
-class ErrorWidget extends StatelessWidget {
-  const ErrorWidget({super.key, required this.message, this.onRetry});
+class ErrorDisplayWidget extends StatelessWidget {
+  const ErrorDisplayWidget({super.key, required this.message, this.onRetry});
   final String message;
   final VoidCallback? onRetry;
 

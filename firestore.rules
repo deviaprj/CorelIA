@@ -4,40 +4,53 @@ service cloud.firestore {
 
     // ── Utilisateurs ──────────────────────────────────────────────────────────
     match /users/{userId} {
-      allow read, write: if request.auth != null
-        && request.auth.uid == userId;
+      allow read: if request.auth != null && request.auth.uid == userId;
+      allow create: if request.auth != null
+        && request.auth.uid == userId
+        && request.resource.data.uid == userId;
+      allow update, delete: if request.auth != null && request.auth.uid == userId;
     }
 
     // ── Conversations ─────────────────────────────────────────────────────────
     match /conversations/{convId} {
       // list : Firestore vérifie que le where('userId','==',uid) satisfait la règle
       allow list: if request.auth != null
-        && resource.data.userId == request.auth.uid;
+        && request.query.filters[0].op == '=='
+        && request.query.filters[0].field == 'userId'
+        && request.query.filters[0].value == request.auth.uid;
       allow get: if request.auth != null
         && resource.data.userId == request.auth.uid;
       allow create: if request.auth != null
         && request.resource.data.userId == request.auth.uid;
-      allow update, delete: if request.auth != null
+      allow update: if request.auth != null
+        && resource.data.userId == request.auth.uid
+        && request.resource.data.userId == resource.data.userId;
+      allow delete: if request.auth != null
         && resource.data.userId == request.auth.uid;
 
       // Messages dans une conversation
       match /messages/{msgId} {
-        allow read, write: if request.auth != null
+        allow read: if request.auth != null
+          && get(/databases/$(database)/documents/conversations/$(convId)).data.userId
+             == request.auth.uid;
+        allow create: if request.auth != null
+          && get(/databases/$(database)/documents/conversations/$(convId)).data.userId
+             == request.auth.uid
+          && request.resource.data.conversationId == convId;
+        allow update, delete: if request.auth != null
           && get(/databases/$(database)/documents/conversations/$(convId)).data.userId
              == request.auth.uid;
       }
     }
 
     // ── Projets (Pro) ─────────────────────────────────────────────────────────
-    match /projects/{projectId} {
-      allow list: if request.auth != null
-        && resource.data.userId == request.auth.uid;
-      allow get: if request.auth != null
-        && resource.data.userId == request.auth.uid;
+    // Stockés dans /users/{userId}/projects/{projectId}
+    match /users/{userId}/projects/{projectId} {
+      allow read: if request.auth != null && request.auth.uid == userId;
       allow create: if request.auth != null
-        && request.resource.data.userId == request.auth.uid;
-      allow update, delete: if request.auth != null
-        && resource.data.userId == request.auth.uid;
+        && request.auth.uid == userId
+        && request.resource.data.userId == userId;
+      allow update, delete: if request.auth != null && request.auth.uid == userId;
     }
 
     // ── Referrals ─────────────────────────────────────────────────────────────

@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../../core/providers/app_providers.dart';
+import '../../../core/providers/firebase_providers.dart';
 
 class OnboardingScreen extends ConsumerStatefulWidget {
   const OnboardingScreen({super.key});
@@ -54,7 +55,13 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
     await prefs.setBool('onboarding_done', true);
     if (mounted) {
       ref.invalidate(onboardingDoneProvider);
-      context.go('/login');
+      // Si l'utilisateur est déjà connecté, aller aux chats, sinon login
+      final user = ref.read(currentUserProvider);
+      if (user != null) {
+        context.go('/chats');
+      } else {
+        context.go('/login');
+      }
     }
   }
 

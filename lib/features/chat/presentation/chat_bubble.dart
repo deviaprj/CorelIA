@@ -1,13 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:share_plus/share_plus.dart';
 import '../domain/message.dart';
+import '../../../core/constants.dart';
+import 'voice_service.dart';
 
 class ChatBubble extends StatelessWidget {
-  const ChatBubble({super.key, required this.message});
+  const ChatBubble({super.key, required this.message, this.showTts = true});
 
   final Message message;
+  final bool showTts;
 
   @override
   Widget build(BuildContext context) {
@@ -88,7 +92,7 @@ class ChatBubble extends StatelessWidget {
                             ),
                 ),
                 if (!isUser && !message.isStreaming && message.content.isNotEmpty)
-                  _ActionRow(message: message),
+                  _ActionRow(message: message, showTts: showTts),
               ],
             ),
           ),
@@ -99,12 +103,17 @@ class ChatBubble extends StatelessWidget {
   }
 }
 
-class _ActionRow extends StatelessWidget {
-  const _ActionRow({required this.message});
+class _ActionRow extends ConsumerWidget {
+  const _ActionRow({required this.message, this.showTts = true});
   final Message message;
+  final bool showTts;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final voiceState = ref.watch(voiceServiceProvider);
+    final voiceNotifier = ref.read(voiceServiceProvider.notifier);
+    final isSpeaking = voiceState.isSpeaking;
+
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -124,8 +133,26 @@ class _ActionRow extends StatelessWidget {
         _ActionButton(
           icon: Icons.share_outlined,
           tooltip: 'Partager',
-          onTap: () => Share.share(message.content),
+          onTap: () {
+            final preview = message.content.length > 200
+                ? '${message.content.substring(0, 200)}...'
+                : message.content;
+            Share.share('$preview\n\n${AppConstants.shareTagline}');
+          },
         ),
+        if (showTts) ...[
+          _ActionButton(
+            icon: isSpeaking ? Icons.stop_circle_outlined : Icons.volume_up_outlined,
+            tooltip: isSpeaking ? 'Arrêter' : 'Lire',
+            onTap: () {
+              if (isSpeaking) {
+                voiceNotifier.stopSpeaking();
+              } else {
+                voiceNotifier.speak(message.content);
+              }
+            },
+          ),
+        ],
       ],
     );
   }

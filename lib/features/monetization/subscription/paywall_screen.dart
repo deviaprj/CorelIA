@@ -115,25 +115,61 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
                     style: TextStyle(color: Colors.white70),
                   ),
                   data: (offerings) {
-                    final pkg =
-                        offerings?.current?.monthly;
+                    // Récupérer le package mensuel ou annuel
+                    Package? pkg = offerings?.current?.monthly;
+                    pkg ??= offerings?.current?.annual;
+                    pkg ??= offerings?.current?.availablePackages.firstOrNull;
+
                     if (pkg == null) {
-                      return const Text(
-                        'Offres non disponibles',
-                        style:
-                            TextStyle(color: Colors.white70),
+                      return Column(
+                        children: [
+                          const Text(
+                            'Offres non disponibles',
+                            style: TextStyle(color: Colors.white70),
+                          ),
+                          const SizedBox(height: 12),
+                          TextButton(
+                            onPressed: _loading ? null : _restore,
+                            child: const Text(
+                              'Restaurer mes achats',
+                              style: TextStyle(color: Colors.white60),
+                            ),
+                          ),
+                        ],
                       );
                     }
+
+                    final isAnnual = pkg.packageType == PackageType.annual;
                     return Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 24),
                       child: Column(
                         children: [
+                          // Badge économie pour annuel
+                          if (isAnnual)
+                            Container(
+                              margin: const EdgeInsets.only(bottom: 12),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12, vertical: 4,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Colors.green,
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: const Text(
+                                'Économisez 17%',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
                           SizedBox(
                             width: double.infinity,
                             child: FilledButton(
                               onPressed: _loading
                                   ? null
-                                  : () => _purchasePro(pkg),
+                                  : () => _purchasePro(pkg!),
                               style: FilledButton.styleFrom(
                                 backgroundColor: Colors.amber,
                                 foregroundColor: Colors.black,
@@ -143,7 +179,7 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
                               child: _loading
                                   ? const CircularProgressIndicator()
                                   : Text(
-                                      'S\'abonner ${pkg.storeProduct.priceString}/mois',
+                                      'S\'abonner ${pkg.storeProduct.priceString}${isAnnual ? '/an' : '/mois'}',
                                       style: const TextStyle(
                                           fontWeight: FontWeight.bold,
                                           fontSize: 16),

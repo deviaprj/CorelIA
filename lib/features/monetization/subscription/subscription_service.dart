@@ -54,8 +54,18 @@ final isProProvider = FutureProvider<bool>((ref) async {
   if (PlatformService.isExtension) {
     // Extension : lire le plan depuis Firestore
     final user = ref.watch(currentUserProvider);
-    return false;
-  };
+    if (user == null) return false;
+    try {
+      final doc = await ref.watch(firestoreProvider)
+          .collection(AppConstants.colUsers)
+          .doc(user.uid)
+          .get();
+      final data = doc.data();
+      return data?['plan'] == 'pro';
+    } catch (_) {
+      return false;
+    }
+  }
   try {
     final info = await Purchases.getCustomerInfo();
     return SubscriptionService._isPro(info);

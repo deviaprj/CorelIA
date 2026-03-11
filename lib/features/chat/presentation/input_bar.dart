@@ -37,6 +37,14 @@ class _InputBarState extends ConsumerState<InputBar> {
     super.dispose();
   }
 
+  /// Remplit le champ de texte avec une valeur
+  void setText(String text) {
+    _controller.text = text;
+    _controller.selection = TextSelection.fromPosition(
+      TextPosition(offset: _controller.text.length),
+    );
+  }
+
   void _send() {
     final text = _controller.text.trim();
     if (text.isEmpty || widget.isLoading) return;

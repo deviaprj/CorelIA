@@ -1,3 +1,5 @@
+import 'package:cloud_functions/cloud_functions.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../data/ai_client.dart';
 import '../data/firestore_chat_repository.dart';
@@ -84,9 +86,13 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
           isStreaming: false,
         );
         return;
-      } catch (_) {
+      } on FirebaseFunctionsException catch (e) {
         // Cloud Function indisponible (non déployée ou erreur réseau) :
-        // on continue sans quota en mode dégradé
+        // on continue sans quota en mode dégradé, mais on log
+        debugPrint('[Quota] Cloud Function unavailable: ${e.message}');
+      } catch (e) {
+        // Autre erreur - continuer en mode dégradé
+        debugPrint('[Quota] Error checking quota: $e');
       }
     }
 
@@ -122,6 +128,12 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
     // 5. Streamer la réponse IA
     try {
       final apiKey = await _getApiKey(isPro);
+      if (apiKey.isEmpty) {
+        throw const AiException(
+          'Clé API non configurée. Ajoutez-la dans les paramètres.',
+          statusCode: 401,
+        );
+      }
       final history = state.messages
           .where((m) => m.role != Role.system && !m.isStreaming)
           .take(AppConstants.maxContextMessages)
@@ -172,6 +184,11 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
     List<Map<String, dynamic>> history,
     bool isPro,
   ) {
+    if (apiKey.isEmpty) {
+      return Stream.error(
+        const AiException('Clé API manquante', statusCode: 401),
+      );
+    }
     if (isPro) {
       return OpenRouterClient(apiKey: apiKey).streamChat(
         messages: history,

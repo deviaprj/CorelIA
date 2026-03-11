@@ -1,4 +1,3 @@
-import 'package:flutter/foundation.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 import '../../../core/constants.dart';
 import '../../../core/platform/platform_service.dart';

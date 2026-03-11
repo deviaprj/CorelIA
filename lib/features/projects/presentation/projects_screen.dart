@@ -123,12 +123,35 @@ class ProjectsScreen extends ConsumerWidget {
       ),
     );
 
-    if (ok == true && nameCtrl.text.isNotEmpty) {
+    if (ok == true && nameCtrl.text.trim().isNotEmpty) {
+      final name = nameCtrl.text.trim();
+
+      // Vérifier si un projet avec ce nom existe déjà
+      final existing = await ref
+          .read(firestoreProvider)
+          .collection('users')
+          .doc(userId)
+          .collection('projects')
+          .where('name', isEqualTo: name)
+          .get();
+
+      if (existing.docs.isNotEmpty && context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Un projet avec ce nom existe déjà')),
+        );
+        nameCtrl.dispose();
+        descCtrl.dispose();
+        return;
+      }
+
       final project = Project.create(
         userId: userId,
-        name: nameCtrl.text,
-        description: descCtrl.text,
+        name: name,
+        description: descCtrl.text.trim(),
       );
+
+      nameCtrl.dispose();
+      descCtrl.dispose();
       await ref
           .read(firestoreProvider)
           .collection('users')
