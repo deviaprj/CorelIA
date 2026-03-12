@@ -36,7 +36,12 @@ Future<void> main() async {
   // RevenueCat (mobile uniquement)
   if (PlatformService.isMobile) {
     final auth = FirebaseAuth.instance;
-    await SubscriptionService().init(auth.currentUser?.uid ?? '');
+    try {
+      await SubscriptionService().init(auth.currentUser?.uid ?? '');
+    } catch (e) {
+      // RevenueCat non configuré ou erreur d'initialisation
+      debugPrint('[RevenueCat] Initialisation échouée : $e');
+    }
   }
 
   runApp(const ProviderScope(child: AironBotApp()));

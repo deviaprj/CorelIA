@@ -2,9 +2,9 @@
 // qui utilisent flutter.compileSdkVersion dans leur build.gradle
 ext {
     flutter = [
-        compileSdkVersion: 36,
-        targetSdkVersion : 36,
-        minSdkVersion    : 21,
+        compileSdkVersion: 35,
+        targetSdkVersion : 35,
+        minSdkVersion    : 26,
         ndkVersion       : '27.0.12077973',
     ]
 }

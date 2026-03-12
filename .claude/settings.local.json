@@ -3,7 +3,32 @@
     "allow": [
       "Bash(find /home/geekai/Documents/GitHub/AironBot -type f -name \"*.md\" -o -name \"*.py\" -o -name \"*.json\" -o -name \"*.txt\" -o -name \"*.yml\" -o -name \"*.yaml\" 2>/dev/null | head -100)",
       "Bash(flutter analyze:*)",
-      "Bash(flutter build:*)"
+      "Bash(flutter build:*)",
+      "Bash(chmod +x /home/geekai/Documents/GitHub/AironBot/scripts/run_tests.sh)",
+      "Bash(flutter test:*)",
+      "Bash(sleep 15 && adb devices 2>&1)",
+      "Bash(adb devices:*)",
+      "Bash(flutter run:*)",
+      "Bash(adb kill-server:*)",
+      "Bash(adb -s 6db039ac shell pm list packages | grep airon 2>&1)",
+      "Bash(sudo adb:*)",
+      "Bash(sudo /home/geekai/Android/Sdk/platform-tools/adb -s 6db039ac kill-server && sudo /home/geekai/Android/Sdk/platform-tools/adb -s 6db039ac start-server 2>&1)",
+      "Bash(export PATH=$PATH:/home/geekai/Android/Sdk/platform-tools && flutter run --device-id 6db039ac --no-sound-null-safety 2>&1 | tail -30)",
+      "Bash(adb -s 6db039ac push build/app/outputs/flutter-apk/app-debug.apk /sdcard/Download/AironBot.apk 2>&1)",
+      "Bash(adb -s 6db039ac install -r build/app/outputs/flutter-apk/app-debug.apk 2>&1)",
+      "Bash(adb -s 6db039ac shell am start -n com.airon.bot/.MainActivity 2>&1)",
+      "Bash(adb -s 6db039ac shell monkey -p com.airon.bot -c android.intent.category.LAUNCHER 1 2>&1)",
+      "Bash(adb -s 6db039ac shell pm list packages | grep -i airon 2>&1)",
+      "Bash(adb -s 6db039ac shell monkey -p com.aironbot.airon_bot -c android.intent.category.LAUNCHER 1 2>&1)",
+      "Bash(adb -s 6db039ac logcat -v color -v time | grep -i \"airon\\\\|flutter\" 2>&1)",
+      "Bash(flutter doctor:*)",
+      "Bash(cd /home/geekai/Documents/GitHub/AironBot/android && ./gradlew clean 2>&1 | tail -20)",
+      "Bash(adb install:*)",
+      "Bash(adb logcat:*)",
+      "Bash(adb shell:*)",
+      "Bash(ls -la /home/geekai/Documents/GitHub/AironBot/android/app/src/main/res/drawable*/ 2>&1)",
+      "Bash(sudo apt:*)",
+      "Bash(git add:*)"
     ]
   }
 }
