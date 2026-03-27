@@ -60,4 +60,10 @@ class Message {
         isStreaming: isStreaming ?? this.isStreaming,
         createdAt: createdAt,
       );
+
+  /// Returns true if this message is from a user
+  bool get isUser => role == Role.user;
+
+  /// Returns true if this message is from the assistant
+  bool get isAssistant => role == Role.assistant;
 }

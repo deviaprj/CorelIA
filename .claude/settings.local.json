@@ -28,7 +28,16 @@
       "Bash(adb shell:*)",
       "Bash(ls -la /home/geekai/Documents/GitHub/AironBot/android/app/src/main/res/drawable*/ 2>&1)",
       "Bash(sudo apt:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(emulator -list-avds 2>&1)",
+      "Bash(adb -s emulator-5554 install -r build/app/outputs/flutter-apk/app-release.apk 2>&1)",
+      "Bash(adb -s emulator-5554 shell am start -n com.aironbot.airon_bot/.MainActivity 2>&1)",
+      "Bash(find:*)",
+      "Bash(flutter pub:*)",
+      "Bash(/home/geekai/flutter/bin/flutter pub:*)",
+      "Bash(bash scripts/run_tests.sh unit)",
+      "Bash(/home/geekai/flutter/bin/flutter test:*)"
     ]
   }
 }

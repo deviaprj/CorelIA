@@ -29,6 +29,9 @@ class AppUser {
 
   bool get isPro => plan == 'pro';
 
+  /// Daily request limit: -1 for pro (unlimited), 20 for free
+  int get dailyRequestsLimit => isPro ? -1 : 20;
+
   int get remainingRequests {
     final today = DateTime.now().toIso8601String().split('T')[0];
     if (dailyRequestsDate != today) return 20;
