@@ -53,6 +53,7 @@ class Conversation {
     String? title,
     int? messageCount,
     String? modelUsed,
+    String? projectId,
     bool? isPinned,
     DateTime? updatedAt,
   }) =>
@@ -62,7 +63,7 @@ class Conversation {
         title: title ?? this.title,
         modelUsed: modelUsed ?? this.modelUsed,
         messageCount: messageCount ?? this.messageCount,
-        projectId: projectId,
+        projectId: projectId ?? this.projectId,
         isPinned: isPinned ?? this.isPinned,
         createdAt: createdAt,
         updatedAt: updatedAt ?? this.updatedAt,

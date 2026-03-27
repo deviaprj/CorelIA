@@ -17,14 +17,16 @@ final routerProvider = Provider<GoRouter>((ref) {
   return GoRouter(
     initialLocation: '/',
     redirect: (context, state) {
-      final isLoggedIn = authState.valueOrNull != null;
+      // Gérer les erreurs Firebase - en cas d'erreur, on considère pas connecté
+      final hasError = authState.hasError;
+      final isLoggedIn = hasError ? false : (authState.valueOrNull != null);
       final onboardingDone = onboardingAsync.valueOrNull ?? false;
       final path = state.matchedLocation;
 
       // Onboarding toujours en premier
       if (!onboardingDone && path != '/onboarding') return '/onboarding';
 
-      // Auth
+      // Auth - si erreur Firebase, rediriger vers login quand même
       if (!isLoggedIn && path != '/login' && path != '/onboarding') {
         return '/login';
       }

@@ -1,14 +1,22 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../data/firebase_auth_repository.dart';
+import '../data/mock_auth_repository.dart';
+import '../../../main.dart' show isDemoMode;
 
 class AuthNotifier extends AsyncNotifier<void> {
   @override
   Future<void> build() async {}
 
+  // Helper pour obtenir le bon repository selon le mode
+  dynamic get _repository {
+    if (isDemoMode) return mockAuthRepository;
+    return ref.read(authRepositoryProvider);
+  }
+
   Future<void> signInWithEmail(String email, String password) async {
     state = const AsyncLoading();
     state = await AsyncValue.guard(
-      () => ref.read(authRepositoryProvider).signInWithEmail(email, password),
+      () => _repository.signInWithEmail(email, password),
     );
   }
 
@@ -16,37 +24,35 @@ class AuthNotifier extends AsyncNotifier<void> {
       String email, String password, String name) async {
     state = const AsyncLoading();
     state = await AsyncValue.guard(
-      () => ref
-          .read(authRepositoryProvider)
-          .registerWithEmail(email, password, name),
+      () => _repository.registerWithEmail(email, password, name),
     );
   }
 
   Future<void> signInWithGoogle() async {
     state = const AsyncLoading();
     state = await AsyncValue.guard(
-      () => ref.read(authRepositoryProvider).signInWithGoogle(),
+      () => _repository.signInWithGoogle(),
     );
   }
 
   Future<void> signInAnonymously() async {
     state = const AsyncLoading();
     state = await AsyncValue.guard(
-      () => ref.read(authRepositoryProvider).signInAnonymously(),
+      () => _repository.signInAnonymously(),
     );
   }
 
   Future<void> signOut() async {
     state = const AsyncLoading();
     state = await AsyncValue.guard(
-      () => ref.read(authRepositoryProvider).signOut(),
+      () => _repository.signOut(),
     );
   }
 
   Future<void> deleteAccount() async {
     state = const AsyncLoading();
     state = await AsyncValue.guard(
-      () => ref.read(authRepositoryProvider).deleteAccount(),
+      () => _repository.deleteAccount(),
     );
   }
 }

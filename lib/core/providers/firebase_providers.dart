@@ -3,6 +3,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../secure_storage.dart';
+import '../../features/auth/data/mock_auth_repository.dart';
+import '../../main.dart' show isDemoMode;
 
 // ── Firebase instances ────────────────────────────────────────────────────────
 final firebaseAuthProvider = Provider<FirebaseAuth>(
@@ -18,12 +20,24 @@ final firebaseMessagingProvider = Provider<FirebaseMessaging>(
 );
 
 // ── Auth state ────────────────────────────────────────────────────────────────
-final authStateProvider = StreamProvider<User?>(
-  (ref) => ref.watch(firebaseAuthProvider).authStateChanges(),
+// Mode DEMO: utilise le mock auth repository
+final authStateProvider = StreamProvider<dynamic>(
+  (ref) {
+    if (isDemoMode) {
+      return mockAuthRepository.authStateChanges;
+    }
+    return ref.watch(firebaseAuthProvider).authStateChanges();
+  },
 );
 
-final currentUserProvider = Provider<User?>(
-  (ref) => ref.watch(authStateProvider).valueOrNull,
+// Mode DEMO: retourne AppUser ou User selon le mode
+final currentUserProvider = Provider<dynamic>(
+  (ref) {
+    if (isDemoMode) {
+      return mockAuthRepository.currentUser;
+    }
+    return ref.watch(authStateProvider).valueOrNull;
+  },
 );
 
 // ── Secure storage ────────────────────────────────────────────────────────────

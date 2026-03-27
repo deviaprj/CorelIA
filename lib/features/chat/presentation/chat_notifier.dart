@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../data/ai_client.dart';
 import '../data/firestore_chat_repository.dart';
+import '../data/mock_chat_repository.dart';
 import '../data/quota_service.dart';
 import '../domain/conversation.dart';
 import '../domain/message.dart';
@@ -10,19 +11,28 @@ import '../../../core/constants.dart';
 import '../../../core/providers/firebase_providers.dart';
 import '../../../core/secure_storage.dart';
 import '../../monetization/subscription/subscription_service.dart';
+import '../../../main.dart' show isDemoMode;
 
 // ── Conversations stream ───────────────────────────────────────────────────────
 final conversationsStreamProvider =
     StreamProvider.family<List<Conversation>, String>(
-  (ref, userId) =>
-      ref.watch(chatRepositoryProvider).watchConversations(userId),
+  (ref, userId) {
+    if (isDemoMode) {
+      return mockChatRepository.watchConversations(userId);
+    }
+    return ref.watch(chatRepositoryProvider).watchConversations(userId);
+  },
 );
 
 // ── Messages stream ───────────────────────────────────────────────────────────
 final messagesStreamProvider =
     StreamProvider.family<List<Message>, String>(
-  (ref, convId) =>
-      ref.watch(chatRepositoryProvider).watchMessages(convId),
+  (ref, convId) {
+    if (isDemoMode) {
+      return mockChatRepository.watchMessages(convId);
+    }
+    return ref.watch(chatRepositoryProvider).watchMessages(convId);
+  },
 );
 
 // ── Chat state (streaming en cours) ──────────────────────────────────────────
@@ -97,7 +107,7 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
     }
 
     // 2. Sauvegarder message utilisateur
-    final repo = ref.read(chatRepositoryProvider);
+    final dynamic repo = isDemoMode ? mockChatRepository : ref.read(chatRepositoryProvider);
     final userMsg = await repo.addMessage(
       conversationId: arg,
       role: Role.user,
@@ -163,12 +173,17 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
 
       // 6. Sauvegarder la réponse finale
       final model = isPro ? AppConstants.mistralModel : AppConstants.deepSeekModel;
-      await repo.addMessage(
-        conversationId: arg,
-        role: Role.assistant,
-        content: buffer.toString(),
-        model: model,
-      );
+      if (isDemoMode) {
+        // En mode DEMO, on met à jour le message placeholder directement
+        await mockChatRepository.updateMessageContent(arg, placeholderId, buffer.toString());
+      } else {
+        await repo.addMessage(
+          conversationId: arg,
+          role: Role.assistant,
+          content: buffer.toString(),
+          model: model,
+        );
+      }
     } on AiException catch (e) {
       state = state.copyWith(error: e.message);
     } catch (e) {

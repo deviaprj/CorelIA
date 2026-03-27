@@ -41,7 +41,12 @@
       "Bash(git push:*)",
       "Bash(git:*)",
       "Bash(cd:*)",
-      "Bash(/home/geekai/flutter/bin/flutter build:*)"
+      "Bash(/home/geekai/flutter/bin/flutter build:*)",
+      "Bash(/home/geekai/flutter/bin/flutter emulators:*)",
+      "Bash(/home/geekai/flutter/bin/flutter install:*)",
+      "Bash(adb wait-for-device:*)",
+      "Bash(/home/geekai/flutter/bin/flutter run:*)",
+      "Bash(pkill:*)"
     ]
   }
 }
