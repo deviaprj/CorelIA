@@ -140,6 +140,7 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
           .toList()
           .reversed
           .take(AppConstants.maxContextMessages)
+          .toList()
           .reversed
           .map((m) => m.toApiMap())
           .toList();
