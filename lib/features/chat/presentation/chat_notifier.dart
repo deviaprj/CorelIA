@@ -107,12 +107,17 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
     }
 
     // 2. Sauvegarder message utilisateur
-    final dynamic repo = isDemoMode ? mockChatRepository : ref.read(chatRepositoryProvider);
-    final userMsg = await repo.addMessage(
-      conversationId: arg,
-      role: Role.user,
-      content: text,
-    );
+    final userMsg = isDemoMode
+        ? await mockChatRepository.addMessage(
+            conversationId: arg,
+            role: Role.user,
+            content: text,
+          )
+        : await ref.read(chatRepositoryProvider).addMessage(
+            conversationId: arg,
+            role: Role.user,
+            content: text,
+          );
 
     // 3. Préparer l'appel streaming
     state = state.copyWith(
@@ -177,7 +182,7 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
         // En mode DEMO, on met à jour le message placeholder directement
         await mockChatRepository.updateMessageContent(arg, placeholderId, buffer.toString());
       } else {
-        await repo.addMessage(
+        await ref.read(chatRepositoryProvider).addMessage(
           conversationId: arg,
           role: Role.assistant,
           content: buffer.toString(),
@@ -216,12 +221,26 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
         maxTokens: AppConstants.proMaxTokens,
       );
     }
+    // Check if Ollama API key is configured
+    final ollamaKey = AppConstants.ollamaApiKey;
+    if (ollamaKey.isNotEmpty) {
+      return OllamaClient(apiKey: ollamaKey, baseUrl: AppConstants.ollamaBaseUrl)
+          .streamChat(
+        messages: history,
+        model: AppConstants.ollamaModel,
+        maxTokens: AppConstants.proMaxTokens,
+      );
+    }
     return DeepSeekClient(apiKey: apiKey).streamChat(messages: history);
   }
 
   Future<String> _getApiKey(bool isPro) async {
     if (isPro) return AppConstants.openRouterApiKey;
-    // Vérifier clé personnelle puis clé app
+    // Ollama ne nécessite pas de clé personnelle - utiliser clé config
+    if (AppConstants.ollamaApiKey.isNotEmpty) {
+      return AppConstants.ollamaApiKey;
+    }
+    // Vérifier clé personnelle puis clé app DeepSeek
     final storage = ref.read(secureStorageProvider);
     final personal = await storage.read(StorageKeys.apiKeyDeepSeek);
     if (personal != null && personal.isNotEmpty) return personal;

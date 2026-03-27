@@ -136,3 +136,67 @@ class OpenRouterClient {
     }
   }
 }
+
+/// Client Ollama pour modèles cloud (kimi-k2.5:cloud, etc.)
+/// Voir: https://ollama.com/library/kimi-k2.5
+class OllamaClient {
+  final String? apiKey;
+  final String baseUrl;
+
+  OllamaClient({this.apiKey, this.baseUrl = 'https://ollama.com'});
+
+  Stream<String> streamChat({
+    required List<Map<String, dynamic>> messages,
+    String model = 'kimi-k2.5:cloud',
+    String? systemPrompt,
+    int maxTokens = AppConstants.proMaxTokens,
+  }) async* {
+    final body = jsonEncode({
+      'model': model,
+      'stream': true,
+      'messages': [
+        if (systemPrompt != null && systemPrompt.isNotEmpty)
+          {'role': 'system', 'content': systemPrompt},
+        ...messages,
+      ],
+      'options': {
+        'num_predict': maxTokens,
+      },
+    });
+
+    final request = http.Request(
+      'POST',
+      Uri.parse('$baseUrl/api/chat'),
+    )
+      ..headers.addAll({
+        'Content-Type': 'application/json',
+        'Accept': 'application/x-ndjson',
+      })
+      ..body = body;
+
+    final response = await _httpClient.send(request);
+    if (response.statusCode != 200) {
+      final err = await response.stream.bytesToString();
+      throw AiException('Ollama error ${response.statusCode}: $err',
+          statusCode: response.statusCode);
+    }
+
+    await for (final line in response.stream
+        .transform(utf8.decoder)
+        .transform(const LineSplitter())) {
+      if (line.isEmpty) continue;
+      try {
+        final json = jsonDecode(line) as Map<String, dynamic>;
+        final message = json['message'] as Map<String, dynamic>?;
+        final content = message?['content'] as String?;
+        if (content != null && content.isNotEmpty) yield content;
+
+        // Check if done
+        final done = json['done'] as bool?;
+        if (done == true) break;
+      } catch (e) {
+        // Ignore parse errors, continue streaming
+      }
+    }
+  }
+}
