@@ -218,16 +218,7 @@ class _ProjectTile extends ConsumerWidget {
 
   void _openProject(BuildContext context, WidgetRef ref) {
     // Navigation vers les conversations du projet
-    // Pour l'instant, on affiche un message car la feature n'est pas complète
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Projet "${project.name}" — Feature en développement'),
-        action: SnackBarAction(
-          label: 'OK',
-          onPressed: () {},
-        ),
-      ),
-    );
+    context.go('/projects/${project.id}');
   }
 
   Future<void> _onMenuSelected(

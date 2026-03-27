@@ -96,6 +96,11 @@ class VoiceServiceNotifier extends Notifier<VoiceState> {
     await _tts.stop();
     state = state.copyWith(isSpeaking: false);
   }
+
+  void dispose() {
+    _tts.stop();
+    _stt.stop();
+  }
 }
 
 final voiceServiceProvider =

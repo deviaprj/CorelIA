@@ -37,7 +37,11 @@
       "Bash(flutter pub:*)",
       "Bash(/home/geekai/flutter/bin/flutter pub:*)",
       "Bash(bash scripts/run_tests.sh unit)",
-      "Bash(/home/geekai/flutter/bin/flutter test:*)"
+      "Bash(/home/geekai/flutter/bin/flutter test:*)",
+      "Bash(git push:*)",
+      "Bash(git:*)",
+      "Bash(cd:*)",
+      "Bash(/home/geekai/flutter/bin/flutter build:*)"
     ]
   }
 }
