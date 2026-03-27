@@ -4,7 +4,20 @@ import Stripe from 'stripe';
 
 // ⚠️  Définir ces secrets via : firebase functions:secrets:set STRIPE_SECRET_KEY
 //                                                    STRIPE_WEBHOOK_SECRET
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY ?? '', {
+
+// Validate secrets at startup - fail fast if not configured
+const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
+const stripeWebhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+
+if (!stripeSecretKey || stripeSecretKey.length < 10) {
+  throw new Error('STRIPE_SECRET_KEY is not configured. Set it via: firebase functions:secrets:set STRIPE_SECRET_KEY');
+}
+
+if (!stripeWebhookSecret || stripeWebhookSecret.length < 10) {
+  throw new Error('STRIPE_WEBHOOK_SECRET is not configured. Set it via: firebase functions:secrets:set STRIPE_WEBHOOK_SECRET');
+}
+
+const stripe = new Stripe(stripeSecretKey, {
   apiVersion: '2023-10-16',
 });
 
@@ -19,14 +32,13 @@ export const stripeWebhook = onRequest(
   { region: 'europe-west1' },
   async (req, res) => {
     const sig = req.headers['stripe-signature'];
-    const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET ?? '';
 
     let event: Stripe.Event;
     try {
       event = stripe.webhooks.constructEvent(
         req.rawBody,
         sig as string,
-        webhookSecret
+        stripeWebhookSecret
       );
     } catch (err) {
       console.error('Stripe webhook signature invalide :', err);

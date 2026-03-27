@@ -134,26 +134,30 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
           statusCode: 401,
         );
       }
+      // Prendre les derniers messages (les plus récents) pour le contexte IA
       final history = state.messages
           .where((m) => m.role != Role.system && !m.isStreaming)
+          .toList()
+          .reversed
           .take(AppConstants.maxContextMessages)
+          .reversed
           .map((m) => m.toApiMap())
           .toList();
 
       final buffer = StringBuffer();
       final stream = _getAiStream(apiKey, history, isPro);
 
+      // Optimisation: liste mutable pour éviter la recréation O(n²) à chaque token
+      final updatedMessages = List<Message>.from(state.messages);
+      final placeholderIndex = updatedMessages.indexWhere((m) => m.id == placeholderId);
+
       await for (final token in stream) {
         buffer.write(token);
-        state = state.copyWith(
-          messages: [
-            for (final m in state.messages)
-              if (m.id == placeholderId)
-                m.copyWith(content: buffer.toString())
-              else
-                m,
-          ],
-        );
+        if (placeholderIndex != -1) {
+          updatedMessages[placeholderIndex] = updatedMessages[placeholderIndex]
+              .copyWith(content: buffer.toString());
+          state = state.copyWith(messages: List.unmodifiable(updatedMessages));
+        }
       }
 
       // 6. Sauvegarder la réponse finale

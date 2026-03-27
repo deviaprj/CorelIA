@@ -11,6 +11,9 @@ class AiException implements Exception {
   String toString() => 'AiException($statusCode): $message';
 }
 
+/// Singleton HTTP client pour éviter les fuites mémoire
+final _httpClient = http.Client();
+
 /// Client DeepSeek-V3 avec streaming SSE
 class DeepSeekClient {
   final String apiKey;
@@ -46,7 +49,7 @@ class DeepSeekClient {
 
     final http.StreamedResponse response;
     try {
-      response = await http.Client().send(request);
+      response = await _httpClient.send(request);
     } catch (e) {
       throw AiException('Erreur réseau : $e');
     }
@@ -111,7 +114,7 @@ class OpenRouterClient {
           })
           ..body = body;
 
-    final response = await http.Client().send(request);
+    final response = await _httpClient.send(request);
     if (response.statusCode != 200) {
       final err = await response.stream.bytesToString();
       throw AiException('OpenRouter error ${response.statusCode}: $err',

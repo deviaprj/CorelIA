@@ -19,6 +19,19 @@ final projectsStreamProvider =
           snap.docs.map(Project.fromFirestore).toList()),
 );
 
+// Provider pour les conversations d'un projet
+final projectConversationsProvider =
+    StreamProvider.family<List<String>, String>(
+  (ref, projectId) => ref
+      .watch(firestoreProvider)
+      .collection('projects')
+      .doc(projectId)
+      .collection('conversations')
+      .orderBy('createdAt', descending: true)
+      .snapshots()
+      .map((snap) => snap.docs.map((d) => d.id).toList()),
+);
+
 // ── Screen ────────────────────────────────────────────────────────────────────
 class ProjectsScreen extends ConsumerWidget {
   const ProjectsScreen({super.key});
@@ -166,13 +179,13 @@ class ProjectsScreen extends ConsumerWidget {
   }
 }
 
-class _ProjectTile extends StatelessWidget {
+class _ProjectTile extends ConsumerWidget {
   const _ProjectTile({required this.project, required this.userId});
   final Project project;
   final String userId;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     return ListTile(
       leading: const CircleAvatar(
         child: Icon(Icons.folder_outlined),
@@ -182,7 +195,149 @@ class _ProjectTile extends StatelessWidget {
         '${project.conversationIds.length} conversation(s)',
         style: Theme.of(context).textTheme.bodySmall,
       ),
+      trailing: PopupMenuButton<String>(
+        onSelected: (v) => _onMenuSelected(v, context, ref),
+        itemBuilder: (_) => [
+          const PopupMenuItem(
+            value: 'open',
+            child: Text('Ouvrir'),
+          ),
+          const PopupMenuItem(
+            value: 'edit',
+            child: Text('Modifier'),
+          ),
+          const PopupMenuItem(
+            value: 'delete',
+            child: Text('Supprimer'),
+          ),
+        ],
+      ),
+      onTap: () => _openProject(context, ref),
     );
+  }
+
+  void _openProject(BuildContext context, WidgetRef ref) {
+    // Navigation vers les conversations du projet
+    // Pour l'instant, on affiche un message car la feature n'est pas complète
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Projet "${project.name}" — Feature en développement'),
+        action: SnackBarAction(
+          label: 'OK',
+          onPressed: () {},
+        ),
+      ),
+    );
+  }
+
+  Future<void> _onMenuSelected(
+    String value,
+    BuildContext context,
+    WidgetRef ref,
+  ) async {
+    switch (value) {
+      case 'open':
+        _openProject(context, ref);
+        break;
+      case 'edit':
+        await _editProject(context, ref);
+        break;
+      case 'delete':
+        await _deleteProject(context, ref);
+        break;
+    }
+  }
+
+  Future<void> _editProject(BuildContext context, WidgetRef ref) async {
+    final nameCtrl = TextEditingController(text: project.name);
+    final descCtrl = TextEditingController(text: project.description);
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Modifier le projet'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: nameCtrl,
+              autofocus: true,
+              decoration: const InputDecoration(labelText: 'Nom'),
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: descCtrl,
+              decoration: const InputDecoration(
+                labelText: 'Description (optionnel)',
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Annuler'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Enregistrer'),
+          ),
+        ],
+      ),
+    );
+
+    if (ok == true && nameCtrl.text.trim().isNotEmpty) {
+      final updatedProject = project.copyWith(
+        name: nameCtrl.text.trim(),
+        description: descCtrl.text.trim(),
+        updatedAt: DateTime.now(),
+      );
+      await ref
+          .read(firestoreProvider)
+          .collection('users')
+          .doc(userId)
+          .collection('projects')
+          .doc(project.id)
+          .set(updatedProject.toFirestore());
+    }
+
+    nameCtrl.dispose();
+    descCtrl.dispose();
+  }
+
+  Future<void> _deleteProject(BuildContext context, WidgetRef ref) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Supprimer le projet ?'),
+        content: const Text(
+          'Cette action est irréversible. Les conversations associées ne seront pas supprimées.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Annuler'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.error,
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Supprimer'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true && context.mounted) {
+      await ref
+          .read(firestoreProvider)
+          .collection('users')
+          .doc(userId)
+          .collection('projects')
+          .doc(project.id)
+          .delete();
+    }
   }
 }
 

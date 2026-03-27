@@ -57,8 +57,6 @@ final isProProvider = FutureProvider<bool>((ref) async {
     debugPrint('[Debug] Mode Pro activé pour tests');
     return true;
   }
-  // TEMP: forcer Pro pour test en release (à retirer en prod)
-  return true;
 
   if (PlatformService.isExtension) {
     // Extension : lire le plan depuis Firestore
