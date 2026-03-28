@@ -7,53 +7,71 @@ class AuthNotifier extends AsyncNotifier<void> {
   @override
   Future<void> build() async {}
 
-  // Helper pour obtenir le bon repository selon le mode
-  dynamic get _repository {
-    if (isDemoMode) return mockAuthRepository;
-    return ref.read(authRepositoryProvider);
-  }
-
   Future<void> signInWithEmail(String email, String password) async {
     state = const AsyncLoading();
-    state = await AsyncValue.guard(
-      () => _repository.signInWithEmail(email, password),
-    );
+    state = await AsyncValue.guard(() async {
+      if (isDemoMode) {
+        await mockAuthRepository.signInWithEmail(email, password);
+      } else {
+        await ref.read(authRepositoryProvider).signInWithEmail(email, password);
+      }
+    });
   }
 
   Future<void> registerWithEmail(
       String email, String password, String name) async {
     state = const AsyncLoading();
-    state = await AsyncValue.guard(
-      () => _repository.registerWithEmail(email, password, name),
-    );
+    state = await AsyncValue.guard(() async {
+      if (isDemoMode) {
+        await mockAuthRepository.registerWithEmail(email, password, name);
+      } else {
+        await ref.read(authRepositoryProvider).registerWithEmail(email, password, name);
+      }
+    });
   }
 
   Future<void> signInWithGoogle() async {
     state = const AsyncLoading();
-    state = await AsyncValue.guard(
-      () => _repository.signInWithGoogle(),
-    );
+    state = await AsyncValue.guard(() async {
+      if (isDemoMode) {
+        await mockAuthRepository.signInWithGoogle();
+      } else {
+        await ref.read(authRepositoryProvider).signInWithGoogle();
+      }
+    });
   }
 
   Future<void> signInAnonymously() async {
     state = const AsyncLoading();
-    state = await AsyncValue.guard(
-      () => _repository.signInAnonymously(),
-    );
+    state = await AsyncValue.guard(() async {
+      if (isDemoMode) {
+        await mockAuthRepository.signInAnonymously();
+      } else {
+        await ref.read(authRepositoryProvider).signInAnonymously();
+      }
+    });
   }
 
   Future<void> signOut() async {
     state = const AsyncLoading();
-    state = await AsyncValue.guard(
-      () => _repository.signOut(),
-    );
+    state = await AsyncValue.guard(() async {
+      if (isDemoMode) {
+        await mockAuthRepository.signOut();
+      } else {
+        await ref.read(authRepositoryProvider).signOut();
+      }
+    });
   }
 
   Future<void> deleteAccount() async {
     state = const AsyncLoading();
-    state = await AsyncValue.guard(
-      () => _repository.deleteAccount(),
-    );
+    state = await AsyncValue.guard(() async {
+      if (isDemoMode) {
+        await mockAuthRepository.deleteAccount();
+      } else {
+        await ref.read(authRepositoryProvider).deleteAccount();
+      }
+    });
   }
 }
 

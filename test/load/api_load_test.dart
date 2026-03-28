@@ -1,9 +1,6 @@
-import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
-import 'package:http/http.dart' as http;
-import 'package:airon_bot/core/constants.dart';
 import 'package:airon_bot/features/chat/data/ai_client.dart';
 
 /// Tests de charge pour les APIs

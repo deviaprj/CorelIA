@@ -3,7 +3,6 @@ import 'package:flutter/foundation.dart';
 import 'package:uuid/uuid.dart';
 import '../domain/conversation.dart';
 import '../domain/message.dart';
-import '../../../core/constants.dart';
 
 /// Mock repository pour le chat - mode DEMO sans Firebase
 /// Stocke les données en mémoire locale
@@ -20,11 +19,8 @@ class MockChatRepository {
 
   // ── Conversations ──────────────────────────────────────────────────────────
   Stream<List<Conversation>> watchConversations(String userId) {
-    // Retourner un stream qui émet à chaque changement
-    _messagesController.stream.listen((_) {
-      _conversationsController.add(getConversations(userId));
-    });
-    return _conversationsController.stream;
+    return _conversationsController.stream
+        .map((_) => getConversations(userId));
   }
 
   List<Conversation> getConversations(String userId) {

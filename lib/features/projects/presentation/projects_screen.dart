@@ -163,8 +163,6 @@ class ProjectsScreen extends ConsumerWidget {
         description: descCtrl.text.trim(),
       );
 
-      nameCtrl.dispose();
-      descCtrl.dispose();
       await ref
           .read(firestoreProvider)
           .collection('users')

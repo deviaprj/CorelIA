@@ -78,7 +78,8 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
   }
 
   Future<void> sendMessage(String text) async {
-    if (text.trim().isEmpty || state.isStreaming) return;
+    final trimmed = text.trim();
+    if (trimmed.isEmpty || trimmed.length > 10000 || state.isStreaming) return;
 
     final user = ref.read(currentUserProvider);
     if (user == null) return;
@@ -111,12 +112,12 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
         ? await mockChatRepository.addMessage(
             conversationId: arg,
             role: Role.user,
-            content: text,
+            content: trimmed,
           )
         : await ref.read(chatRepositoryProvider).addMessage(
             conversationId: arg,
             role: Role.user,
-            content: text,
+            content: trimmed,
           );
 
     // 3. Préparer l'appel streaming

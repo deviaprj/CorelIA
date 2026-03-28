@@ -38,6 +38,10 @@ class VoiceServiceNotifier extends Notifier<VoiceState> {
   VoiceState build() {
     _stt = stt.SpeechToText();
     _tts = FlutterTts();
+    ref.onDispose(() {
+      _tts.stop();
+      _stt.stop();
+    });
     _init();
     return const VoiceState();
   }
@@ -95,11 +99,6 @@ class VoiceServiceNotifier extends Notifier<VoiceState> {
   Future<void> stopSpeaking() async {
     await _tts.stop();
     state = state.copyWith(isSpeaking: false);
-  }
-
-  void dispose() {
-    _tts.stop();
-    _stt.stop();
   }
 }
 

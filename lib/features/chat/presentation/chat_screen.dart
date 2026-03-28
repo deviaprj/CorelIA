@@ -44,13 +44,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     final notifier = ref.read(
         chatNotifierProvider(widget.conversationId).notifier);
 
-    // Auto-scroll quand un nouveau message arrive
-    ref.listen(chatNotifierProvider(widget.conversationId), (_, __) {
-      _scrollToBottom();
-    });
-
-    // Afficher erreur quota
+    // Auto-scroll + afficher erreur quota
     ref.listen(chatNotifierProvider(widget.conversationId), (_, next) {
+      _scrollToBottom();
       if (next.error == 'quota_exceeded') {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(

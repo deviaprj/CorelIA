@@ -65,7 +65,7 @@ final isProProvider = FutureProvider<bool>((ref) async {
     try {
       final doc = await ref.watch(firestoreProvider)
           .collection(AppConstants.colUsers)
-          .doc(user.uid)
+          .doc(user.uid as String)
           .get();
       final data = doc.data();
       return data?['plan'] == 'pro';

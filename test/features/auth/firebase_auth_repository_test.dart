@@ -1,5 +1,4 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:airon_bot/features/auth/data/firebase_auth_repository.dart';
 import 'package:airon_bot/features/auth/domain/app_user.dart';
 
 // Fake implementations for testing

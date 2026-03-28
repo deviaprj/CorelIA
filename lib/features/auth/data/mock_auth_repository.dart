@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import '../domain/app_user.dart';
-import '../../../core/constants.dart';
 import '../../../core/secure_storage.dart';
 
 /// Mock repository pour tests locaux sans Firebase
@@ -40,7 +39,7 @@ class MockAuthRepository {
     String password,
     String name,
   ) async {
-    await Future.delayed(const Duration(milliseconds: 500)); // Simulation réseau
+    await Future<void>.delayed(const Duration(milliseconds: 500)); // Simulation réseau
 
     if (_users.containsKey(email)) {
       throw Exception('Cet email est déjà utilisé');
@@ -65,7 +64,7 @@ class MockAuthRepository {
 
   /// Connexion avec email/password
   Future<AppUser> signInWithEmail(String email, String password) async {
-    await Future.delayed(const Duration(milliseconds: 300)); // Simulation réseau
+    await Future<void>.delayed(const Duration(milliseconds: 300)); // Simulation réseau
 
     // En mode demo, on accepte n'importe quel mot de passe (≥ 6 caractères)
     if (password.length < 6) {
@@ -96,7 +95,7 @@ class MockAuthRepository {
 
   /// Connexion avec Google (simulée)
   Future<AppUser> signInWithGoogle() async {
-    await Future.delayed(const Duration(milliseconds: 500));
+    await Future<void>.delayed(const Duration(milliseconds: 500));
 
     _currentUser = AppUser(
       uid: 'google_demo_${DateTime.now().millisecondsSinceEpoch}',
@@ -115,7 +114,7 @@ class MockAuthRepository {
 
   /// Connexion anonyme (simulée)
   Future<AppUser> signInAnonymously() async {
-    await Future.delayed(const Duration(milliseconds: 200));
+    await Future<void>.delayed(const Duration(milliseconds: 200));
 
     _currentUser = AppUser(
       uid: 'anon_${DateTime.now().millisecondsSinceEpoch}',

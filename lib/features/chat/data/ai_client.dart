@@ -114,7 +114,12 @@ class OpenRouterClient {
           })
           ..body = body;
 
-    final response = await _httpClient.send(request);
+    final http.StreamedResponse response;
+    try {
+      response = await _httpClient.send(request);
+    } catch (e) {
+      throw AiException('Erreur réseau OpenRouter : $e');
+    }
     if (response.statusCode != 200) {
       final err = await response.stream.bytesToString();
       throw AiException('OpenRouter error ${response.statusCode}: $err',
@@ -174,7 +179,12 @@ class OllamaClient {
       })
       ..body = body;
 
-    final response = await _httpClient.send(request);
+    final http.StreamedResponse response;
+    try {
+      response = await _httpClient.send(request);
+    } catch (e) {
+      throw AiException('Erreur réseau Ollama : $e');
+    }
     if (response.statusCode != 200) {
       final err = await response.stream.bytesToString();
       throw AiException('Ollama error ${response.statusCode}: $err',

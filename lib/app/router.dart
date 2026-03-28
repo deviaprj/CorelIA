@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:go_router/go_router.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core/providers/firebase_providers.dart';
@@ -11,13 +12,17 @@ import '../features/settings/presentation/settings_screen.dart';
 import '../features/monetization/subscription/paywall_screen.dart';
 
 final routerProvider = Provider<GoRouter>((ref) {
-  final authState = ref.watch(authStateProvider);
-  final onboardingAsync = ref.watch(onboardingDoneProvider);
+  final notifier = ValueNotifier<int>(0);
+  ref.listen(authStateProvider, (_, __) => notifier.value++);
+  ref.listen(onboardingDoneProvider, (_, __) => notifier.value++);
+  ref.onDispose(() => notifier.dispose());
 
   return GoRouter(
     initialLocation: '/',
+    refreshListenable: notifier,
     redirect: (context, state) {
-      // Gérer les erreurs Firebase - en cas d'erreur, on considère pas connecté
+      final authState = ref.read(authStateProvider);
+      final onboardingAsync = ref.read(onboardingDoneProvider);
       final hasError = authState.hasError;
       final isLoggedIn = hasError ? false : (authState.valueOrNull != null);
       final onboardingDone = onboardingAsync.valueOrNull ?? false;

@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 import 'package:airon_bot/features/chat/data/ai_client.dart';
 import 'package:airon_bot/core/constants.dart';
 
+
 void main() {
   group('DeepSeekClient', () {
     late DeepSeekClient client;
@@ -57,7 +58,7 @@ void main() {
       expect(decoded['model'], equals('deepseek-chat'));
       expect(decoded['stream'], isTrue);
       expect(decoded['max_tokens'], equals(4096));
-      expect(decoded['messages'], isA<List>());
+      expect(decoded['messages'], isA<List<dynamic>>());
     });
 
     test('should parse SSE response correctly', () {
@@ -88,7 +89,10 @@ void main() {
     });
 
     test('should use correct headers', () {
-      final request = http.Request('POST', Uri.parse(AppConstants.openRouterBaseUrl));
+      final request = http.Request(
+        'POST',
+        Uri.parse(AppConstants.openRouterBaseUrl),
+      );
       request.headers.addAll({
         'Authorization': 'Bearer $testApiKey',
         'Content-Type': 'application/json',
@@ -159,7 +163,7 @@ void main() {
     });
 
     test('should use default baseUrl', () {
-      final defaultClient = OllamaClient();
+      OllamaClient();
       expect(AppConstants.ollamaBaseUrl, equals('https://ollama.com'));
     });
 
@@ -189,7 +193,7 @@ void main() {
       final decoded = jsonDecode(body) as Map<String, dynamic>;
       expect(decoded['model'], equals('kimi-k2.5:cloud'));
       expect(decoded['stream'], isTrue);
-      expect(decoded['options'], isA<Map>());
+      expect(decoded['options'], isA<Map<String, dynamic>>());
       expect(decoded['options']['num_predict'], equals(8192));
     });
 

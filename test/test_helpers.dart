@@ -38,7 +38,7 @@ Future<void> tapDialogButton(WidgetTester tester, String buttonText) async {
 Stream<T> mockStream<T>(List<T> data) async* {
   for (final item in data) {
     yield item;
-    await Future.delayed(const Duration(milliseconds: 10));
+    await Future<void>.delayed(const Duration(milliseconds: 10));
   }
 }
 
@@ -107,15 +107,6 @@ extension PerformanceTester on WidgetTester {
     stopwatch.stop();
     return stopwatch.elapsedMilliseconds;
   }
-
-  /// Vérifie le nombre de frames
-  Future<int> countFrames(Future<void> Function() action) async {
-    int frameCount = 0;
-    binding.addTimeStampCallback((_) => frameCount++);
-    await action();
-    binding.removeTimeStampCallback((_) {});
-    return frameCount;
-  }
 }
 
 /// Mock de Firebase Auth
@@ -172,14 +163,16 @@ class TestData {
 
   static String generateEmail() => 'test_${generateId()}@example.com';
 
-  static String loremIpsum({int words = 50}) {
-    const words = [
+  static String loremIpsum({int wordCount = 50}) {
+    const wordList = [
       'lorem', 'ipsum', 'dolor', 'sit', 'amet', 'consectetur',
       'adipiscing', 'elit', 'sed', 'do', 'eiusmod', 'tempor',
       'incididunt', 'ut', 'labore', 'et', 'dolore', 'magna',
     ];
-    return List.generate(words, (_) => words[TestData._randomInt(words.length)])
-        .join(' ');
+    return List.generate(
+      wordCount,
+      (_) => wordList[TestData._randomInt(wordList.length)],
+    ).join(' ');
   }
 
   static int _randomInt(int max) => DateTime.now().millisecondsSinceEpoch % max;

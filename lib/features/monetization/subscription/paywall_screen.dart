@@ -4,6 +4,10 @@ import 'package:go_router/go_router.dart';
 import 'package:purchases_flutter/purchases_flutter.dart';
 import 'subscription_service.dart';
 
+final _offeringsProvider = FutureProvider<Offerings?>((ref) {
+  return ref.read(subscriptionServiceProvider).getOfferings();
+});
+
 class PaywallScreen extends ConsumerStatefulWidget {
   const PaywallScreen({super.key});
 
@@ -58,11 +62,7 @@ class _PaywallScreenState extends ConsumerState<PaywallScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final offAsync = ref.watch(
-      FutureProvider<Offerings?>(
-        (ref) => ref.read(subscriptionServiceProvider).getOfferings(),
-      ),
-    );
+    final offAsync = ref.watch(_offeringsProvider);
 
     return Scaffold(
       body: Stack(
