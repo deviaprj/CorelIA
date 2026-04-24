@@ -25,6 +25,10 @@ class Settings(BaseSettings):
     # Search
     serpapi_key: str | None = None
 
+    # Voice
+    openai_api_key: str | None = None
+    elevenlabs_api_key: str | None = None
+
     # Firebase
     firebase_project_id: str | None = None
 

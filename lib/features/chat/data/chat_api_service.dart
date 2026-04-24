@@ -3,6 +3,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import '../../../core/api/api_config.dart';
 import '../../../core/api/dio_client.dart';
+import 'ai_client.dart';
 import 'models/chat_request.dart';
 import '../domain/message.dart';
 
@@ -104,10 +105,7 @@ class ChatApiService {
     String? systemPrompt,
     int maxTokens = 4096,
   }) {
-    // Import tardif pour éviter la dépendance circulaire au niveau fichier
-    // ignore: implementation_imports
-    import 'ai_client.dart' as ai;
-    final client = ai.DeepSeekClient(apiKey: ''); // Clé compilée utilisée par défaut
+    final client = DeepSeekClient(apiKey: ''); // Clé compilée utilisée par défaut
     return client.streamChat(
       messages: history.map((m) => m.toApiMap()).toList(),
       systemPrompt: systemPrompt,

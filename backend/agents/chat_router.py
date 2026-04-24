@@ -180,12 +180,12 @@ async def _chat_with_fallback(
     raise RuntimeError("All chat providers exhausted")
 
 
-@router.post("/completions")
+@router.post("/completions", response_model=None)
 async def chat_completions(
     request: Request,
     body: ChatRequest,
     current_user: dict[str, Any] = Depends(verify_firebase_token),
-) -> StreamingResponse | ChatResponse:
+):
     """Chat completions with SSE streaming and provider fallback."""
     messages_raw = [m.model_dump(exclude_none=True) for m in body.messages]
 

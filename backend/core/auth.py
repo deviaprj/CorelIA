@@ -1,7 +1,7 @@
 """Firebase JWT verification middleware."""
 
 import functools
-from typing import Callable
+from typing import Any, Callable
 
 from fastapi import HTTPException, Request, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials

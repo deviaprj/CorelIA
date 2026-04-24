@@ -63,6 +63,9 @@ dependencies:
   # Security
   crypto: ^3.0.5
 
+  # Deep Links
+  app_links: ^6.4.0
+
   # Platform detection
   web: ^1.0.0
 
