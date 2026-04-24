@@ -52,9 +52,11 @@ class SubscriptionService {
 final subscriptionServiceProvider = Provider((_) => SubscriptionService());
 
 final isProProvider = FutureProvider<bool>((ref) async {
-  // Mode debug/test : forcer Pro pour tester sans RevenueCat
-  if (!kReleaseMode) {
-    debugPrint('[Debug] Mode Pro activé pour tests');
+  // Mode debug/test : forcer Pro SEULEMENT si la variable d'env DEBUG_FORCE_PRO est définie
+  // Ne JAMAIS activer par défaut en debug pour éviter les bypass de sécurité
+  const debugForcePro = bool.fromEnvironment('DEBUG_FORCE_PRO', defaultValue: false);
+  if (!kReleaseMode && debugForcePro) {
+    debugPrint('[Debug] Mode Pro activé via DEBUG_FORCE_PRO');
     return true;
   }
 

@@ -28,6 +28,13 @@ dependencies:
 
   # AI & HTTP
   http: ^1.2.0
+  dio: ^5.7.0
+  connectivity_plus: ^6.1.0
+
+  # Serialization & Code Generation
+  freezed_annotation: ^2.4.4
+  json_annotation: ^4.9.0
+  riverpod_annotation: ^2.3.5
 
   # Monetization
   google_mobile_ads: ^5.3.1
@@ -36,6 +43,9 @@ dependencies:
   # Voice
   speech_to_text: ^7.1.0
   flutter_tts: ^4.2.0
+  record: ^5.2.0
+  just_audio: ^0.9.42
+  permission_handler: ^11.3.0
 
   # Storage
   flutter_secure_storage: ^9.2.0
@@ -46,6 +56,12 @@ dependencies:
   share_plus: ^10.0.0
   intl: ^0.19.0
   uuid: ^4.5.0
+  shimmer: ^3.0.0
+  flutter_slidable: ^3.1.0
+  url_launcher: ^6.3.0
+
+  # Security
+  crypto: ^3.0.5
 
   # Platform detection
   web: ^1.0.0
@@ -56,6 +72,10 @@ dev_dependencies:
   integration_test:
     sdk: flutter
   very_good_analysis: ^6.0.0
+  build_runner: ^2.4.13
+  freezed: ^2.5.7
+  json_serializable: ^6.9.0
+  mocktail: ^1.0.4
 
 flutter:
   uses-material-design: true

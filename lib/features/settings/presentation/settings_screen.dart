@@ -124,6 +124,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             ),
           ),
 
+          // ── Serveur Ollama local ─────────────────────────────────────────
+          _SectionTitle('Serveur Ollama local'),
+          const _OllamaLocalSetting(),
+
           // ── Parrainage ─────────────────────────────────────────────────────
           _SectionTitle('Parrainage'),
           _ReferralSection(),
@@ -203,6 +207,79 @@ class _SectionTitle extends StatelessWidget {
               color: Theme.of(context).colorScheme.primary,
               letterSpacing: 1,
             ),
+      ),
+    );
+  }
+}
+
+class _OllamaLocalSetting extends ConsumerStatefulWidget {
+  const _OllamaLocalSetting();
+
+  @override
+  ConsumerState<_OllamaLocalSetting> createState() => _OllamaLocalSettingState();
+}
+
+class _OllamaLocalSettingState extends ConsumerState<_OllamaLocalSetting> {
+  final _controller = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final storage = ref.read(secureStorageProvider);
+    final url = await storage.read(StorageKeys.ollamaLocalUrl);
+    if (url != null && mounted) {
+      _controller.text = url;
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    final storage = ref.read(secureStorageProvider);
+    final text = _controller.text.trim();
+    if (text.isEmpty) {
+      await storage.delete(StorageKeys.ollamaLocalUrl);
+    } else {
+      await storage.write(StorageKeys.ollamaLocalUrl, text);
+    }
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Configuration Ollama sauvegardée')),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: Row(
+        children: [
+          Expanded(
+            child: TextField(
+              controller: _controller,
+              decoration: const InputDecoration(
+                labelText: 'URL Ollama local',
+                hintText: 'http://localhost:11434',
+                helperText: 'Laissez vide pour auto-détection',
+                isDense: true,
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          IconButton(
+            icon: const Icon(Icons.save_outlined),
+            onPressed: _save,
+          ),
+        ],
       ),
     );
   }

@@ -69,9 +69,11 @@ class _WebSecureStorage implements SecureStorageService {
 /// Clés de stockage
 abstract class StorageKeys {
   static const apiKeyDeepSeek = 'api_key_deepseek';
+  static const firebaseIdToken = 'firebase_id_token';
   static const onboardingDone = 'onboarding_done';
   static const selectedModel = 'selected_model';
   static const themeMode = 'theme_mode';
   static const ttsEnabled = 'tts_enabled';
   static const speechLang = 'speech_lang';
+  static const ollamaLocalUrl = 'ollama_local_url';
 }

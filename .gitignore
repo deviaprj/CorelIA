@@ -55,5 +55,12 @@ airon_bot_extension_*.zip
 functions/node_modules/
 functions/lib/
 
+# Python (backend)
+backend/.env
+backend/venv/
+backend/__pycache__/
+backend/**/__pycache__/
+backend/*.pyc
+
 # macOS
 .DS_Store

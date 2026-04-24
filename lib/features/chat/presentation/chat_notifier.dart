@@ -1,10 +1,15 @@
+import 'dart:async';
 import 'package:cloud_functions/cloud_functions.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../data/ai_client.dart';
+import '../data/chat_api_service.dart';
 import '../data/firestore_chat_repository.dart';
 import '../data/mock_chat_repository.dart';
+import '../data/ollama_local_client.dart';
 import '../data/quota_service.dart';
+import '../data/search_service.dart';
 import '../domain/conversation.dart';
 import '../domain/message.dart';
 import '../../../core/constants.dart';
@@ -13,7 +18,7 @@ import '../../../core/secure_storage.dart';
 import '../../monetization/subscription/subscription_service.dart';
 import '../../../main.dart' show isDemoMode;
 
-// ── Conversations stream ───────────────────────────────────────────────────────
+// ── Conversations stream ───────────────────────────────────────────────────
 final conversationsStreamProvider =
     StreamProvider.family<List<Conversation>, String>(
   (ref, userId) {
@@ -24,9 +29,8 @@ final conversationsStreamProvider =
   },
 );
 
-// ── Messages stream ───────────────────────────────────────────────────────────
-final messagesStreamProvider =
-    StreamProvider.family<List<Message>, String>(
+// ── Messages stream ────────────────────────────────────────────────────────
+final messagesStreamProvider = StreamProvider.family<List<Message>, String>(
   (ref, convId) {
     if (isDemoMode) {
       return mockChatRepository.watchMessages(convId);
@@ -35,18 +39,27 @@ final messagesStreamProvider =
   },
 );
 
-// ── Chat state (streaming en cours) ──────────────────────────────────────────
+// ── Services providers ─────────────────────────────────────────────────────
+final chatApiServiceProvider = Provider((ref) => ChatApiService());
+final searchServiceProvider = Provider((ref) => SearchService());
+final ollamaLocalClientProvider = Provider((ref) => OllamaLocalClient());
+
+// ── Chat state ─────────────────────────────────────────────────────────────
 class ChatState {
   final List<Message> messages;
   final bool isStreaming;
   final String? error;
   final int? remainingRequests;
+  final bool isSearching; // Indicateur visuel recherche web en cours
+  final bool useSearch; // Toggle recherche web activée
 
   const ChatState({
     this.messages = const [],
     this.isStreaming = false,
     this.error,
     this.remainingRequests,
+    this.isSearching = false,
+    this.useSearch = false,
   });
 
   ChatState copyWith({
@@ -54,17 +67,23 @@ class ChatState {
     bool? isStreaming,
     String? error,
     int? remainingRequests,
+    bool? isSearching,
+    bool? useSearch,
   }) =>
       ChatState(
         messages: messages ?? this.messages,
         isStreaming: isStreaming ?? this.isStreaming,
         error: error,
         remainingRequests: remainingRequests ?? this.remainingRequests,
+        isSearching: isSearching ?? this.isSearching,
+        useSearch: useSearch ?? this.useSearch,
       );
 }
 
 class ChatNotifier extends FamilyNotifier<ChatState, String> {
   // conversationId = arg
+  OllamaLocalClient? _ollamaClient;
+  String? _ollamaUrl;
 
   @override
   ChatState build(String conversationId) {
@@ -74,7 +93,21 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
         state = state.copyWith(messages: next.value!);
       }
     });
+
+    // Détection asynchrone Ollama local (non bloquante)
+    _detectOllamaLocal();
+
     return const ChatState();
+  }
+
+  Future<void> _detectOllamaLocal() async {
+    final client = ref.read(ollamaLocalClientProvider);
+    final url = await client.detectLocalServer();
+    if (url != null) {
+      _ollamaClient = client;
+      _ollamaUrl = url;
+      debugPrint('[ChatNotifier] Ollama local détecté : $url');
+    }
   }
 
   Future<void> sendMessage(String text) async {
@@ -98,11 +131,8 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
         );
         return;
       } on FirebaseFunctionsException catch (e) {
-        // Cloud Function indisponible (non déployée ou erreur réseau) :
-        // on continue sans quota en mode dégradé, mais on log
         debugPrint('[Quota] Cloud Function unavailable: ${e.message}');
       } catch (e) {
-        // Autre erreur - continuer en mode dégradé
         debugPrint('[Quota] Error checking quota: $e');
       }
     }
@@ -125,6 +155,7 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
       messages: [...state.messages, userMsg],
       isStreaming: true,
       error: null,
+      isSearching: state.useSearch,
     );
 
     // 4. Créer placeholder assistant
@@ -143,36 +174,19 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
 
     // 5. Streamer la réponse IA
     try {
-      final apiKey = await _getApiKey(isPro);
-      if (apiKey.isEmpty) {
-        throw const AiException(
-          'Clé API non configurée. Ajoutez-la dans les paramètres.',
-          statusCode: 401,
-        );
-      }
-      // Prendre les derniers messages (les plus récents) pour le contexte IA
-      final history = state.messages
-          .where((m) => m.role != Role.system && !m.isStreaming)
-          .toList()
-          .reversed
-          .take(AppConstants.maxContextMessages)
-          .toList()
-          .reversed
-          .map((m) => m.toApiMap())
-          .toList();
+      final stream = await _buildStream(userMsg, isPro);
 
       final buffer = StringBuffer();
-      final stream = _getAiStream(apiKey, history, isPro);
-
-      // Optimisation: liste mutable pour éviter la recréation O(n²) à chaque token
       final updatedMessages = List<Message>.from(state.messages);
-      final placeholderIndex = updatedMessages.indexWhere((m) => m.id == placeholderId);
+      final placeholderIndex =
+          updatedMessages.indexWhere((m) => m.id == placeholderId);
 
       await for (final token in stream) {
         buffer.write(token);
         if (placeholderIndex != -1) {
-          updatedMessages[placeholderIndex] = updatedMessages[placeholderIndex]
-              .copyWith(content: buffer.toString());
+          updatedMessages[placeholderIndex] =
+              updatedMessages[placeholderIndex]
+                  .copyWith(content: buffer.toString());
           state = state.copyWith(messages: List.unmodifiable(updatedMessages));
         }
       }
@@ -180,8 +194,8 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
       // 6. Sauvegarder la réponse finale
       final model = isPro ? AppConstants.mistralModel : AppConstants.deepSeekModel;
       if (isDemoMode) {
-        // En mode DEMO, on met à jour le message placeholder directement
-        await mockChatRepository.updateMessageContent(arg, placeholderId, buffer.toString());
+        await mockChatRepository.updateMessageContent(
+            arg, placeholderId, buffer.toString());
       } else {
         await ref.read(chatRepositoryProvider).addMessage(
           conversationId: arg,
@@ -192,61 +206,88 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
       }
     } on AiException catch (e) {
       state = state.copyWith(error: e.message);
+    } on ChatApiException catch (e) {
+      state = state.copyWith(error: e.message);
     } catch (e) {
       state = state.copyWith(error: e.toString());
     } finally {
-      // Retirer le placeholder streaming
       state = state.copyWith(
         isStreaming: false,
+        isSearching: false,
         messages: state.messages.where((m) => m.id != placeholderId).toList(),
       );
     }
   }
 
-  void clearError() => state = state.copyWith(error: null);
+  Future<Stream<String>> _buildStream(Message userMsg, bool isPro) async {
+    final history = state.messages
+        .where((m) => m.role != Role.system && !m.isStreaming)
+        .toList()
+        .reversed
+        .take(AppConstants.maxContextMessages)
+        .toList()
+        .reversed
+        .map((m) => m.toApiMap())
+        .toList();
 
-  Stream<String> _getAiStream(
-    String apiKey,
+    // Stratégie 1 : Backend FastAPI (recommandé)
+    final connectivity = await Connectivity().checkConnectivity();
+    final hasNetwork = connectivity != ConnectivityResult.none;
+
+    if (hasNetwork && !isDemoMode) {
+      try {
+        final apiService = ref.read(chatApiServiceProvider);
+        return apiService.streamChat(
+          conversationId: arg,
+          history: history,
+          useSearch: state.useSearch,
+          useOllamaLocal: _ollamaUrl != null,
+          ollamaLocalUrl: _ollamaUrl,
+          maxTokens: isPro ? AppConstants.proMaxTokens : AppConstants.maxTokens,
+        );
+      } catch (e) {
+        debugPrint('[ChatNotifier] Backend indisponible : $e');
+        // Fallback silencieux vers les API directes
+      }
+    }
+
+    // Stratégie 2 : Ollama local (offline / réseau local)
+    if (_ollamaClient != null && _ollamaUrl != null) {
+      return _ollamaClient!.streamChat(
+        messages: history,
+        model: 'llama3.2',
+        maxTokens: isPro ? AppConstants.proMaxTokens : AppConstants.maxTokens,
+      );
+    }
+
+    // Stratégie 3 : API directes (fallback final)
+    return _getDirectAiStream(history, isPro);
+  }
+
+  Stream<String> _getDirectAiStream(
     List<Map<String, dynamic>> history,
     bool isPro,
   ) {
-    if (apiKey.isEmpty) {
-      return Stream.error(
-        const AiException('Clé API manquante', statusCode: 401),
-      );
-    }
     if (isPro) {
-      return OpenRouterClient(apiKey: apiKey).streamChat(
-        messages: history,
-        model: AppConstants.mistralModel,
-        maxTokens: AppConstants.proMaxTokens,
-      );
+      final key = AppConstants.openRouterApiKey;
+      if (key.isNotEmpty) {
+        return OpenRouterClient(apiKey: key).streamChat(
+          messages: history,
+          model: AppConstants.mistralModel,
+          maxTokens: AppConstants.proMaxTokens,
+        );
+      }
     }
-    // Check if Ollama API key is configured
-    final ollamaKey = AppConstants.ollamaApiKey;
-    if (ollamaKey.isNotEmpty) {
-      return OllamaClient(apiKey: ollamaKey, baseUrl: AppConstants.ollamaBaseUrl)
-          .streamChat(
-        messages: history,
-        model: AppConstants.ollamaModel,
-        maxTokens: AppConstants.proMaxTokens,
-      );
-    }
-    return DeepSeekClient(apiKey: apiKey).streamChat(messages: history);
+    // DeepSeek gratuit (fallback ultime)
+    return DeepSeekClient(apiKey: AppConstants.deepSeekApiKey)
+        .streamChat(messages: history);
   }
 
-  Future<String> _getApiKey(bool isPro) async {
-    if (isPro) return AppConstants.openRouterApiKey;
-    // Ollama ne nécessite pas de clé personnelle - utiliser clé config
-    if (AppConstants.ollamaApiKey.isNotEmpty) {
-      return AppConstants.ollamaApiKey;
-    }
-    // Vérifier clé personnelle puis clé app DeepSeek
-    final storage = ref.read(secureStorageProvider);
-    final personal = await storage.read(StorageKeys.apiKeyDeepSeek);
-    if (personal != null && personal.isNotEmpty) return personal;
-    return AppConstants.deepSeekApiKey;
+  void toggleSearch() {
+    state = state.copyWith(useSearch: !state.useSearch);
   }
+
+  void clearError() => state = state.copyWith(error: null);
 }
 
 final chatNotifierProvider =

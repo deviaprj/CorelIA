@@ -78,6 +78,20 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         ),
         title: const Text('Chat'),
         actions: [
+          // Toggle recherche web
+          IconButton(
+            icon: Icon(
+              state.useSearch ? Icons.travel_explore : Icons.travel_explore_outlined,
+              color: state.useSearch
+                  ? Theme.of(context).colorScheme.primary
+                  : null,
+            ),
+            tooltip: state.useSearch ? 'Recherche web activée' : 'Recherche web désactivée',
+            onPressed: state.isStreaming
+                ? null
+                : () => ref.read(chatNotifierProvider(widget.conversationId).notifier)
+                    .toggleSearch(),
+          ),
           if (state.remainingRequests != null && !state.isStreaming)
             Padding(
               padding: const EdgeInsets.only(right: 12),

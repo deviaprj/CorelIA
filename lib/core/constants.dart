@@ -78,8 +78,13 @@ abstract class AppConstants {
 
   // ── App ─────────────────────────────────────────────────────────────────────
   static const appName = 'AironBot';
+  static const appVersion = '1.1.0';
   static const appWebUrl = 'https://aironbot.app';
   static const shareTagline = '— Généré par AironBot\nhttps://aironbot.app';
+
+  // ── Backend ─────────────────────────────────────────────────────────────────
+  static const backendBaseUrl = String.fromEnvironment('BACKEND_URL',
+      defaultValue: 'https://api.aironbot.app');
 
   // ── Firestore collections ───────────────────────────────────────────────────
   static const colUsers = 'users';
