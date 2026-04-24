@@ -46,7 +46,9 @@
       "Bash(/home/geekai/flutter/bin/flutter install:*)",
       "Bash(adb wait-for-device:*)",
       "Bash(/home/geekai/flutter/bin/flutter run:*)",
-      "Bash(pkill:*)"
+      "Bash(pkill:*)",
+      "Bash(cat)",
+      "Bash(chmod +x /home/geekai/Documents/GitHub/AironBot/.git/hooks/pre-commit)"
     ]
   }
 }
