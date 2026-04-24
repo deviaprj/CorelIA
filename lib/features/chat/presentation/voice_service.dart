@@ -47,17 +47,30 @@ class VoiceServiceNotifier extends Notifier<VoiceState> {
   }
 
   Future<void> _init() async {
-    final available = await _stt.initialize(
-      onError: (_) => state = state.copyWith(isListening: false),
-      onStatus: (status) {
-        if (status == 'done' || status == 'notListening') {
-          state = state.copyWith(isListening: false);
-        }
-      },
-    );
-    await _tts.setLanguage('fr-FR');
-    await _tts.setSpeechRate(0.9);
-    state = state.copyWith(isAvailable: available);
+    // Initialisation asynchrone ; si elle échoue on réessaiera au premier tap
+    try {
+      final available = await _stt.initialize(
+        onError: (_) => state = state.copyWith(isListening: false),
+        onStatus: (status) {
+          if (status == 'done' || status == 'notListening') {
+            state = state.copyWith(isListening: false);
+          }
+        },
+      );
+      await _tts.setLanguage('fr-FR');
+      await _tts.setSpeechRate(0.9);
+      state = state.copyWith(isAvailable: available);
+    } catch (e) {
+      debugPrint('[VoiceService] Init STT échouée : $e');
+      state = state.copyWith(isAvailable: false);
+    }
+  }
+
+  /// Initialise à la demande si la première tentative a échoué
+  Future<bool> ensureInitialized() async {
+    if (state.isAvailable) return true;
+    await _init();
+    return state.isAvailable;
   }
 
   Future<void> startListening() async {

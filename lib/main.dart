@@ -13,27 +13,31 @@ import 'firebase_options.dart';
 import 'features/auth/data/mock_auth_repository.dart';
 
 // Global flag pour le mode demo local (sans Firebase)
-bool isDemoMode = false;
+// Peut être forcé via --dart-define=DEMO_MODE=true
+bool isDemoMode = const bool.fromEnvironment('DEMO_MODE', defaultValue: false);
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Firebase (non supporté sur Linux desktop — uniquement Android/iOS/Web)
-  try {
-    await Firebase.initializeApp(
-      options: DefaultFirebaseOptions.currentPlatform,
-    );
-    isDemoMode = false;
-  } catch (e) {
-    // Sur Linux desktop, Firebase n'est pas disponible → mode DEMO activé
-    debugPrint('[Firebase] Non disponible sur cette plateforme : $e');
-    debugPrint('[DEMO MODE] Activation du mode de test local sans Firebase');
-    isDemoMode = true;
-  }
-
-  // Initialiser le mock auth en mode DEMO
   if (isDemoMode) {
+    debugPrint('[DEMO MODE] Forcé via dart-define — pas de Firebase');
     await mockAuthRepository.initialize();
+    // Connexion anonyme automatique pour skipper le login
+    if (mockAuthRepository.currentUser == null) {
+      await mockAuthRepository.signInAnonymously();
+    }
+  } else {
+    // Firebase (non supporté sur Linux desktop — uniquement Android/iOS/Web)
+    try {
+      await Firebase.initializeApp(
+        options: DefaultFirebaseOptions.currentPlatform,
+      );
+    } catch (e) {
+      debugPrint('[Firebase] Non disponible sur cette plateforme : $e');
+      debugPrint('[DEMO MODE] Activation du mode de test local sans Firebase');
+      isDemoMode = true;
+      await mockAuthRepository.initialize();
+    }
   }
 
   // AdMob (mobile uniquement)

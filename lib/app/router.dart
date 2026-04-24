@@ -5,11 +5,13 @@ import '../core/providers/firebase_providers.dart';
 import '../core/providers/app_providers.dart';
 import '../features/onboarding/presentation/onboarding_screen.dart';
 import '../features/auth/presentation/login_screen.dart';
+import '../features/auth/data/mock_auth_repository.dart';
 import '../features/chat/presentation/chat_screen.dart';
 import '../features/chat/presentation/conversations_screen.dart';
 import '../features/projects/presentation/projects_screen.dart';
 import '../features/settings/presentation/settings_screen.dart';
 import '../features/monetization/subscription/paywall_screen.dart';
+import '../../main.dart' show isDemoMode;
 
 final routerProvider = Provider<GoRouter>((ref) {
   final notifier = ValueNotifier<int>(0);
@@ -24,7 +26,10 @@ final routerProvider = Provider<GoRouter>((ref) {
       final authState = ref.read(authStateProvider);
       final onboardingAsync = ref.read(onboardingDoneProvider);
       final hasError = authState.hasError;
-      final isLoggedIn = hasError ? false : (authState.valueOrNull != null);
+      // Mode DEMO: utiliser directement le mock auth pour éviter le flash login
+      final isLoggedIn = isDemoMode
+          ? (mockAuthRepository.currentUser != null)
+          : (hasError ? false : (authState.valueOrNull != null));
       final onboardingDone = onboardingAsync.valueOrNull ?? false;
       final path = state.matchedLocation;
 

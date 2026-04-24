@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'voice_service.dart';
+import 'voice_conversation_service.dart';
 
 class InputBar extends ConsumerStatefulWidget {
   const InputBar({
@@ -57,6 +58,8 @@ class _InputBarState extends ConsumerState<InputBar> {
   Widget build(BuildContext context) {
     final voiceState = ref.watch(voiceServiceProvider);
     final voiceNotifier = ref.read(voiceServiceProvider.notifier);
+    final voiceConv = ref.watch(voiceConversationProvider);
+    final voiceConvNotifier = ref.read(voiceConversationProvider.notifier);
 
     // Remplir le champ avec le résultat de la reconnaissance vocale
     ref.listen(voiceServiceProvider, (_, next) {
@@ -69,6 +72,7 @@ class _InputBarState extends ConsumerState<InputBar> {
     });
 
     final colorScheme = Theme.of(context).colorScheme;
+    final isVoiceActive = voiceConv.state != VoiceConversationState.idle;
 
     return SafeArea(
       child: Padding(
@@ -103,15 +107,23 @@ class _InputBarState extends ConsumerState<InputBar> {
                         textInputAction: TextInputAction.send,
                       ),
                     ),
-                    // Bouton voix
-                    _VoiceButton(
+                    // Bouton dictée (STT)
+                    _DictationButton(
                       isListening: voiceState.isListening,
-                      isAvailable: voiceState.isAvailable,
-                      onTap: () {
+                      onTap: () async {
                         if (voiceState.isListening) {
                           voiceNotifier.stopListening();
                         } else {
-                          voiceNotifier.startListening();
+                          final ok = await voiceNotifier.ensureInitialized();
+                          if (ok) {
+                            voiceNotifier.startListening();
+                          } else {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                  content: Text(
+                                      'Reconnaissance vocale non disponible')),
+                            );
+                          }
                         }
                       },
                     ),
@@ -121,6 +133,29 @@ class _InputBarState extends ConsumerState<InputBar> {
               ),
             ),
             const SizedBox(width: 8),
+            // Bouton mode conversation vocale mains-libres
+            IconButton(
+              onPressed: () {
+                if (isVoiceActive) {
+                  voiceConvNotifier.stop();
+                } else {
+                  voiceConvNotifier.startConversation();
+                }
+              },
+              icon: Icon(
+                isVoiceActive
+                    ? Icons.headset_mic
+                    : Icons.headset_mic_outlined,
+                size: 24,
+                color: isVoiceActive
+                    ? colorScheme.error
+                    : colorScheme.primary,
+              ),
+              tooltip: isVoiceActive
+                  ? 'Arrêter conversation vocale'
+                  : 'Conversation vocale mains-libres',
+            ),
+            const SizedBox(width: 4),
             // Bouton envoyer
             AnimatedScale(
               scale: _hasText || widget.isLoading ? 1 : 0.7,
@@ -150,39 +185,26 @@ class _InputBarState extends ConsumerState<InputBar> {
   }
 }
 
-class _VoiceButton extends StatelessWidget {
-  const _VoiceButton({
+class _DictationButton extends StatelessWidget {
+  const _DictationButton({
     required this.isListening,
-    required this.isAvailable,
     required this.onTap,
   });
 
   final bool isListening;
-  final bool isAvailable;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    if (!isAvailable) return const SizedBox.shrink();
-
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 200),
-      decoration: isListening
-          ? BoxDecoration(
-              shape: BoxShape.circle,
-              color: Theme.of(context).colorScheme.errorContainer,
-            )
-          : null,
-      child: IconButton(
-        onPressed: onTap,
-        icon: Icon(
-          isListening ? Icons.mic : Icons.mic_none_outlined,
-          color: isListening
-              ? Theme.of(context).colorScheme.error
-              : Theme.of(context).colorScheme.onSurfaceVariant,
-        ),
-        tooltip: isListening ? 'Arrêter' : 'Parler',
+    final colorScheme = Theme.of(context).colorScheme;
+    return IconButton(
+      onPressed: onTap,
+      icon: Icon(
+        isListening ? Icons.mic : Icons.mic_none_outlined,
+        size: 24,
+        color: isListening ? colorScheme.error : colorScheme.primary,
       ),
+      tooltip: isListening ? 'Arrêter dictée' : 'Dictée vocale',
     );
   }
 }

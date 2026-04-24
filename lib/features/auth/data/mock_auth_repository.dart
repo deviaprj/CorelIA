@@ -16,7 +16,11 @@ class MockAuthRepository {
   final Map<String, AppUser> _users = {};
 
   // Stream pour écouter les changements d'auth
-  Stream<AppUser?> get authStateChanges => _authStateController.stream;
+  // Utilise async* pour réémettre la valeur courante à chaque nouvel abonné
+  Stream<AppUser?> get authStateChanges async* {
+    yield _currentUser;
+    yield* _authStateController.stream;
+  }
 
   // Utilisateur courant
   AppUser? get currentUser => _currentUser;

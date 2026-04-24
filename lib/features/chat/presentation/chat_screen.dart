@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'chat_notifier.dart';
 import 'chat_bubble.dart';
 import 'input_bar.dart';
+import 'voice_conversation_service.dart';
 import '../../../core/platform/platform_service.dart';
 import '../../monetization/ads/ad_banner_widget.dart';
 
@@ -39,10 +40,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final state = ref.watch(
-        chatNotifierProvider(widget.conversationId));
-    final notifier = ref.read(
-        chatNotifierProvider(widget.conversationId).notifier);
+    final state = ref.watch(chatNotifierProvider(widget.conversationId));
+    final notifier = ref.read(chatNotifierProvider(widget.conversationId).notifier);
+    final voiceConv = ref.watch(voiceConversationProvider);
+    final voiceConvNotifier = ref.read(voiceConversationProvider.notifier);
 
     // Auto-scroll + afficher erreur quota
     ref.listen(chatNotifierProvider(widget.conversationId), (_, next) {
@@ -67,6 +68,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     });
 
     final isExtension = PlatformService.isExtension;
+    final isVoiceActive = voiceConv.state != VoiceConversationState.idle;
 
     return Scaffold(
       appBar: AppBar(
@@ -76,7 +78,20 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
               ? context.pop()
               : context.go('/chats'),
         ),
-        title: const Text('Chat'),
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Chat', style: TextStyle(fontSize: 18)),
+            if (state.useSearch)
+              Text(
+                state.isSearching ? 'Recherche web en cours...' : 'Recherche web active',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Theme.of(context).colorScheme.primary,
+                ),
+              ),
+          ],
+        ),
         actions: [
           // Toggle recherche web
           IconButton(
@@ -89,8 +104,24 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
             tooltip: state.useSearch ? 'Recherche web activée' : 'Recherche web désactivée',
             onPressed: state.isStreaming
                 ? null
-                : () => ref.read(chatNotifierProvider(widget.conversationId).notifier)
-                    .toggleSearch(),
+                : () => notifier.toggleSearch(),
+          ),
+          // Mode conversation vocale
+          IconButton(
+            icon: Icon(
+              isVoiceActive ? Icons.mic : Icons.mic_none_outlined,
+              color: isVoiceActive
+                  ? Theme.of(context).colorScheme.error
+                  : null,
+            ),
+            tooltip: isVoiceActive ? 'Arrêter la conversation vocale' : 'Conversation vocale',
+            onPressed: () {
+              if (isVoiceActive) {
+                voiceConvNotifier.stop();
+              } else {
+                voiceConvNotifier.startConversation();
+              }
+            },
           ),
           if (state.remainingRequests != null && !state.isStreaming)
             Padding(
@@ -104,6 +135,39 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       ),
       body: Column(
         children: [
+          // Indicateur recherche web
+          if (state.isSearching)
+            Container(
+              width: double.infinity,
+              color: Theme.of(context).colorScheme.primaryContainer,
+              padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 12),
+              child: Row(
+                children: [
+                  SizedBox(
+                    width: 14,
+                    height: 14,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Theme.of(context).colorScheme.primary,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Recherche web en cours...',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Theme.of(context).colorScheme.onPrimaryContainer,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          // Indicateur conversation vocale
+          if (isVoiceActive)
+            _VoiceConversationBanner(
+              status: voiceConv,
+              onStop: () => voiceConvNotifier.stop(),
+            ),
           Expanded(
             child: state.messages.isEmpty
                 ? const _WelcomeHint()
@@ -120,8 +184,88 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
           if (!isExtension) const AdBannerWidget(),
           InputBar(
             isLoading: state.isStreaming,
-            onSend: (text) =>
-                notifier.sendMessage(text),
+            onSend: (text) => notifier.sendMessage(text),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _VoiceConversationBanner extends StatelessWidget {
+  const _VoiceConversationBanner({
+    required this.status,
+    required this.onStop,
+  });
+
+  final VoiceConversationStatus status;
+  final VoidCallback onStop;
+
+  @override
+  Widget build(BuildContext context) {
+    String label;
+    IconData icon;
+    switch (status.state) {
+      case VoiceConversationState.listening:
+        label = 'Écoute en cours...';
+        icon = Icons.mic;
+        break;
+      case VoiceConversationState.processingStt:
+        label = 'Transcription...';
+        icon = Icons.transcribe;
+        break;
+      case VoiceConversationState.thinking:
+        label = 'Réflexion...';
+        icon = Icons.psychology;
+        break;
+      case VoiceConversationState.speaking:
+        label = 'Réponse vocale...';
+        icon = Icons.record_voice_over;
+        break;
+      case VoiceConversationState.error:
+        label = 'Erreur vocale';
+        icon = Icons.error_outline;
+        break;
+      default:
+        label = 'Conversation vocale';
+        icon = Icons.mic;
+    }
+
+    return Container(
+      width: double.infinity,
+      color: Theme.of(context).colorScheme.errorContainer.withOpacity(0.3),
+      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+      child: Row(
+        children: [
+          Icon(icon, size: 18, color: Theme.of(context).colorScheme.error),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              label,
+              style: TextStyle(
+                fontSize: 13,
+                color: Theme.of(context).colorScheme.onErrorContainer,
+              ),
+            ),
+          ),
+          if (status.transcript != null && status.transcript!.isNotEmpty)
+            Expanded(
+              child: Text(
+                '"${status.transcript}"',
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontStyle: FontStyle.italic,
+                  color: Theme.of(context).colorScheme.onErrorContainer,
+                ),
+              ),
+            ),
+          IconButton(
+            icon: const Icon(Icons.stop),
+            color: Theme.of(context).colorScheme.error,
+            onPressed: onStop,
+            tooltip: 'Arrêter',
+            iconSize: 18,
           ),
         ],
       ),

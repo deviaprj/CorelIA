@@ -18,9 +18,10 @@ class MockChatRepository {
   final _messagesController = StreamController<Map<String, List<Message>>>.broadcast();
 
   // ── Conversations ──────────────────────────────────────────────────────────
-  Stream<List<Conversation>> watchConversations(String userId) {
-    return _conversationsController.stream
-        .map((_) => getConversations(userId));
+  Stream<List<Conversation>> watchConversations(String userId) async* {
+    yield List.unmodifiable(getConversations(userId));
+    yield* _conversationsController.stream
+        .map((_) => List.unmodifiable(getConversations(userId)));
   }
 
   List<Conversation> getConversations(String userId) {
@@ -73,10 +74,11 @@ class MockChatRepository {
   }
 
   // ── Messages ───────────────────────────────────────────────────────────────
-  Stream<List<Message>> watchMessages(String convId) {
-    return _messagesController.stream
+  Stream<List<Message>> watchMessages(String convId) async* {
+    yield List.unmodifiable(_messages[convId] ?? []);
+    yield* _messagesController.stream
         .where((_) => _messages.containsKey(convId))
-        .map((_) => _messages[convId] ?? []);
+        .map((_) => List.unmodifiable(_messages[convId] ?? []));
   }
 
   Future<Message> addMessage({

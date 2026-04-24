@@ -50,8 +50,8 @@ class ChatState {
   final bool isStreaming;
   final String? error;
   final int? remainingRequests;
-  final bool isSearching; // Indicateur visuel recherche web en cours
-  final bool useSearch; // Toggle recherche web activée
+  final bool isSearching;
+  final bool useSearch;
 
   const ChatState({
     this.messages = const [],
@@ -81,22 +81,20 @@ class ChatState {
 }
 
 class ChatNotifier extends FamilyNotifier<ChatState, String> {
-  // conversationId = arg
   OllamaLocalClient? _ollamaClient;
   String? _ollamaUrl;
 
   @override
   ChatState build(String conversationId) {
-    // S'abonner au stream Firestore
     ref.listen(messagesStreamProvider(conversationId), (_, next) {
+      // Hors streaming uniquement : sync depuis le repo Firestore/mock.
+      // Pendant le streaming, on gère tout localement pour éviter les
+      // conflits entre placeholders locaux et sync repo.
       if (next.hasValue && !state.isStreaming) {
         state = state.copyWith(messages: next.value!);
       }
     });
-
-    // Détection asynchrone Ollama local (non bloquante)
     _detectOllamaLocal();
-
     return const ChatState();
   }
 
@@ -117,7 +115,6 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
     final user = ref.read(currentUserProvider);
     if (user == null) return;
 
-    // 1. Vérifier quota (Cloud Function server-side)
     final isPro = await ref.read(isProProvider.future).catchError((_) => false);
     if (!isPro) {
       try {
@@ -125,10 +122,7 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
             await ref.read(quotaServiceProvider).checkAndDecrement();
         state = state.copyWith(remainingRequests: remaining);
       } on QuotaExceededException {
-        state = state.copyWith(
-          error: 'quota_exceeded',
-          isStreaming: false,
-        );
+        state = state.copyWith(error: 'quota_exceeded', isStreaming: false);
         return;
       } on FirebaseFunctionsException catch (e) {
         debugPrint('[Quota] Cloud Function unavailable: ${e.message}');
@@ -137,28 +131,21 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
       }
     }
 
-    // 2. Sauvegarder message utilisateur
+    // 1. Persister le message utilisateur dans le repo
     final userMsg = isDemoMode
         ? await mockChatRepository.addMessage(
-            conversationId: arg,
-            role: Role.user,
-            content: trimmed,
-          )
+            conversationId: arg, role: Role.user, content: trimmed)
         : await ref.read(chatRepositoryProvider).addMessage(
-            conversationId: arg,
-            role: Role.user,
-            content: trimmed,
-          );
+            conversationId: arg, role: Role.user, content: trimmed);
 
-    // 3. Préparer l'appel streaming
-    state = state.copyWith(
-      messages: [...state.messages, userMsg],
-      isStreaming: true,
-      error: null,
-      isSearching: state.useSearch,
-    );
+    // 2. ref.listen va sync le message utilisateur depuis le repo,
+    //    mais en attendant on s'assure que le state le contient pour
+    //    que le placeholder s'ajoute correctement.
+    final baseMessages = state.messages.any((m) => m.id == userMsg.id)
+        ? state.messages
+        : [...state.messages, userMsg];
 
-    // 4. Créer placeholder assistant
+    // 3. Créer le placeholder de streaming (local uniquement)
     final placeholderId = '${userMsg.id}_stream';
     final placeholder = Message(
       id: placeholderId,
@@ -168,39 +155,83 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
       isStreaming: true,
       createdAt: DateTime.now(),
     );
+
     state = state.copyWith(
-      messages: [...state.messages, placeholder],
+      messages: [...baseMessages, placeholder],
+      isStreaming: true,
+      error: null,
+      isSearching: state.useSearch,
     );
 
-    // 5. Streamer la réponse IA
+    final buffer = StringBuffer();
+    // Liste mutable interne pour éviter les allocations O(n) à chaque token
+    var mutableMessages = List<Message>.from(state.messages);
+    var placeholderIndex = mutableMessages.indexWhere((m) => m.id == placeholderId);
+
+    // Throttle : mettre à jour l'état Riverpod uniquement tous les 8 tokens
+    // ou tous les 150ms pour réduire les rebuilds UI
+    var tokenCount = 0;
+    const throttleEvery = 8;
+    Timer? throttleTimer;
+    var hasPendingUpdate = false;
+
+    void flushState() {
+      if (hasPendingUpdate && placeholderIndex != -1) {
+        mutableMessages[placeholderIndex] =
+            mutableMessages[placeholderIndex].copyWith(content: buffer.toString());
+        state = state.copyWith(messages: List<Message>.from(mutableMessages));
+        hasPendingUpdate = false;
+      }
+    }
+
     try {
       final stream = await _buildStream(userMsg, isPro);
 
-      final buffer = StringBuffer();
-      final updatedMessages = List<Message>.from(state.messages);
-      final placeholderIndex =
-          updatedMessages.indexWhere((m) => m.id == placeholderId);
-
       await for (final token in stream) {
         buffer.write(token);
-        if (placeholderIndex != -1) {
-          updatedMessages[placeholderIndex] =
-              updatedMessages[placeholderIndex]
-                  .copyWith(content: buffer.toString());
-          state = state.copyWith(messages: List.unmodifiable(updatedMessages));
+        tokenCount++;
+        hasPendingUpdate = true;
+
+        if (tokenCount % throttleEvery == 0) {
+          flushState();
+        } else if (throttleTimer == null || !throttleTimer.isActive) {
+          throttleTimer = Timer(const Duration(milliseconds: 150), flushState);
         }
       }
 
-      // 6. Sauvegarder la réponse finale
+      flushState();
+      throttleTimer?.cancel();
+
+      // 4. Stream terminé : transformer le placeholder en vrai message final
+      //    (pas de suppression — on remplace isStreaming=false et on persiste)
+      final finalContent = buffer.toString();
       final model = isPro ? AppConstants.mistralModel : AppConstants.deepSeekModel;
+
+      if (placeholderIndex != -1) {
+        mutableMessages[placeholderIndex] = mutableMessages[placeholderIndex]
+            .copyWith(content: finalContent, isStreaming: false);
+      }
+
+      state = state.copyWith(
+        messages: List<Message>.from(mutableMessages),
+        isStreaming: false,
+        isSearching: false,
+      );
+
+      // 5. Persister la réponse finale dans le repo pour que ref.listen
+      //    la garde sync si l'utilisateur revient sur la conversation
       if (isDemoMode) {
-        await mockChatRepository.updateMessageContent(
-            arg, placeholderId, buffer.toString());
+        await mockChatRepository.addMessage(
+          conversationId: arg,
+          role: Role.assistant,
+          content: finalContent,
+          model: model,
+        );
       } else {
         await ref.read(chatRepositoryProvider).addMessage(
           conversationId: arg,
           role: Role.assistant,
-          content: buffer.toString(),
+          content: finalContent,
           model: model,
         );
       }
@@ -211,26 +242,32 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
     } catch (e) {
       state = state.copyWith(error: e.toString());
     } finally {
-      state = state.copyWith(
-        isStreaming: false,
-        isSearching: false,
-        messages: state.messages.where((m) => m.id != placeholderId).toList(),
-      );
+      // S'assurer que isStreaming est false et que le placeholder
+      // n'est pas orphelin (si une erreur est survenue en cours de stream)
+      if (state.isStreaming) {
+        state = state.copyWith(
+          isStreaming: false,
+          isSearching: false,
+          messages: state.messages
+              .where((m) => !m.isStreaming)
+              .toList(),
+        );
+      }
     }
   }
 
   Future<Stream<String>> _buildStream(Message userMsg, bool isPro) async {
-    final history = state.messages
+    final historyMessages = state.messages
         .where((m) => m.role != Role.system && !m.isStreaming)
         .toList()
         .reversed
         .take(AppConstants.maxContextMessages)
         .toList()
         .reversed
-        .map((m) => m.toApiMap())
         .toList();
 
-    // Stratégie 1 : Backend FastAPI (recommandé)
+    final historyMaps = historyMessages.map((m) => m.toApiMap()).toList();
+
     final connectivity = await Connectivity().checkConnectivity();
     final hasNetwork = connectivity != ConnectivityResult.none;
 
@@ -239,7 +276,7 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
         final apiService = ref.read(chatApiServiceProvider);
         return apiService.streamChat(
           conversationId: arg,
-          history: history,
+          history: historyMessages,
           useSearch: state.useSearch,
           useOllamaLocal: _ollamaUrl != null,
           ollamaLocalUrl: _ollamaUrl,
@@ -247,21 +284,18 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
         );
       } catch (e) {
         debugPrint('[ChatNotifier] Backend indisponible : $e');
-        // Fallback silencieux vers les API directes
       }
     }
 
-    // Stratégie 2 : Ollama local (offline / réseau local)
     if (_ollamaClient != null && _ollamaUrl != null) {
       return _ollamaClient!.streamChat(
-        messages: history,
+        messages: historyMaps,
         model: 'llama3.2',
         maxTokens: isPro ? AppConstants.proMaxTokens : AppConstants.maxTokens,
       );
     }
 
-    // Stratégie 3 : API directes (fallback final)
-    return _getDirectAiStream(history, isPro);
+    return _getDirectAiStream(historyMaps, isPro);
   }
 
   Stream<String> _getDirectAiStream(
@@ -278,9 +312,25 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
         );
       }
     }
-    // DeepSeek gratuit (fallback ultime)
-    return DeepSeekClient(apiKey: AppConstants.deepSeekApiKey)
+    final deepSeekKey = AppConstants.deepSeekApiKey;
+    if (deepSeekKey.isEmpty && isDemoMode) {
+      // Mode DEMO sans clé API → réponse mock pour tests
+      return _mockResponseStream();
+    }
+    return DeepSeekClient(apiKey: deepSeekKey)
         .streamChat(messages: history);
+  }
+
+  /// Réponse mock pour tests en mode DEMO
+  Stream<String> _mockResponseStream() async* {
+    const response =
+        'Bonjour ! Je suis AironBot, votre assistant IA. '
+        'En mode démo, je fonctionne sans connexion externe. '
+        'Posez-moi des questions sur n\'importe quel sujet !';
+    for (final word in response.split(' ')) {
+      yield '$word ';
+      await Future.delayed(const Duration(milliseconds: 80));
+    }
   }
 
   void toggleSearch() {
