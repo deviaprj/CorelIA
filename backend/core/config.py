@@ -25,9 +25,9 @@ class Settings(BaseSettings):
     # Search
     serpapi_key: str | None = None
 
-    # Voice
-    openai_api_key: str | None = None
-    elevenlabs_api_key: str | None = None
+    # Voice (Ollama local only — no external paid services)
+    ollama_stt_model: str = "whisper"
+    ollama_tts_model: str = "piper"
 
     # Firebase
     firebase_project_id: str | None = None

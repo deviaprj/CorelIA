@@ -45,8 +45,9 @@ class VoiceAdvancedState {
 /// - Lecture streaming avec `just_audio` (interruption possible)
 /// - Gestion des permissions micro
 ///
-/// Ce service est conçu pour être étendu vers un backend Whisper/ElevenLabs
-/// en mode Pro.
+/// Ce service est conçu pour être étendu vers un backend Ollama local
+/// (modèles `whisper` pour STT, `piper` pour TTS) en mode Pro.
+/// Aucun service vocal payant n'est utilisé.
 class VoiceAdvancedNotifier extends Notifier<VoiceAdvancedState> {
   late final AudioRecorder _recorder;
   late final AudioPlayer _player;
@@ -79,7 +80,7 @@ class VoiceAdvancedNotifier extends Notifier<VoiceAdvancedState> {
     if (!state.hasPermission || state.isRecording) return;
 
     try {
-      // Config WAV pour qualité max ( Whisper préfère )
+      // Config WAV pour qualité max (Ollama STT préfère)
       const config = RecordConfig(
         encoder: AudioEncoder.wav,
         sampleRate: 16000,

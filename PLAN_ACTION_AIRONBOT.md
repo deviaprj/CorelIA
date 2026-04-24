@@ -74,16 +74,16 @@ dev_dependencies:
 - `http` → remplacé par `dio` (wrapper plus puissant).
 - Garder `speech_to_text` et `flutter_tts` pour le MVP voix, mais étendre avec `record` + `just_audio` pour le mode avancé.
 
-### 1.4 TTS / STT Solutions
+### 1.4 TTS / STT Solutions — 100% Gratuit & Local
 | Approche | Avantage | Inconvénient | Choix |
 |---|---|---|---|
-| **Locale** (`speech_to_text` + `flutter_tts`) | Offline, rapide, gratuit | Qualité médiocre, langues limitées | ✅ Garder pour le mode rapide |
-| **Cloud** (OpenAI Whisper + ElevenLabs / Coqui) | Haute qualité, multi-langue | Coût, latence réseau | ✅ Intégrer en mode Pro |
-| **Hybride** | Détérioration progressive | Complexité | ✅ Cible finale |
+| **Locale Flutter** (`speech_to_text` + `flutter_tts`) | Offline, rapide, 0€ | Qualité médiocre, langues limitées | ✅ Mode rapide & fallback |
+| **Ollama Local** (Whisper via Ollama + Piper/Coqui TTS via Ollama) | Haute qualité, privacy totale, 0€ coût API | Nécessite un serveur Ollama local | ✅ Mode Pro (auto-hébergé) |
+| **Hybride** | Dégradation progressive | Complexité | ✅ Cible finale |
 
 **Décision :**
 - **Mode gratuit** : `speech_to_text` + `flutter_tts` (existant).
-- **Mode Pro** : Proxy backend vers **Whisper API** (STT) + **ElevenLabs / Coqui TTS** (streaming audio MP3 retourné au client).
+- **Mode Pro** : Backend proxy vers **Ollama local** (modèles `whisper` pour STT, `piper` pour TTS). Aucun service vocal payant. Si Ollama est injoignable, fallback immédiat vers les packages Flutter natifs.
 
 ### 1.5 Recherche Web
 | Service | Coût | Qualité | Choix |
@@ -149,7 +149,7 @@ dev_dependencies:
 │  └─────────┘       └──────────┘       └─────────────┘              │   │
 │                                                                     │   │
 │  ┌─────────────────────────────────────────────────────────────┐   │   │
-│  │  Services tiers : SerpAPI / Tavily │ Whisper │ ElevenLabs   │   │   │
+│  │  Services tiers : SerpAPI / Tavily │ DuckDuckGo │ Ollama Voice │   │   │
 │  └─────────────────────────────────────────────────────────────┘   │   │
 └─────────────────────────────────────────────────────────────────────┘   │
                                                                          │
@@ -177,7 +177,7 @@ dev_dependencies:
 ### Sprint 2 — Voix, UX, Monétisation (Semaine 3-4)
 | ID | Module | Description | Livrable |
 |---|---|---|---|
-| S2-M1 | **Voix Avancée** | `record` + `just_audio`, streaming TTS backend, mode conversation mains-libres | `lib/features/voice/` |
+| S2-M1 | **Voix Avancée** | `record` + `just_audio`, proxy Ollama local pour STT/TTS, fallback `speech_to_text`/`flutter_tts` | `lib/features/voice/` |
 | S2-M2 | **Chat Streaming V2** | Gestion d'erreurs granulaire, reconnexion auto, historique infini paginé | `lib/features/chat/presentation/` |
 | S2-M3 | **Monétisation V2** | Deep links parrainage, système de crédits, bandeau GDPR, analytics | `lib/features/monetization/` |
 | S2-M4 | **RAG Projects** | Indexation sémantique des projects (embeddings) via backend | `backend/agents/rag_indexer.py` |

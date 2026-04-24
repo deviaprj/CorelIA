@@ -145,9 +145,10 @@ Paramètres → Serveur Ollama local → saisir l'URL.
 - `record` — Enregistrement WAV 16kHz (qualité STT)
 - `just_audio` — Lecture streaming avec interruption
 
-**Mode Pro futur** :
-- STT : proxy backend vers OpenAI Whisper API.
-- TTS : proxy backend vers ElevenLabs / Coqui.
+**Mode Pro (Ollama local)** :
+- STT : proxy backend vers Ollama local (modèle `whisper` ou tout modèle STT compatible Ollama). Aucune clé API externe.
+- TTS : proxy backend vers Ollama local (modèle `piper` ou tout modèle TTS compatible Ollama). Aucune clé API externe.
+- **Fallback** : si Ollama est injoignable, l'application bascule automatiquement sur `speech_to_text` (STT) et `flutter_tts` (TTS) qui sont 100% offline et gratuits.
 
 ---
 

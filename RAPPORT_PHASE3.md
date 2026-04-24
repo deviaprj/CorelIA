@@ -69,9 +69,11 @@ Les fondations sécurisées, le backend FastAPI, la couche réseau refactorée, 
    - Test de la détection Ollama.
    - Test du streaming SSE avec erreur réseau.
 
-3. **Voix Pro** :
-   - Endpoint backend `/voice/stt` (Whisper API).
-   - Endpoint backend `/voice/tts` (ElevenLabs / Coqui).
+3. **Voix Pro (Ollama local uniquement)** :
+   - Endpoint backend `/voice/stt` — proxy vers Ollama local (modèle `whisper`).
+   - Endpoint backend `/voice/tts` — proxy vers Ollama local (modèle `piper`).
+   - Aucun service vocal payant (Whisper API, ElevenLabs, Coqui Cloud supprimés).
+   - Fallback Flutter natif (`speech_to_text`, `flutter_tts`) si Ollama injoignable.
    - Intégration dans `voice_advanced_service.dart`.
 
 4. **Monétisation avancée** :

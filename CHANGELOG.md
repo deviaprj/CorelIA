@@ -18,11 +18,16 @@
 - **Tool use** : définitions de fonctions (`search_web`, `get_datetime`, `get_weather`) prêtes pour le function calling.
 - **Ollama local** : détection automatique sur `localhost:11434`, `10.0.2.2` (Android emulator), et réseau local.
 
-### 🎙️ Voix
+### 🎙️ Voix — 100% Gratuit & Local
 - **Service vocal avancé** (`voice_advanced_service.dart`) :
-  - Enregistrement WAV 16kHz mono via `record` (qualité Whisper-ready).
+  - Enregistrement WAV 16kHz mono via `record` (qualité STT-ready).
   - Lecture streaming via `just_audio` avec interruption/pause.
   - Gestion des permissions micro via `permission_handler`.
+- **Backend endpoints vocaux** (`backend/agents/voice.py`) :
+  - `POST /voice/stt` — Proxy vers Ollama local (modèle `whisper`). Aucune clé externe.
+  - `POST /voice/tts` — Proxy vers Ollama local (modèle `piper`). Aucune clé externe.
+  - Si Ollama est injoignable, le client Flutter bascule sur `speech_to_text` / `flutter_tts`.
+- **Suppression des services payants** : OpenAI Whisper API, ElevenLabs, Coqui Cloud retirés intégralement du projet.
 
 ### 🏗️ Architecture
 - **Backend FastAPI** (`backend/`) :
