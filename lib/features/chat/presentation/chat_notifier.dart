@@ -257,6 +257,7 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
   }
 
   Future<Stream<String>> _buildStream(Message userMsg, bool isPro) async {
+    // ── 1. Construire l'historique ───────────────────────────────────────
     final historyMessages = state.messages
         .where((m) => m.role != Role.system && !m.isStreaming)
         .toList()
@@ -266,27 +267,38 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
         .reversed
         .toList();
 
-    final historyMaps = historyMessages.map((m) => m.toApiMap()).toList();
-
-    final connectivity = await Connectivity().checkConnectivity();
-    final hasNetwork = connectivity != ConnectivityResult.none;
-
-    if (hasNetwork && !isDemoMode) {
+    // ── 2. Recherche web directe (autonome, pas de backend) ────────────
+    if (state.useSearch) {
       try {
-        final apiService = ref.read(chatApiServiceProvider);
-        return apiService.streamChat(
+        state = state.copyWith(isSearching: true);
+        final searchService = ref.read(searchServiceProvider);
+        final results = await searchService.searchDirect(userMsg.content);
+        final searchContext = searchService.formatForAi(results, userMsg.content);
+
+        // Injecter les résultats comme un message système au début
+        historyMessages.insert(0, Message(
+          id: 'search_context_${DateTime.now().millisecondsSinceEpoch}',
           conversationId: arg,
-          history: historyMessages,
-          useSearch: state.useSearch,
-          useOllamaLocal: _ollamaUrl != null,
-          ollamaLocalUrl: _ollamaUrl,
-          maxTokens: isPro ? AppConstants.proMaxTokens : AppConstants.maxTokens,
-        );
+          role: Role.system,
+          content:
+              'Tu es un assistant IA avec accès à internet. '
+              'Utilise les résultats de recherche ci-dessous pour répondre '
+              'à la question de l\'utilisateur. Cite tes sources quand c\'est pertinent.\n\n'
+              '$searchContext',
+          createdAt: DateTime.now(),
+        ));
+
+        debugPrint('[ChatNotifier] Recherche web directe : ${results.length} résultats');
       } catch (e) {
-        debugPrint('[ChatNotifier] Backend indisponible : $e');
+        debugPrint('[ChatNotifier] Recherche web échouée : $e');
+      } finally {
+        state = state.copyWith(isSearching: false);
       }
     }
 
+    final historyMaps = historyMessages.map((m) => m.toApiMap()).toList();
+
+    // ── 3. Ollama local (prioritaire si disponible) ────────────────────
     if (_ollamaClient != null && _ollamaUrl != null) {
       return _ollamaClient!.streamChat(
         messages: historyMaps,
@@ -295,6 +307,7 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
       );
     }
 
+    // ── 4. DeepSeek / OpenRouter direct (100% autonome) ───────────────
     return _getDirectAiStream(historyMaps, isPro);
   }
 
