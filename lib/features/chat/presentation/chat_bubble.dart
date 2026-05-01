@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../domain/message.dart';
 import '../../../core/constants.dart';
 import 'voice_service.dart';
@@ -134,6 +135,8 @@ class ChatBubble extends StatelessWidget {
                 ),
                 if (!isUser && !message.isStreaming && message.content.isNotEmpty)
                   _ActionRow(message: message, showTts: showTts),
+                if (!isUser && message.hasSearchSources)
+                  _SourcesRow(sources: message.searchSources!),
               ],
             ),
           ),
@@ -222,6 +225,58 @@ class _ActionButton extends StatelessWidget {
           child: Icon(icon, size: 16,
               color: Theme.of(context).colorScheme.outline),
         ),
+      ),
+    );
+  }
+}
+
+class _SourcesRow extends StatelessWidget {
+  const _SourcesRow({required this.sources});
+
+  final List<String> sources;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 6, left: 4, right: 4),
+      child: Wrap(
+        spacing: 6,
+        runSpacing: 4,
+        children: sources.asMap().entries.map((entry) {
+          final idx = entry.key;
+          final parts = entry.value.split('|');
+          final title = parts.isNotEmpty ? parts.first : 'Source';
+          final url = parts.length > 1 ? parts[1] : '';
+
+          return ActionChip(
+            avatar: Icon(
+              Icons.public,
+              size: 14,
+              color: colorScheme.primary,
+            ),
+            label: Text(
+              '${idx + 1}. ${title.length > 24 ? "${title.substring(0, 24)}..." : title}',
+              style: TextStyle(
+                fontSize: 11,
+                color: colorScheme.primary,
+              ),
+            ),
+            backgroundColor: colorScheme.primaryContainer.withOpacity(0.4),
+            side: BorderSide(color: colorScheme.primary.withOpacity(0.3)),
+            visualDensity: VisualDensity.compact,
+            padding: EdgeInsets.zero,
+            onPressed: url.isNotEmpty
+                ? () async {
+                    final uri = Uri.parse(url);
+                    if (await canLaunchUrl(uri)) {
+                      await launchUrl(uri, mode: LaunchMode.externalApplication);
+                    }
+                  }
+                : null,
+          );
+        }).toList(),
       ),
     );
   }

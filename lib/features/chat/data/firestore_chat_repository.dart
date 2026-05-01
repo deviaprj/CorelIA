@@ -102,6 +102,28 @@ class FirestoreChatRepository {
         .map((s) => s.docs.map(Message.fromFirestore).toList());
   }
 
+  /// Charge les messages plus anciens que [before] (pagination).
+  Future<List<Message>> loadOlderMessages(
+    String convId,
+    DateTime before, {
+    int limit = 20,
+  }) async {
+    if (_db == null) {
+      return mockChatRepository.loadOlderMessages(convId, before, limit: limit);
+    }
+    final snap = await _db!
+        .collection(AppConstants.colConversations)
+        .doc(convId)
+        .collection(AppConstants.colMessages)
+        .orderBy('createdAt', descending: true)
+        .startAfter([Timestamp.fromDate(before)])
+        .limit(limit)
+        .get();
+    final msgs = snap.docs.map(Message.fromFirestore).toList();
+    // Firestore les a retournés du plus récent au plus ancien ; les inverser
+    return msgs.reversed.toList();
+  }
+
   Future<Message> addMessage({
     required String conversationId,
     required Role role,
@@ -110,6 +132,7 @@ class FirestoreChatRepository {
     String? imageBase64,
     String? imageMimeType,
     String? fileName,
+    List<String>? searchSources,
   }) async {
     if (_db == null) {
       return mockChatRepository.addMessage(
@@ -120,6 +143,7 @@ class FirestoreChatRepository {
         imageBase64: imageBase64,
         imageMimeType: imageMimeType,
         fileName: fileName,
+        searchSources: searchSources,
       );
     }
     final msg = Message(
@@ -132,6 +156,7 @@ class FirestoreChatRepository {
       imageBase64: imageBase64,
       imageMimeType: imageMimeType,
       fileName: fileName,
+      searchSources: searchSources,
     );
     await _db!
         .collection(AppConstants.colConversations)

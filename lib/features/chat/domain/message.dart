@@ -16,6 +16,7 @@ class Message {
   final String? imageBase64;
   // Support fichiers
   final String? fileName;
+  final List<String>? searchSources;
 
   const Message({
     required this.id,
@@ -29,6 +30,7 @@ class Message {
     this.imageMimeType,
     this.imageBase64,
     this.fileName,
+    this.searchSources,
   });
 
   /// Convertit en format API (texte ou multimodal si image presente).
@@ -75,6 +77,7 @@ class Message {
       imageMimeType: data['imageMimeType'] as String?,
       imageBase64: data['imageBase64'] as String?,
       fileName: data['fileName'] as String?,
+      searchSources: (data['searchSources'] as List<dynamic>?)?.cast<String>(),
     );
   }
 
@@ -88,11 +91,18 @@ class Message {
     if (imageUrl != null) 'imageUrl': imageUrl,
     if (imageMimeType != null) 'imageMimeType': imageMimeType,
     if (fileName != null) 'fileName': fileName,
+    if (searchSources != null && searchSources!.isNotEmpty)
+      'searchSources': searchSources,
     // Ne pas stocker imageBase64 dans Firestore (trop gros)
     // L'image doit etre uploadee vers Firebase Storage et stockee via imageUrl
   };
 
-  Message copyWith({String? content, bool? isStreaming}) => Message(
+  Message copyWith({
+    String? content,
+    bool? isStreaming,
+    List<String>? searchSources,
+  }) =>
+      Message(
         id: id,
         conversationId: conversationId,
         role: role,
@@ -104,6 +114,7 @@ class Message {
         imageMimeType: imageMimeType,
         imageBase64: imageBase64,
         fileName: fileName,
+        searchSources: searchSources ?? this.searchSources,
       );
 
   /// Returns true if this message is from a user
@@ -117,4 +128,7 @@ class Message {
 
   /// Returns true if this message contains a file
   bool get hasFile => fileName != null && fileName!.isNotEmpty;
+
+  /// Returns true if this message has search sources attached
+  bool get hasSearchSources => searchSources != null && searchSources!.isNotEmpty;
 }

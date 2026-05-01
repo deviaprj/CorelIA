@@ -23,6 +23,7 @@ class _InputBarState extends ConsumerState<InputBar> {
   final _controller = TextEditingController();
   final _focusNode = FocusNode();
   bool _hasText = false;
+  DateTime? _lastSentAt;
 
   @override
   void initState() {
@@ -43,6 +44,14 @@ class _InputBarState extends ConsumerState<InputBar> {
   void _send() {
     final text = _controller.text.trim();
     if (text.isEmpty || widget.isLoading) return;
+
+    // Debounce : ignorer les envois rapides (< 600ms)
+    final now = DateTime.now();
+    if (_lastSentAt != null && now.difference(_lastSentAt!).inMilliseconds < 600) {
+      return;
+    }
+    _lastSentAt = now;
+
     _controller.clear();
     widget.onSend(text);
     _focusNode.requestFocus();

@@ -212,9 +212,7 @@ class SearchService {
     return context;
   }
 
-  /// Formate les sources pour affichage utilisateur dans le chat.
-  ///
-  /// Retourne une liste de sources avec titre et URL cliquables.
+  /// Formate les sources pour affichage utilisateur dans le chat (markdown inline).
   String formatSourcesForUi(List<WebSearchResult> results) {
     if (results.isEmpty) return '';
     final buffer = StringBuffer('\n\n---\n**Sources :**\n');
@@ -223,5 +221,11 @@ class SearchService {
       buffer.writeln('${i + 1}. [${r.title}](${r.url})');
     }
     return buffer.toString();
+  }
+
+  /// Retourne les sources sous forme de liste "titre|url" pour stockage
+  /// dans le modèle Message et affichage UI structuré.
+  List<String> formatSourcesAsList(List<WebSearchResult> results) {
+    return results.map((r) => '${r.title}|${r.url}').toList();
   }
 }

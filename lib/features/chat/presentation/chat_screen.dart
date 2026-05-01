@@ -143,15 +143,26 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
               onStop: () => voiceConvNotifier.stop(),
             ),
           Expanded(
-            child: state.messages.isEmpty
+            child: state.displayedMessages.isEmpty
                 ? const _WelcomeHint()
                 : ListView.builder(
                     controller: _scrollController,
                     padding: const EdgeInsets.symmetric(
                         vertical: 8, horizontal: 12),
-                    itemCount: state.messages.length,
-                    itemBuilder: (_, i) =>
-                        ChatBubble(message: state.messages[i]),
+                    itemCount: state.canLoadMore
+                        ? state.displayedMessages.length + 1
+                        : state.displayedMessages.length,
+                    itemBuilder: (_, i) {
+                      if (state.canLoadMore && i == 0) {
+                        return _LoadMoreButton(
+                          onTap: notifier.loadMoreHistory,
+                        );
+                      }
+                      final msgIdx = state.canLoadMore ? i - 1 : i;
+                      return ChatBubble(
+                        message: state.displayedMessages[msgIdx],
+                      );
+                    },
                   ),
           ),
           // Bandeau publicitaire (mobile uniquement, pas extension)
@@ -454,6 +465,35 @@ class _VoiceConversationBanner extends StatelessWidget {
             iconSize: 18,
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _LoadMoreButton extends StatelessWidget {
+  const _LoadMoreButton({required this.onTap});
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        child: OutlinedButton.icon(
+          onPressed: onTap,
+          icon: Icon(Icons.arrow_upward, size: 16, color: colorScheme.primary),
+          label: Text(
+            'Charger l\'historique',
+            style: TextStyle(color: colorScheme.primary),
+          ),
+          style: OutlinedButton.styleFrom(
+            side: BorderSide(color: colorScheme.primary.withOpacity(0.4)),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(20),
+            ),
+          ),
+        ),
       ),
     );
   }

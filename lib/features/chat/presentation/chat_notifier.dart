@@ -15,6 +15,8 @@ import '../domain/message.dart';
 import '../../../core/constants.dart';
 import '../../../core/providers/firebase_providers.dart';
 import '../../monetization/subscription/subscription_service.dart';
+import '../../monetization/credits/credit_providers.dart';
+import '../../monetization/credits/credit_service.dart';
 import '../../../main.dart' show isDemoMode;
 
 // ── Conversations stream ───────────────────────────────────────────────────
@@ -51,6 +53,7 @@ class ChatState {
   final int? remainingRequests;
   final bool isSearching;
   final bool useSearch;
+  final int displayCount;
 
   const ChatState({
     this.messages = const [],
@@ -59,6 +62,7 @@ class ChatState {
     this.remainingRequests,
     this.isSearching = false,
     this.useSearch = false,
+    this.displayCount = 30,
   });
 
   ChatState copyWith({
@@ -68,6 +72,7 @@ class ChatState {
     int? remainingRequests,
     bool? isSearching,
     bool? useSearch,
+    int? displayCount,
   }) =>
       ChatState(
         messages: messages ?? this.messages,
@@ -76,7 +81,14 @@ class ChatState {
         remainingRequests: remainingRequests ?? this.remainingRequests,
         isSearching: isSearching ?? this.isSearching,
         useSearch: useSearch ?? this.useSearch,
+        displayCount: displayCount ?? this.displayCount,
       );
+
+  bool get canLoadMore => messages.length > displayCount;
+  List<Message> get displayedMessages =>
+      messages.length <= displayCount
+          ? messages
+          : messages.sublist(messages.length - displayCount);
 }
 
 class ChatNotifier extends FamilyNotifier<ChatState, String> {
@@ -132,8 +144,28 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
         return;
       } on FirebaseFunctionsException catch (e) {
         debugPrint('[Quota] Cloud Function unavailable: ${e.message}');
+        // Fallback local : credit service
+        try {
+          final remaining = await ref.read(creditServiceProvider).decrement();
+          state = state.copyWith(remainingRequests: remaining);
+        } on CreditsExhaustedException {
+          state = state.copyWith(error: 'quota_exceeded', isStreaming: false);
+          return;
+        } catch (fallbackErr) {
+          debugPrint('[Credit] Fallback error: $fallbackErr');
+        }
       } catch (e) {
         debugPrint('[Quota] Error checking quota: $e');
+        // Fallback local : credit service
+        try {
+          final remaining = await ref.read(creditServiceProvider).decrement();
+          state = state.copyWith(remainingRequests: remaining);
+        } on CreditsExhaustedException {
+          state = state.copyWith(error: 'quota_exceeded', isStreaming: false);
+          return;
+        } catch (fallbackErr) {
+          debugPrint('[Credit] Fallback error: $fallbackErr');
+        }
       }
 
       // Quota fichiers (local, 100% autonome)
@@ -232,22 +264,38 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
     }
 
     try {
-      final stream = await _buildStream(
-        userMsg,
-        isPro,
-        searchResults: searchResults,
-        fileContent: fileContent,
-      );
+      var retries = 0;
+      const maxRetries = 2;
+      while (retries <= maxRetries) {
+        try {
+          final stream = await _buildStream(
+            userMsg,
+            isPro,
+            searchResults: searchResults,
+            fileContent: fileContent,
+          );
 
-      await for (final token in stream) {
-        buffer.write(token);
-        tokenCount++;
-        hasPendingUpdate = true;
+          await for (final token in stream) {
+            buffer.write(token);
+            tokenCount++;
+            hasPendingUpdate = true;
 
-        if (tokenCount % throttleEvery == 0) {
-          flushState();
-        } else if (throttleTimer == null || !throttleTimer.isActive) {
-          throttleTimer = Timer(const Duration(milliseconds: 150), flushState);
+            if (tokenCount % throttleEvery == 0) {
+              flushState();
+            } else if (throttleTimer == null || !throttleTimer.isActive) {
+              throttleTimer = Timer(const Duration(milliseconds: 150), flushState);
+            }
+          }
+          break; // Stream reussi, sortir de la boucle retry
+        } on AiException catch (e) {
+          if (retries < maxRetries &&
+              (e.statusCode == null || e.statusCode! >= 500 || e.statusCode == 429)) {
+            retries++;
+            debugPrint('[ChatNotifier] Retry stream $retries/$maxRetries : ${e.message}');
+            await Future<void>.delayed(Duration(seconds: retries));
+            continue;
+          }
+          rethrow;
         }
       }
 
@@ -255,20 +303,26 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
       throttleTimer?.cancel();
 
       // 4. Stream terminé : transformer le placeholder en vrai message final
-      //    (pas de suppression — on remplace isStreaming=false et on persiste)
       var finalContent = buffer.toString();
       final model = isPro ? AppConstants.mistralModel : AppConstants.deepSeekModel;
 
-      // Ajouter les sources si recherche web active
+      // Stocker les sources separément pour affichage UI structuré
+      List<String>? sourceList;
       if (searchResults != null && searchResults.isNotEmpty) {
         final searchService = ref.read(searchServiceProvider);
-        final sources = searchService.formatSourcesForUi(searchResults);
-        finalContent = '$finalContent$sources';
+        sourceList = searchService.formatSourcesAsList(searchResults);
+        // Garder les sources en markdown dans le content pour compatibilité
+        final sourcesMd = searchService.formatSourcesForUi(searchResults);
+        finalContent = '$finalContent$sourcesMd';
       }
 
       if (placeholderIndex != -1) {
         mutableMessages[placeholderIndex] = mutableMessages[placeholderIndex]
-            .copyWith(content: finalContent, isStreaming: false);
+            .copyWith(
+              content: finalContent,
+              isStreaming: false,
+              searchSources: sourceList,
+            );
       }
 
       state = state.copyWith(
@@ -279,12 +333,14 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
 
       // 5. Persister la réponse finale dans le repo pour que ref.listen
       //    la garde sync si l'utilisateur revient sur la conversation
+      final persistedSources = sourceList;
       if (isDemoMode) {
         await mockChatRepository.addMessage(
           conversationId: arg,
           role: Role.assistant,
           content: finalContent,
           model: model,
+          searchSources: persistedSources,
         );
       } else {
         await ref.read(chatRepositoryProvider).addMessage(
@@ -292,6 +348,7 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
           role: Role.assistant,
           content: finalContent,
           model: model,
+          searchSources: persistedSources,
         );
       }
     } on AiException catch (e) {
@@ -322,14 +379,44 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
     String? fileContent,
   }) async {
     // ── 1. Construire l'historique ───────────────────────────────────────
-    final historyMessages = state.messages
+    final allHistory = state.messages
         .where((m) => m.role != Role.system && !m.isStreaming)
-        .toList()
-        .reversed
-        .take(AppConstants.maxContextMessages)
-        .toList()
-        .reversed
         .toList();
+
+    var historyMessages = allHistory;
+    // Si trop de messages et Ollama local dispo, resumer les anciens
+    if (allHistory.length > AppConstants.maxContextMessages &&
+        _ollamaClient != null && _ollamaUrl != null) {
+      final older = allHistory
+          .take(allHistory.length - AppConstants.maxContextMessages)
+          .toList();
+      final recent = allHistory
+          .skip(allHistory.length - AppConstants.maxContextMessages)
+          .toList();
+      final summary = await _summarizeWithOllama(older);
+      if (summary.isNotEmpty) {
+        historyMessages = [
+          Message(
+            id: 'summary_${DateTime.now().millisecondsSinceEpoch}',
+            conversationId: arg,
+            role: Role.system,
+            content:
+                'Resume de la conversation precedente :\n$summary',
+            createdAt: DateTime.now(),
+          ),
+          ...recent,
+        ];
+      } else {
+        historyMessages = recent;
+      }
+    } else {
+      historyMessages = allHistory
+          .reversed
+          .take(AppConstants.maxContextMessages)
+          .toList()
+          .reversed
+          .toList();
+    }
 
     // ── 2. Injecter le contexte fichier ────────────────────────────────
     if (fileContent != null && fileContent.isNotEmpty) {
@@ -406,6 +493,43 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
         .streamChat(messages: history);
   }
 
+  /// Resume une liste de messages via Ollama local.
+  Future<String> _summarizeWithOllama(List<Message> messages) async {
+    try {
+      final transcript = messages.map((m) {
+        final prefix = m.isUser ? 'Utilisateur' : 'Assistant';
+        return '$prefix : ${m.content}';
+      }).join('\n');
+
+      final buffer = StringBuffer();
+      final stream = _ollamaClient!.streamChat(
+        messages: [
+          {
+            'role': 'system',
+            'content':
+                'Tu es un resumeur de conversation. '
+                'Resume le dialogue suivant en 3 phrases maximum, '
+                'en gardant les points clefs, les decisions et les faits importants. '
+                'Sois tres concis.',
+          },
+          {
+            'role': 'user',
+            'content': transcript,
+          },
+        ],
+        model: 'llama3.2',
+        maxTokens: 300,
+      );
+      await for (final token in stream) {
+        buffer.write(token);
+      }
+      return buffer.toString().trim();
+    } catch (e) {
+      debugPrint('[ChatNotifier] Erreur resume Ollama : $e');
+      return '';
+    }
+  }
+
   /// Réponse mock pour tests en mode DEMO
   Stream<String> _mockResponseStream() async* {
     const response =
@@ -423,6 +547,12 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
   }
 
   void clearError() => state = state.copyWith(error: null);
+
+  /// Charge plus de messages dans l'historique (UI pagination).
+  void loadMoreHistory() {
+    if (!state.canLoadMore) return;
+    state = state.copyWith(displayCount: state.displayCount + 20);
+  }
 }
 
 final chatNotifierProvider =

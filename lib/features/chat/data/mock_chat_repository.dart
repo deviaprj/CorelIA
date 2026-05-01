@@ -81,6 +81,23 @@ class MockChatRepository {
         .map((_) => List.unmodifiable(_messages[convId] ?? []));
   }
 
+  /// Charge les messages plus anciens que [before] (mock = tous les messages).
+  Future<List<Message>> loadOlderMessages(
+    String convId,
+    DateTime before, {
+    int limit = 20,
+  }) async {
+    final all = _messages[convId] ?? [];
+    final older = all
+        .where((m) => m.createdAt.isBefore(before))
+        .toList()
+      ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+    if (older.length > limit) {
+      return older.sublist(older.length - limit);
+    }
+    return older;
+  }
+
   Future<Message> addMessage({
     required String conversationId,
     required Role role,
@@ -89,6 +106,7 @@ class MockChatRepository {
     String? imageBase64,
     String? imageMimeType,
     String? fileName,
+    List<String>? searchSources,
   }) async {
     final msg = Message(
       id: _uuid.v4(),
@@ -100,6 +118,7 @@ class MockChatRepository {
       imageBase64: imageBase64,
       imageMimeType: imageMimeType,
       fileName: fileName,
+      searchSources: searchSources,
     );
 
     if (!_messages.containsKey(conversationId)) {

@@ -9,6 +9,7 @@ import 'app/theme.dart';
 import 'core/platform/platform_service.dart';
 import 'core/providers/app_providers.dart';
 import 'features/monetization/ads/ad_service.dart';
+import 'features/monetization/ads/consent_service.dart';
 import 'features/monetization/subscription/subscription_service.dart';
 import 'firebase_options.dart';
 import 'features/auth/data/mock_auth_repository.dart';
@@ -117,6 +118,11 @@ class AironBotApp extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final themeMode = ref.watch(themeModeProvider);
     final router = ref.watch(routerProvider);
+
+    // Afficher bandeau GDPR au premier lancement
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      ConsentBanner.showIfNeeded(context, ref);
+    });
 
     return MaterialApp.router(
       title: 'AironBot${isDemoMode ? " (DEMO)" : ""}',
