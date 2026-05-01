@@ -38,7 +38,7 @@ final ttsSpeedProvider = StateNotifierProvider<TtsSpeedNotifier, double>(
 );
 
 class TtsSpeedNotifier extends StateNotifier<double> {
-  TtsSpeedNotifier() : super(0.85) {
+  TtsSpeedNotifier() : super(0.50) {
     _load();
   }
 
