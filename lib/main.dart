@@ -119,9 +119,12 @@ class AironBotApp extends ConsumerWidget {
     final themeMode = ref.watch(themeModeProvider);
     final router = ref.watch(routerProvider);
 
-    // Afficher bandeau GDPR au premier lancement
+    // Afficher bandeau GDPR au premier lancement (attendre le 2e frame
+    // pour que MaterialLocalizations soit disponible)
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      ConsentBanner.showIfNeeded(context, ref);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        ConsentBanner.showIfNeeded(context, ref);
+      });
     });
 
     return MaterialApp.router(

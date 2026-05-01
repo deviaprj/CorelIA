@@ -5,7 +5,7 @@ import uuid
 from typing import Any, AsyncGenerator
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
 
 from backend.agents.tools import execute_tool, get_tool_definitions
@@ -17,46 +17,10 @@ from backend.schemas.chat import ChatRequest, ChatResponse, Message, Role
 logger = get_logger(__name__)
 router = APIRouter(prefix="/chat", tags=["chat"])
 
-OLLAMA_LOCAL_URL = "http://localhost:11434"
-
-
-async def _stream_ollama(
-    messages: list[dict[str, Any]],
-    model: str = "llama3",
-    base_url: str = OLLAMA_LOCAL_URL,
-    api_key: str | None = None,
-) -> AsyncGenerator[str, None]:
-    """Stream completions from Ollama (local or cloud)."""
-    url = f"{base_url}/api/chat"
-    payload = {
-        "model": model,
-        "messages": messages,
-        "stream": True,
-    }
-    headers: dict[str, str] = {"Content-Type": "application/json"}
-    if api_key:
-        headers["Authorization"] = f"Bearer {api_key}"
-
-    async with httpx.AsyncClient(timeout=120.0) as client:
-        async with client.stream("POST", url, json=payload, headers=headers) as response:
-            response.raise_for_status()
-            async for line in response.aiter_lines():
-                if not line:
-                    continue
-                try:
-                    data = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                if data.get("done"):
-                    break
-                content = data.get("message", {}).get("content", "")
-                if content:
-                    yield f"data: {json.dumps({'content': content})}\n\n"
-
 
 async def _stream_deepseek(
     messages: list[dict[str, Any]],
-    model: str = "deepseek-chat",
+    model: str = "deepseek-v4-flash",
 ) -> AsyncGenerator[str, None]:
     """Stream completions from DeepSeek API."""
     if not settings.deepseek_api_key:
@@ -136,28 +100,16 @@ async def _chat_with_fallback(
     messages: list[dict[str, Any]],
     preferred_model: str | None = None,
 ) -> AsyncGenerator[str, None]:
-    """Route chat request through fallback chain: Ollama -> DeepSeek -> OpenRouter."""
+    """Route chat request through fallback chain: DeepSeek -> OpenRouter."""
 
     providers: list[tuple[str, Any]] = []
 
-    # Determine Ollama target
-    ollama_url = settings.ollama_cloud_url or OLLAMA_LOCAL_URL
-    ollama_key = settings.ollama_cloud_api_key
-
-    if preferred_model and preferred_model.startswith("ollama/"):
-        model_name = preferred_model.replace("ollama/", "")
-        providers.append(
-            ("ollama", lambda msgs: _stream_ollama(msgs, model=model_name, base_url=ollama_url, api_key=ollama_key))
-        )
-    elif preferred_model and preferred_model.startswith("deepseek/"):
+    if preferred_model and preferred_model.startswith("deepseek/"):
         providers.append(("deepseek", lambda msgs: _stream_deepseek(msgs, model=preferred_model)))
     elif preferred_model and "/" in preferred_model:
         providers.append(("openrouter", lambda msgs: _stream_openrouter(msgs, model=preferred_model)))
     else:
         # Default fallback chain
-        providers.append(
-            ("ollama", lambda msgs: _stream_ollama(msgs, model="llama3", base_url=ollama_url, api_key=ollama_key))
-        )
         providers.append(("deepseek", lambda msgs: _stream_deepseek(msgs)))
         providers.append(
             ("openrouter", lambda msgs: _stream_openrouter(msgs, model="mistralai/mistral-7b-instruct"))

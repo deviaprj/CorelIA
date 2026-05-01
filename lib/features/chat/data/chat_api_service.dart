@@ -1,7 +1,6 @@
 import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
-import '../../../core/api/api_config.dart';
 import '../../../core/api/dio_client.dart';
 import 'ai_client.dart';
 import 'models/chat_request.dart';
@@ -38,8 +37,6 @@ class ChatApiService {
     String? systemPrompt,
     String? model,
     bool useSearch = false,
-    bool useOllamaLocal = false,
-    String? ollamaLocalUrl,
     int maxTokens = 4096,
   }) async* {
     final request = ChatRequest(
@@ -48,8 +45,6 @@ class ChatApiService {
       systemPrompt: systemPrompt,
       model: model,
       useSearch: useSearch,
-      useOllamaLocal: useOllamaLocal,
-      ollamaLocalUrl: ollamaLocalUrl,
       maxTokens: maxTokens,
     );
 

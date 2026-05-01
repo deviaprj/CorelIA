@@ -19,15 +19,8 @@ class Settings(BaseSettings):
     # AI providers
     deepseek_api_key: str | None = None
     openrouter_api_key: str | None = None
-    ollama_cloud_url: str | None = None
-    ollama_cloud_api_key: str | None = None
-
     # Search
     serpapi_key: str | None = None
-
-    # Voice (Ollama local only — no external paid services)
-    ollama_stt_model: str = "whisper"
-    ollama_tts_model: str = "piper"
 
     # Firebase
     firebase_project_id: str | None = None

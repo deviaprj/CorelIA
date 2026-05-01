@@ -6,7 +6,6 @@ import '../data/ai_client.dart';
 import '../data/chat_api_service.dart';
 import '../data/firestore_chat_repository.dart';
 import '../data/mock_chat_repository.dart';
-import '../data/ollama_local_client.dart';
 import '../data/quota_service.dart';
 import '../data/search_service.dart';
 import '../data/file_quota_service.dart';
@@ -43,7 +42,6 @@ final messagesStreamProvider = StreamProvider.family<List<Message>, String>(
 // ── Services providers ─────────────────────────────────────────────────────
 final chatApiServiceProvider = Provider((ref) => ChatApiService());
 final searchServiceProvider = Provider((ref) => SearchService());
-final ollamaLocalClientProvider = Provider((ref) => OllamaLocalClient());
 
 // ── Chat state ─────────────────────────────────────────────────────────────
 class ChatState {
@@ -92,9 +90,6 @@ class ChatState {
 }
 
 class ChatNotifier extends FamilyNotifier<ChatState, String> {
-  OllamaLocalClient? _ollamaClient;
-  String? _ollamaUrl;
-
   @override
   ChatState build(String conversationId) {
     ref.listen(messagesStreamProvider(conversationId), (_, next) {
@@ -105,18 +100,7 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
         state = state.copyWith(messages: next.value!);
       }
     });
-    _detectOllamaLocal();
     return const ChatState();
-  }
-
-  Future<void> _detectOllamaLocal() async {
-    final client = ref.read(ollamaLocalClientProvider);
-    final url = await client.detectLocalServer();
-    if (url != null) {
-      _ollamaClient = client;
-      _ollamaUrl = url;
-      debugPrint('[ChatNotifier] Ollama local détecté : $url');
-    }
   }
 
   Future<void> sendMessage(
@@ -379,44 +363,14 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
     String? fileContent,
   }) async {
     // ── 1. Construire l'historique ───────────────────────────────────────
-    final allHistory = state.messages
+    final historyMessages = state.messages
         .where((m) => m.role != Role.system && !m.isStreaming)
+        .toList()
+        .reversed
+        .take(AppConstants.maxContextMessages)
+        .toList()
+        .reversed
         .toList();
-
-    var historyMessages = allHistory;
-    // Si trop de messages et Ollama local dispo, resumer les anciens
-    if (allHistory.length > AppConstants.maxContextMessages &&
-        _ollamaClient != null && _ollamaUrl != null) {
-      final older = allHistory
-          .take(allHistory.length - AppConstants.maxContextMessages)
-          .toList();
-      final recent = allHistory
-          .skip(allHistory.length - AppConstants.maxContextMessages)
-          .toList();
-      final summary = await _summarizeWithOllama(older);
-      if (summary.isNotEmpty) {
-        historyMessages = [
-          Message(
-            id: 'summary_${DateTime.now().millisecondsSinceEpoch}',
-            conversationId: arg,
-            role: Role.system,
-            content:
-                'Resume de la conversation precedente :\n$summary',
-            createdAt: DateTime.now(),
-          ),
-          ...recent,
-        ];
-      } else {
-        historyMessages = recent;
-      }
-    } else {
-      historyMessages = allHistory
-          .reversed
-          .take(AppConstants.maxContextMessages)
-          .toList()
-          .reversed
-          .toList();
-    }
 
     // ── 2. Injecter le contexte fichier ────────────────────────────────
     if (fileContent != null && fileContent.isNotEmpty) {
@@ -457,16 +411,7 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
 
     final historyMaps = historyMessages.map((m) => m.toApiMap()).toList();
 
-    // ── 4. Ollama local (prioritaire si disponible) ────────────────────
-    if (_ollamaClient != null && _ollamaUrl != null) {
-      return _ollamaClient!.streamChat(
-        messages: historyMaps,
-        model: 'llama3.2',
-        maxTokens: isPro ? AppConstants.proMaxTokens : AppConstants.maxTokens,
-      );
-    }
-
-    // ── 5. DeepSeek / OpenRouter direct (100% autonome) ───────────────
+    // ── 4. DeepSeek / OpenRouter direct (100% autonome) ───────────────
     return _getDirectAiStream(historyMaps, isPro);
   }
 
@@ -491,43 +436,6 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
     }
     return DeepSeekClient(apiKey: deepSeekKey)
         .streamChat(messages: history);
-  }
-
-  /// Resume une liste de messages via Ollama local.
-  Future<String> _summarizeWithOllama(List<Message> messages) async {
-    try {
-      final transcript = messages.map((m) {
-        final prefix = m.isUser ? 'Utilisateur' : 'Assistant';
-        return '$prefix : ${m.content}';
-      }).join('\n');
-
-      final buffer = StringBuffer();
-      final stream = _ollamaClient!.streamChat(
-        messages: [
-          {
-            'role': 'system',
-            'content':
-                'Tu es un resumeur de conversation. '
-                'Resume le dialogue suivant en 3 phrases maximum, '
-                'en gardant les points clefs, les decisions et les faits importants. '
-                'Sois tres concis.',
-          },
-          {
-            'role': 'user',
-            'content': transcript,
-          },
-        ],
-        model: 'llama3.2',
-        maxTokens: 300,
-      );
-      await for (final token in stream) {
-        buffer.write(token);
-      }
-      return buffer.toString().trim();
-    } catch (e) {
-      debugPrint('[ChatNotifier] Erreur resume Ollama : $e');
-      return '';
-    }
   }
 
   /// Réponse mock pour tests en mode DEMO

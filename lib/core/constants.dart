@@ -8,17 +8,13 @@ abstract class AppConstants {
   // ── IA ──────────────────────────────────────────────────────────────────────
   static String get deepSeekApiKey => dotenv.get('DEEPSEEK_API_KEY', fallback: '');
   static String get openRouterApiKey => dotenv.get('OPENROUTER_API_KEY', fallback: '');
-  static String get ollamaApiKey => dotenv.get('OLLAMA_API_KEY', fallback: '');
-
   static const deepSeekBaseUrl = 'https://api.deepseek.com/v1/chat/completions';
   static const openRouterBaseUrl = 'https://openrouter.ai/api/v1/chat/completions';
-  static const ollamaBaseUrl = 'https://ollama.com';
 
-  static const deepSeekModel = 'deepseek-chat';
+  static const deepSeekModel = 'deepseek-v4-flash';
   static const mistralModel = 'mistralai/mistral-large-2407';
   static const groqModel = 'meta-llama/llama-3.3-70b-instruct';
   static const visionModel = 'openai/gpt-4o-mini';
-  static const ollamaModel = 'kimi-k2.5:cloud';
 
   // ── Quotas ──────────────────────────────────────────────────────────────────
   static const freeRequestsPerDay = 20;

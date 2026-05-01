@@ -34,7 +34,7 @@ void main() {
     });
 
     test('should use correct model', () {
-      expect(AppConstants.deepSeekModel, equals('deepseek-chat'));
+      expect(AppConstants.deepSeekModel, equals('deepseek-v4-flash'));
     });
 
     test('should use correct max tokens', () {
@@ -55,7 +55,7 @@ void main() {
       });
 
       final decoded = jsonDecode(body) as Map<String, dynamic>;
-      expect(decoded['model'], equals('deepseek-chat'));
+      expect(decoded['model'], equals('deepseek-v4-flash'));
       expect(decoded['stream'], isTrue);
       expect(decoded['max_tokens'], equals(4096));
       expect(decoded['messages'], isA<List<dynamic>>());
@@ -147,77 +147,6 @@ void main() {
         const exception = AiException(expectedMessage, statusCode: 429);
         expect(exception.statusCode, equals(429));
       }
-    });
-  });
-
-  group('OllamaClient', () {
-    late OllamaClient client;
-    const testApiKey = 'test_ollama_key';
-
-    setUp(() {
-      client = OllamaClient(apiKey: testApiKey);
-    });
-
-    test('should be created with API key', () {
-      expect(client, isNotNull);
-    });
-
-    test('should use default baseUrl', () {
-      OllamaClient();
-      expect(AppConstants.ollamaBaseUrl, equals('https://ollama.com'));
-    });
-
-    test('should use correct default model', () {
-      expect(AppConstants.ollamaModel, equals('kimi-k2.5:cloud'));
-    });
-
-    test('should use pro max tokens', () {
-      expect(AppConstants.proMaxTokens, equals(8192));
-    });
-
-    test('should construct correct API request body', () async {
-      final messages = [
-        {'role': 'user', 'content': 'Hello'},
-      ];
-
-      // Vérification de la structure sans appel réel
-      final body = jsonEncode({
-        'model': AppConstants.ollamaModel,
-        'stream': true,
-        'messages': messages,
-        'options': {
-          'num_predict': AppConstants.proMaxTokens,
-        },
-      });
-
-      final decoded = jsonDecode(body) as Map<String, dynamic>;
-      expect(decoded['model'], equals('kimi-k2.5:cloud'));
-      expect(decoded['stream'], isTrue);
-      expect(decoded['options'], isA<Map<String, dynamic>>());
-      expect(decoded['options']['num_predict'], equals(8192));
-    });
-
-    test('should parse NDJSON response correctly', () {
-      const ndjsonLine = '{"message": {"content": "Hello"}, "done": false}';
-
-      if (ndjsonLine.isNotEmpty) {
-        final json = jsonDecode(ndjsonLine) as Map<String, dynamic>;
-        final message = json['message'] as Map<String, dynamic>?;
-        final content = message?['content'] as String?;
-        final done = json['done'] as bool?;
-
-        expect(content, equals('Hello'));
-        expect(done, equals(false));
-      }
-    });
-
-    test('should detect done signal', () {
-      const doneLine = '{"message": {"content": "World"}, "done": true}';
-
-      final json = jsonDecode(doneLine) as Map<String, dynamic>;
-      final done = json['done'] as bool?;
-
-      expect(done, equals(true));
     });
   });
 }

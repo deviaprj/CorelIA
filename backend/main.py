@@ -13,7 +13,6 @@ from slowapi.util import get_remote_address
 
 from backend.agents.chat_router import router as chat_router
 from backend.agents.search_engine import search
-from backend.agents.voice import router as voice_router
 from backend.core.config import settings
 from backend.core.logging import get_logger, set_request_id
 from backend.schemas.chat import SearchResponse
@@ -90,4 +89,3 @@ async def search_endpoint(request: Request, q: str) -> SearchResponse:
 
 # Include routers
 app.include_router(chat_router)
-app.include_router(voice_router)

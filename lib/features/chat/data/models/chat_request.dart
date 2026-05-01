@@ -5,8 +5,6 @@ class ChatRequest {
   final String? systemPrompt;
   final String? model;
   final bool useSearch;
-  final bool useOllamaLocal;
-  final String? ollamaLocalUrl;
   final int maxTokens;
 
   const ChatRequest({
@@ -15,8 +13,6 @@ class ChatRequest {
     this.systemPrompt,
     this.model,
     this.useSearch = false,
-    this.useOllamaLocal = false,
-    this.ollamaLocalUrl,
     this.maxTokens = 4096,
   });
 
@@ -26,8 +22,6 @@ class ChatRequest {
     if (systemPrompt != null) 'systemPrompt': systemPrompt,
     if (model != null) 'model': model,
     'useSearch': useSearch,
-    'useOllamaLocal': useOllamaLocal,
-    if (ollamaLocalUrl != null) 'ollamaLocalUrl': ollamaLocalUrl,
     'maxTokens': maxTokens,
   };
 }
@@ -51,6 +45,6 @@ class ChatMessage {
 
   static ChatMessage fromDomain(dynamic m) => ChatMessage(
         role: m.role == 'user' ? 'user' : 'assistant',
-        content: m.content,
+        content: m.content as String,
       );
 }

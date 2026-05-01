@@ -29,7 +29,7 @@ void main() {
     });
 
     test('should have correct model names', () {
-      expect(AppConstants.deepSeekModel, equals('deepseek-chat'));
+      expect(AppConstants.deepSeekModel, equals('deepseek-v4-flash'));
       expect(AppConstants.mistralModel, equals('mistralai/mistral-large-2407'));
       expect(AppConstants.groqModel, equals('meta-llama/llama-3.3-70b-instruct'));
     });
@@ -48,7 +48,7 @@ void main() {
     test('should have correct share tagline', () {
       expect(
         AppConstants.shareTagline,
-        contains('Généré par AironBot'),
+        contains('Genere par AironBot'),
       );
     });
 

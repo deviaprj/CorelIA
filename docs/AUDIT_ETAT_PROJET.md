@@ -3,7 +3,8 @@
 **Date** : 2026-05-01
 **Branche** : `br-AironBot-V2`
 **Auditeur** : Claude Code (Audit automatique)
-**Commit HEAD** : `a70e0636`
+**Commit HEAD** : `d9e74e77`
+**Fichiers modifiés non commités** : 2 (`ai_client.dart`, `chat_notifier.dart`)
 
 ---
 
@@ -11,141 +12,156 @@
 
 | Domaine | État | % Complet |
 |---------|------|-----------|
-| Chat IA (streaming, multi-provider) | Fonctionnel | 85% |
-| Auth (Firebase, email/Google/Apple) | Fonctionnel | 80% |
+| Chat IA (streaming, multi-provider, retry) | Fonctionnel | 90% |
+| Auth (Firebase, email/Google/Apple, mock) | Fonctionnel | 80% |
 | Firestore persistence | Fonctionnel | 90% |
+| Recherche web (backend + fallback direct) | Fonctionnel | 75% |
+| TTS (lecture vocale naturelle) | Fonctionnel | 75% |
+| Mode vocal conversation (VAD natif) | Fonctionnel | 70% |
+| Upload images (galerie/camera) | Implémenté | 80% |
+| Upload fichiers (PDF/DOCX/XLSX) | Implémenté | 70% |
 | Extension Chrome (Manifest V3) | Basique | 30% |
-| Recherche web | Partiel | 40% |
-| TTS (lecture vocale) | Basique | 35% |
-| Mode vocal conversation | Partiel / instable | 25% |
-| Système Freemium (quota, ads, Pro) | Partiel | 50% |
-| Upload images / vision IA | Non implémenté | 0% |
-| Upload fichiers (PDF/DOCX/XLSX) | Non implémenté | 0% |
+| Système Freemium (quota, ads, Pro, credits) | Partiel | 60% |
 | Parrainage | Partiel | 40% |
-| Tests Flutter | Existent, passants | 75% |
-| Tests Backend | Existent, partiellement cassés | 50% |
-| Lint / Analyse statique | 945 issues | 60% |
+| Tests Flutter | Existent | 75% |
+| Tests Backend | Partiellement cassés | 50% |
+| Lint / Analyse statique | ~945 issues | 60% |
 
-**Estimation globale** : ~55% d'avancement vers les objectifs V2 définis dans le cahier des charges.
+**Estimation globale** : **~65%** d'avancement vers les objectifs V2.
+
+### Évolution depuis le dernier audit (commit a70e0636 → d9e74e77)
+
+- ✅ **Retry API** : ajout de 2 tentatives avec backoff exponentiel sur erreurs 5xx/429
+- ✅ **VAD natif** : `speech_to_text` avec `pauseFor` au lieu du hardcode 5s
+- ✅ **TTS naturel** : `TtsNaturalService` avec `cleanMarkdown()`, strip emojis, strip sources
+- ✅ **Recherche web** : fallback multi-provider (backend cloud → DuckDuckGo direct)
+- ✅ **Upload images** : `ImageUploadService` avec galerie + caméra, compression auto
+- ✅ **Upload fichiers** : `FileUploadService` avec extraction PDF/DOCX/XLSX pure Dart
+- ✅ **Crédits locaux** : fallback `CreditService` si Cloud Function quota indisponible
+- ✅ **File quota** : `FileQuotaService` local (2 fichiers/jour gratuit)
+- ✅ **Pagination UI** : `displayCount` + `loadMoreHistory()` dans le ChatState
+- ✅ **Sources web structurées** : `searchSources` dans Message, format liste + markdown
+- 🔄 **Simplification historique** : suppression du summarize Ollama, `take(20)` direct (en cours, non commité)
 
 ---
 
 ## 2. Fonctionnalités Complètes et Opérationnelles
 
-### 2.1 Chat IA
-- **Streaming token-by-token** avec throttle (8 tokens / 150ms) pour réduire les rebuilds UI
-- **Multi-provider** avec chaîne de fallback : Ollama local → DeepSeek-V3 → OpenRouter (Mistral)
-- **Contexte limité aux 20 derniers messages** (correction du bug `.take()` initial — ADR-009)
+### 2.1 Chat IA (90%)
+- **Streaming token-by-token** avec throttle (8 tokens / 150ms)
+- **Multi-provider** avec chaîne de fallback : Ollama local → DeepSeek-V3 → OpenRouter
+- **Retry automatique** : 2 tentatives max sur erreurs 5xx/429 avec délai exponentiel
+- **Contexte limité aux 20 derniers messages** (`.reversed.take(20).reversed`)
 - **Persistance Firestore** avec sync temps réel via `StreamProvider`
-- **Mode DEMO** (`--dart-define=DEMO_MODE=true`) fonctionnant sans Firebase ni clés API
-- **Gestion d'erreurs** : 401, 429, réseau, avec messages utilisateur
-- **Recherche web injectable** : toggle dans l'AppBar, indicateur "Recherche en cours..."
+- **Mode DEMO** (`--dart-define=DEMO_MODE=true`) fonctionnel sans Firebase
+- **Gestion d'erreurs** : 401, 429, réseau, avec messages utilisateur en français
+- **Recherche web injectable** : toggle dans l'AppBar, contexte système formaté
 
-### 2.2 Architecture & State Management
-- **MVVM + Riverpod** : séparation Model/ViewModel/View respectée
-- **Feature-based folder structure** avec `domain/`, `data/`, `presentation/`
-- **Platform Service** : détection Android/iOS/Web/Extension fonctionnelle
-- **Secure Storage** : `flutter_secure_storage` sur mobile, `shared_preferences` fallback web
+### 2.2 Architecture & State Management (85%)
+- **MVVM + Riverpod** : `domain/`, `data/`, `presentation/` respectés
+- **Feature-based structure** cohérente sur tous les modules
+- **Platform Service** : détection Android/iOS/Web/Extension
+- **Secure Storage** : `flutter_secure_storage` + fallback `shared_preferences`
+- **Router GoRouter** avec redirection auth/onboarding
 
-### 2.3 Monetization (base)
-- **AdMob** : bannière en bas du chat (mobile uniquement), IDs de test en debug
-- **RevenueCat** : intégration iOS/Android, entitlements `pro`, offerings `default`
-- **Stripe** : constantes configurées, webhook endpoint backend prévu
-- **Quota server-side** : Cloud Function `checkQuota` (20 req/jour gratuit)
-
-### 2.4 Extension Chrome
-- **Manifest V3** avec side panel, popup, background service worker
-- **Context menu** : "Demander à AironBot" sur sélection de texte
-- **Content script** : capture sélection texte, envoi au background
-- **Build script** (`scripts/build_extension.sh`) : build Flutter Web + packaging ZIP opérationnel
-- **Suppression Service Worker Flutter** pour éviter conflits avec background.js
-
-### 2.5 Auth
+### 2.3 Auth (80%)
 - **Firebase Auth** : Email, Google Sign-In, Anonymous
-- **Mock auth repository** pour mode DEMO sans Firebase
+- **Mock auth repository** pour mode DEMO (compte test automatique)
 - **Deep links** : `app_links` intégré pour parrainage
+
+### 2.4 Recherche Web (75%)
+- **Backend cloud** : `/search` endpoint FastAPI avec `duckduckgo-search` lib
+- **Fallback client-side** : scraping DuckDuckGo HTML pure Dart (autonome)
+- **Timeout 8s** explicite sur toutes les requêtes
+- **Contexte limité à ~16000 caractères** (~4000 tokens)
+- **Sources affichées** en markdown dans la réponse + liste structurée `searchSources`
+
+### 2.5 TTS Naturel (75%)
+- **Nettoyage markdown** : `cleanMarkdown()` supprime `**`, `#`, code blocks, liens, images, citations
+- **Strip emojis** : détection complète Unicode emoji (18 plages)
+- **Strip sources** : suppression section "Sources:" avant lecture
+- **Vitesse réglable** : slider 0.5x → 2.0x, pitch réglable
+- **Completion handler** : attente réelle de fin de parole avant de rendre la main
+
+### 2.6 Upload Images & Fichiers
+- **Images** (80%) : galerie + caméra, compression auto >2MB, max 1920px, base64
+- **Fichiers** (70%) : PDF (regex extraction), DOCX (XML parsing), XLSX (excel lib), TXT/CSV/MD
+- **Quota fichiers** : 2/jour gratuit, Pro illimité, limite 5MB gratuit / 50MB Pro
+- **Injection contexte** : `fileContextMessage` dans le système prompt (limité à 15000 chars)
+
+### 2.7 Monetization
+- **Quota server-side** : Cloud Function `checkQuota` (20 req/jour gratuit)
+- **Quota fallback local** : `CreditService` + `FileQuotaService` si Cloud Function down
+- **AdMob** : bannière (mobile), interstitiel, rewarded (IDs test en debug)
+- **RevenueCat** : iOS/Android subscriptions, entitlements `pro`
+- **Stripe** : constantes configurées pour web/extension
 
 ---
 
 ## 3. Fonctionnalités Partiellement Implémentées
 
-### 3.1 Recherche Web — 40% complet
+### 3.1 Mode Vocal Conversation — 70% complet
 **Ce qui existe** :
-- Recherche directe client-side via DuckDuckGo HTML scraping (`searchDirect`)
-- Backend FastAPI avec `duckduckgo-search` lib + SerpAPI fallback
-- Injection des résultats dans le contexte système de l'IA
-- Indicateur visuel "Recherche web en cours..." dans le chat
+- Pipeline complet : `listening → thinking → speaking → idle` en boucle
+- VAD via `speech_to_text.pauseFor` (silence detection native)
+- Transcription temps réel affichée dans l'UI
+- Stop/start réactivable (le bouton vocal reste fonctionnel après arrêt)
+- Micro coupé avant TTS pour éviter écho/monologue IA
+- Fallback `speech_to_text` natif intégré
 
 **Ce qui manque** :
-- Pas de fallback multi-provider côté client (Brave Search, DuckDuckGo API)
-- Parsing HTML par regex — très fragile, cassera si DuckDuckGo change son HTML
-- Pas de timeout explicite de 8s avec gestion d'erreur claire
-- Pas de nettoyage HTML des pages récupérées (scripts, ads, nav)
-- Pas de limite à 4000 tokens sur le contexte injecté
-- URLs sources affichées dans le contexte IA mais pas explicitement dans la bulle de réponse
-- Pas de logging structuré des échecs (URL, code, provider)
+- Pas de mode push-to-talk alternatif
+- Pas de retry automatique si STT échoue
+- Timeout de 60s pour la réponse IA (300 tentatives × 200ms) — acceptable mais pas configurable
 
-### 3.2 TTS (Text-to-Speech) — 35% complet
+### 3.2 Extension Chrome — 30% complet
 **Ce qui existe** :
-- `flutter_tts` intégré avec `rate: 0.9`, `language: 'fr-FR'`
-- Bouton lecture/arrêt dans la bulle de message
-
-**Ce qui manque** :
-- Aucun découpage intelligent par phrases/segments
-- Aucune pause entre phrases (100–200ms) ou paragraphes (400ms)
-- Pas de filtrage markdown (`**`, `#`, `` ` ``, `---`) avant TTS
-- Pas de contrôle vitesse utilisateur (slider 0.5x → 2x)
-- Backend TTS Ollama (`piper`) non fonctionnel en pratique — retourne du texte/SSML, pas d'audio
-
-### 3.3 Mode Vocal Conversation — 25% complet
-**Ce qui existe** :
-- Architecture en états : `idle`, `listening`, `processingStt`, `thinking`, `speaking`, `error`
-- Enregistrement audio WAV 16kHz via `record` + `just_audio`
-- Service `VoiceConversationNotifier` avec pipeline conceptuel
-
-**Ce qui manque** :
-- Durée d'enregistrement **hardcodée à 5 secondes** (`await Future.delayed(const Duration(seconds: 5))`) — pas de VAD
-- Pas de Voice Activity Detection (silence 1.5s = arrêt auto)
-- Pas de mode push-to-talk
-- STT backend Ollama (`/voice/stt`) encode l'audio en base64 et l'envoie à `/api/generate` — approche fondamentalement inefficace et non fonctionnelle
-- Pas de retry automatique (3 tentatives) sur erreur réseau
-- Pas de transcription temps réel affichée pendant l'écoute
-- Le fallback vers `speech_to_text` natif n'est pas correctement branché dans le pipeline conversation
-
-### 3.4 Système Freemium — 50% complet
-**Ce qui existe** :
-- Quota 20 requêtes/jour via Cloud Function `checkQuota`
-- Snackbar "Quota journalier atteint. Passez en Pro !" avec CTA vers `/paywall`
-- AdMob bannière (mobile)
-- RevenueCat pour abonnements Pro (mobile)
-- Écran paywall basique (`paywall_screen.dart`)
-
-**Ce qui manque** :
-- Pas de compteurs détaillés : vocal, recherche, images, fichiers
-- Pas de limites par type de feature (tout passe par le compteur global 20 req/jour)
-- Pas d'écran de récompense publicitaire (rewarded ads)
-- Pas de streak quotidien / gamification
-- Pas de notifications push de rappel
-- Pas de partage social viral
-- Pas d'essai Premium 7 jours sans CB
-- Pas d'achats in-app ponctuels (pack messages, débloquer vocal)
-
-### 3.5 Extension Chrome — 30% complet
-**Ce qui existe** :
-- Wrapper Flutter Web + Manifest V3
-- Side panel + popup
-- Context menu sélection texte
+- Manifest V3 avec side panel, popup, background service worker
+- Context menu "Demander à AironBot" sur sélection texte
+- Content script capture sélection
+- Build script (`scripts/build_extension.sh`) opérationnel
 
 **Ce qui manque** :
 - Gestion cookies automatique (bandeau refus)
 - Sidebar IA avec contexte page courante
 - Résumé de page en 1 clic
 - Traduction de sélection
-- Téléchargement médias (vidéos, images)
-- Remplissage formulaires
-- Scraping structuré
-- Macros et automatisation
-- Monitoring prix
+- Téléchargement médias, remplissage formulaires
+- Scraping structuré, macros, monitoring prix
+
+### 3.3 Système Freemium — 60% complet
+**Ce qui existe** :
+- Quota 20 req/jour (Cloud Function + fallback CreditService local)
+- Quota fichiers 2/jour (FileQuotaService local)
+- Snackbar "Quota journalier atteint" avec CTA paywall
+- Écran paywall basique
+
+**Ce qui manque** :
+- Compteurs détaillés par type (messages vs vocal vs recherche vs fichiers)
+- Écran rewarded ads fonctionnel (endpoint existant mais UI non intégrée)
+- Streak quotidien / gamification
+- Notifications push de rappel quota
+- Essai Premium 7 jours sans CB
+- Achats in-app ponctuels (pack messages, débloquer vocal)
+- Partage social viral
+
+### 3.4 Extraction Fichiers — 70% complet
+**Ce qui existe** :
+- PDF : extraction regex des opérateurs `Tj`/`T'` + hex strings
+- DOCX : parsing XML `word/document.xml`
+- XLSX : lib `excel` avec parcours feuilles/rows/cells
+- TXT/CSV/MD : lecture directe UTF-8
+
+**Ce qui manque** :
+- PDF complexes (scannés, encodages exotiques) → fallback texte partiel
+- Pas de preview UI avant envoi
+- Pas d'indicateur de progression pendant l'extraction
+- Pas de cache des extractions pour réutilisation
+
+### 3.5 Parrainage — 40% complet
+- `ReferralService` et `DeepLinkService` existent
+- Pas d'UI de parrainage intégrée dans les paramètres
+- Pas de tracking des conversions
 
 ---
 
@@ -155,141 +171,152 @@
 
 | ID | Bug | Fichier | Impact |
 |----|-----|---------|--------|
-| C1 | **Recherche web par regex HTML** — Parsing DuckDuckGo via regex fragile, cassera à la moindre évolution du site | `search_service.dart:91` | Fort — feature principale |
-| C2 | **Mode vocal hardcodé à 5s** — Pas de VAD, l'enregistrement s'arrête après 5s fixe | `voice_conversation_service.dart:82` | Fort — UX vocale inutilisable |
-| C3 | **Backend STT base64 inefficace** — Ollama `/api/generate` avec audio base64 = approche non fonctionnelle | `backend/agents/voice.py:45` | Fort — pipeline vocal backend inopérant |
-| C4 | **Argument type error** — `dynamic` assigné à `String` dans `chat_request.dart` | `chat_request.dart:54` | Moyen — compilation/lint |
-| C5 | **DeepSeek model obsolète** — `deepseek-chat` utilisé, doit migrer vers `deepseek-v4-flash` avant juillet 2026 | `constants.dart:15` | Moyen — rupture de service future |
+| C1 | **DeepSeek model obsolète** — `deepseek-chat` sera décommissionné en juillet 2026. Doit migrer vers `deepseek-v4-flash` | `constants.dart:17`, `chat_router.py:59` | Rupture de service imminente |
+| C2 | **Backend STT fondamentalement cassé** — Envoie l'audio en base64 dans un prompt textuel à `/api/generate`. Aucun modèle Ollama ne peut traiter ça. | `backend/agents/voice.py:49-51` | Pipeline vocal backend inopérant |
+| C3 | **Recherche web par regex HTML fragile** — Parsing DuckDuckGo HTML cassera si le site change son markup | `search_service.dart:122-141` | Feature principale — fallback existe |
 
 ### 4.2 Majeurs
 
 | ID | Bug | Fichier | Impact |
 |----|-----|---------|--------|
-| M1 | **Backend tests cassés** — 2/4 tests échouent (`firebase_auth` mock incorrect) | `backend/tests/test_chat.py` | Moyen — régression backend |
-| M2 | **Pas de retry API** — Aucune retry sur échec réseau DeepSeek/OpenRouter | `ai_client.dart` | Moyen — instabilité réseau |
-| M3 | **Quota pas de fallback local** — Si Cloud Function indisponible, l'erreur remonte brute | `quota_service.dart` | Moyen — UX gratuits cassée |
-| M4 | **TTS natif basique** — Lecture robotique sans pauses ni filtrage markdown | `voice_service.dart` | Moyen — qualité vocale |
-| M5 | **Voice conversation pas de fallback STT natif** — Si backend Ollama down, pas de basculement vers `speech_to_text` | `voice_conversation_service.dart` | Moyen — pipeline vocal |
+| M1 | **Backend tests cassés** — 2/4 tests échouent (mock `firebase_auth` incorrect) | `backend/tests/test_chat.py` | Régression backend |
+| M2 | **OllamaClient pointe vers ollama.com** — L'URL `https://ollama.com/api/chat` n'est pas une API utilisable. Ollama Cloud nécessite une URL spécifique par utilisateur. | `ai_client.dart:178` | Client Ollama cloud non fonctionnel |
+| M3 | **Quota fallback local pas thread-safe** — `CreditService` utilise `shared_preferences` sans lock | `credit_service.dart` | Conditions de concurrence |
+| M4 | **Pas de retry dans le mode vocal** — Si STT natif échoue, pas de nouvelle tentative automatique | `voice_conversation_service.dart` | UX vocale |
 
 ### 4.3 Mineurs
 
 | ID | Bug | Fichier |
 |----|-----|---------|
-| m1 | 945 issues lint (unused imports, inference failures) | Multiples |
-| m2 | `flutter_markdown` discontinué (remplacer par `flutter_markdown_plus`) | `pubspec.yaml` |
-| m3 | Dépendances obsolètes : 117 packages ont des versions plus récentes | `pubspec.yaml` |
-| m4 | `dio_client.dart` : `Future.delayed` sans type argument | `dio_client.dart:102` |
-| m5 | `voice_conversation_service.dart` : `Future.delayed` sans type argument (×3) | `voice_conversation_service.dart` |
-| m6 | `deep_link_service.dart` : unused import `referral_service.dart` | `deep_link_service.dart:7` |
+| m1 | `flutter_markdown` discontinué (remplacer par `flutter_markdown_plus`) | `pubspec.yaml:65` |
+| m2 | 117 packages ont des versions plus récentes disponibles | `pubspec.yaml` |
+| m3 | `image_upload_service.dart` : `width`/`height` toujours à 0 (non extraits) | `image_upload_service.dart:96-97` |
+| m4 | `TtsNaturalService` : `_tts` est un `FlutterTts` non disposé proprement | `tts_natural_service.dart` |
+| m5 | 1 TODO restant : activer le certificate pinning dans `dio_client.dart:56` | `dio_client.dart` |
+| m6 | `file_upload_service.dart` : regex PDF fragile pour PDF complexes/scannés | `file_upload_service.dart:110-144` |
 
 ---
 
 ## 5. Dette Technique Observable
 
 ### 5.1 Architecture
-- **Flutter** (pas React Native/Expo comme indiqué dans le cahier des charges Phase 2) — cohérent avec ADR-001 mais divergent du cahier utilisateur
-- **Backend FastAPI/Python** (pas Node.js/TypeScript) — cohérent avec l'implémentation actuelle
-- **AI DeepSeek/OpenRouter** (pas Anthropic/Claude comme spécifié dans Phase 6) — divergence majeure du cahier
+- **Divergence cahier des charges** : Flutter au lieu de React Native, Python/FastAPI au lieu de Node.js/TypeScript — documenté et assumé (ADR-001)
+- **Double implémentation** : recherche web existe côté client (DuckDuckGo scraping) ET côté backend (FastAPI) — redondant mais justifié par l'exigence d'autonomie
+- **Modèles IA** : DeepSeek (gratuit), OpenRouter (Pro) — pas de Claude/Anthropic comme dans le cahier Phase 6
 
 ### 5.2 Code Quality
-- 945 issues `flutter analyze` (1 erreur, ~80 warnings, ~864 hints)
-- Nombreux `inference_failure_on_function_invocation` — manque de types génériques explicites
-- Nombreux `unused_import` — nettoyage nécessaire
+- **~945 issues `flutter analyze`** : 1 erreur, ~80 warnings, ~864 hints
+- **Types faibles** : nombreux `inference_failure_on_function_invocation`
+- **Imports non utilisés** : nettoyage nécessaire dans plusieurs fichiers
+- **`Future.delayed` sans type argument** : `dio_client.dart`, `voice_conversation_service.dart`
 
-### 5.3 Dépendances Critiques Manquantes
-Pour implémenter les features demandées, il manque dans `pubspec.yaml` :
-- `image_picker` — upload images / caméra
-- `file_picker` — upload fichiers
-- `firebase_storage` — stockage fichiers/images
-- `cached_network_image` — preview images
-- `path_provider` — accès répertoires locaux (souvent transitif mais pas garanti)
+### 5.3 Dépendances à Surveiller
+- `flutter_markdown: ^0.7.0` → discontinué, migrer vers `flutter_markdown_plus`
+- `flutter_tts: ^4.2.0` — version stable mais limitation TTS natif Android/iOS
+- `record: ^6.0.0` — stable, utilisé pour capture avancée (non critique)
 
 ### 5.4 Backend
-- STT via base64 vers Ollama generate = anti-pattern technique (audio devrait aller vers un vrai endpoint STT comme Whisper API ou Ollama multimodal natif)
-- Pas de rate limiting par utilisateur authentifié côté backend (seulement par IP via slowapi)
+- **STT via base64 dans `/api/generate`** = anti-pattern. Devrait utiliser une vraie API Whisper (OpenAI, Groq, ou Whisper local via HTTP)
+- **Pas de rate limiting par utilisateur** (seulement par IP via slowapi)
+- **Redis requis** pour rate limiting — fallback mémoire existe mais non testé
+- **Ollama cloud URL** : `ollama.com` n'expose pas d'API utilisable publiquement
+
+### 5.5 Tests
+- Tests Flutter passent (couverture core + chat + auth + monetization)
+- Tests backend partiellement cassés (mocks Firebase incorrects)
+- Pas de tests pour `VoiceConversationNotifier`, `TtsNaturalService`, `FileUploadService`
+- Pas de tests d'intégration vocale
 
 ---
 
 ## 6. Plan d'Action Recommandé par Priorité
 
-### Priorité 1 — Bugs Bloquants (expérience cassée)
-1. **[C1] Fiabiliser la recherche web** :
-   - Remplacer le scraping regex par l'API backend `duckduckgo-search` en priorité
-   - Ajouter fallback client-side Brave Search API
-   - Ajouter timeout 8s et gestion d'erreur utilisateur claire
-   - Limiter contexte injecté à 4000 tokens
-   - Afficher sources avec URLs dans la réponse
+### Priorité 1 — Critique (bugs bloquants)
 
-2. **[C2+C3+M5] Corriger le mode vocal** :
-   - Implémenter VAD (silence 1.5s) ou mode push-to-talk
-   - Corriger le backend STT : utiliser une vraie API Whisper (OpenAI/Whisper API) ou Ollama multimodal natif
-   - Brancher fallback `speech_to_text` natif dans `VoiceConversationNotifier`
-   - Ajouter retry 3 tentatives
+1. **[C1] Migrer le modèle DeepSeek** :
+   - Remplacer `deepseek-chat` → `deepseek-v4-flash` dans `constants.dart` et `chat_router.py`
+   - Vérifier que l'API key fonctionne avec le nouveau modèle
+   - Échéance : **avant juillet 2026**
 
-3. **[C4] Corriger l'erreur de compilation** dans `chat_request.dart`
+2. **[C2] Corriger le backend STT** :
+   - Remplacer le endpoint `/voice/stt` par une vraie intégration Whisper API (Groq Whisper ou OpenAI Whisper)
+   - OU supprimer complètement le endpoint STT backend et ne garder que le STT natif
+   - Actuellement le backend STT est inutilisable — le client utilise déjà `speech_to_text` natif
 
-### Priorité 2 — Fonctionnalités Manquantes Critiques
-4. **[0%] Implémenter upload et analyse d'images** :
-   - Ajouter `image_picker`, `firebase_storage`
-   - Compression 1920px/85%/JPEG
-   - Conversion base64 pour API (DeepSeek n'a pas de vision ; nécessite migration vers OpenRouter avec modèle vision ou Anthropic)
-   - Preview miniature dans bulle de message
+3. **[M2] Corriger OllamaClient** :
+   - `https://ollama.com/api/chat` n'est pas un endpoint API valide
+   - Soit documenter l'URL Ollama cloud réelle, soit supprimer ce client
+   - Le client utilise déjà le fallback DeepSeek/OpenRouter correctement
 
-5. **[0%] Implémenter upload et analyse de fichiers** :
-   - Ajouter `file_picker`
-   - Extraction PDF → `pdf-parse` backend ou lib Dart
-   - Extraction DOCX → `mammoth` backend
-   - Extraction XLSX → `xlsx` backend
-   - Limite gratuite 2/jour 5MB, Pro illimité 50MB
+### Priorité 2 — Extension Chrome
 
-### Priorité 3 — TTS et UX
-6. **[C4] Corriger le TTS** :
-   - Fonction `splitForTTS` : découpage par phrases avec filtrage markdown
-   - Pauses inter-phrases 150ms, inter-paragraphes 400ms
-   - Slider vitesse utilisateur
-   - Nettoyage markdown avant lecture
+4. **Gestion cookies automatique** — priorité pour fonctionnement seamless
+5. **Sidebar IA avec contexte page courante** — killer feature extension
+6. **Résumé de page en 1 clic** — différenciateur
 
-### Priorité 4 — Système Freemium
-7. **Implémenter compteurs détaillés** :
-   - Messages, vocal, recherche, images, fichiers avec leurs propres limites
-   - Paywalls non-intrusifs avec CTA premium
-   - Écran essai Premium 7 jours
+### Priorité 3 — Système Freemium
 
-### Priorité 5 — Extension Chrome
-8. **Gestion cookies automatique**
-9. **Sidebar IA avec contexte page**
-10. **Téléchargement médias basique**
+7. **Compteurs détaillés par type de requête** (messages, vocal, fichiers)
+8. **Intégration rewarded ads** pour +5 requêtes
+9. **Essai Premium 7 jours sans CB**
+10. **UI parrainage** dans les paramètres
+
+### Priorité 4 — Qualité
+
+11. **Réduire les issues lint** : cibler les warnings d'abord (~80)
+12. **Réparer les tests backend** (mocks Firebase)
+13. **Ajouter tests pour les services vocaux et upload**
 
 ---
 
-## 7. Outils Installés / Disponibles
+## 7. Outils et Environnement
 
 | Outil | Version | Statut |
 |-------|---------|--------|
-| Flutter SDK | 3.24.0 | Installé dans `$HOME/flutter` |
-| Dart | 3.5.0 | Inclus dans Flutter |
-| Android SDK | 36.0.0 | Présent (licences acceptées) |
+| Flutter SDK | 3.24.0 | Installé (`$HOME/flutter`) |
+| Dart | 3.5.0 | Inclus |
+| Android SDK | 36.0.0 | Licences acceptées |
 | Java | OpenJDK | Présent |
 | Python | 3.12.3 | Système |
 | Backend venv | Python 3.12 | Présent (`backend/venv/`) |
-| Chrome | — | Disponible pour tests web/extension |
+| Chrome | — | Tests web/extension |
+| Redis | — | Non vérifié (optionnel) |
+
+### Packages Dart clés (pubspec.yaml)
+- **State** : `flutter_riverpod: ^2.4.9`
+- **Navigation** : `go_router: ^13.0.0`
+- **Firebase** : `firebase_core`, `firebase_auth`, `cloud_firestore`, `cloud_functions`, `firebase_messaging`
+- **AI/HTTP** : `http`, `dio`, `connectivity_plus`
+- **Voice** : `speech_to_text`, `flutter_tts`, `record`, `just_audio`, `permission_handler`
+- **Monetization** : `google_mobile_ads`, `purchases_flutter`
+- **Files** : `image_picker`, `file_picker`, `archive`, `excel`, `xml`, `flutter_image_compress`
+
+### Packages Python backend (requirements.txt)
+- `fastapi`, `uvicorn`, `httpx`, `pydantic`, `pydantic-settings`
+- `slowapi`, `redis`, `duckduckgo-search`
+- `firebase-admin`, `pytest`, `pytest-asyncio`
 
 ---
 
 ## 8. Résumé Exécutif
 
-AironBot V2 est une application Flutter cross-platform (mobile + extension Chrome) avec une architecture solide (MVVM + Riverpod, Firebase, multi-provider IA). Le chat streaming, l'authentification, la persistance Firestore et la monetization de base fonctionnent.
+AironBot V2 est une application Flutter cross-platform (mobile + extension Chrome) avec une architecture solide (MVVM + Riverpod). **Le chat IA avec streaming, retry, et multi-provider est mature (90%).** L'authentification, la persistance Firestore, et la monetization de base fonctionnent.
 
-**Cependant**, les 4 bugs critiques identifiés dans le cahier des charges sont confirmés :
-1. **TTS** est basique et robotique (pas de découpage, pas de pauses)
-2. **Mode vocal** est quasi-inutilisable (5s fixe, pas de VAD, backend STT non fonctionnel)
-3. **Recherche web** repose sur du scraping regex fragile
-4. **Upload images/fichiers** est totalement absent (0%)
+**Progrès significatifs depuis le dernier audit** :
+- Le TTS est passé de "basique et robotique" à "naturel" avec `cleanMarkdown()` complet
+- Le mode vocal utilise maintenant VAD natif au lieu d'un hardcoded 5s
+- La recherche web a un fallback multi-provider (backend cloud + DuckDuckGo direct)
+- L'upload images et fichiers est implémenté (extraction PDF/DOCX/XLSX pure Dart)
+- Le retry API et le fallback quota local (crédits) ont été ajoutés
 
-Le backend FastAPI est fonctionnel pour le chat streaming et la recherche DuckDuckGo, mais le endpoint vocal Ollama est fondamentalement mal conçu. Les tests Flutter passent mais les tests backend ont des mocks cassés.
+**Risques majeurs restants** :
+1. **DeepSeek model obsolète** (`deepseek-chat` décommissionné juillet 2026) — migration nécessaire
+2. **Backend STT inopérant** — le client utilise déjà le STT natif, le backend vocal est du code mort
+3. **OllamaClient URL invalide** — `ollama.com/api/chat` n'existe pas
+4. **Extension Chrome** à seulement 30% — fonctionnalités killer manquantes
 
-**Recommandation** : Commencer par Priorité 1 (bugs bloquants) avant d'ajouter des features. La migration du modèle DeepSeek (`deepseek-chat` → `deepseek-v4-flash`) doit être traitée en parallèle.
+**Recommandation** : Migrer le modèle DeepSeek en priorité (échéance juillet 2026), nettoyer le backend vocal (code mort), puis concentrer les efforts sur l'extension Chrome et le système freemium.
 
 ---
 
-*Fin du rapport d'audit — Phase 1 terminée.*
+*Fin du rapport d'audit — 2026-05-01*
