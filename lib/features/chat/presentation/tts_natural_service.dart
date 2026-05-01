@@ -68,7 +68,13 @@ class TtsNaturalService {
   /// Conserve la structure (paragraphes, listes) pour que le moteur natif
   /// fasse les pauses aux retours à la ligne et ponctuations.
   static String cleanMarkdown(String text) {
-    return stripEmojis(text)
+    // 1. Supprimer la section Sources et tout ce qui suit le séparateur final
+    var working = _stripSourcesSection(text);
+
+    // 2. Supprimer les citations entre crochets [1], [2], etc.
+    working = working.replaceAll(RegExp(r'\[\d+\]'), '');
+
+    return stripEmojis(working)
         // Gras et italique → texte brut
         .replaceAllMapped(RegExp(r'\*\*\*(.+?)\*\*\*'), (m) => m.group(1) ?? '')
         .replaceAllMapped(RegExp(r'\*\*(.+?)\*\*'), (m) => m.group(1) ?? '')
@@ -115,6 +121,28 @@ class TtsNaturalService {
         // Normaliser sauts de ligne
         .replaceAll(RegExp(r'\n{3,}'), '\n\n')
         .trim();
+  }
+
+  /// Supprime la section Sources de la fin du texte.
+  /// Reconnait les patterns : ---\n**Sources :**\n... ou \n\nSources :\n...
+  static String _stripSourcesSection(String text) {
+    // Pattern 1 : séparateur markdown --- suivi de Sources
+    final sepPattern = RegExp(
+      r'\n?\s*---+\s*\n?\s*\*\*Sources\s*:\*\*.*',
+      caseSensitive: false,
+      dotAll: true,
+    );
+    var result = text.replaceFirst(sepPattern, '');
+
+    // Pattern 2 : Sources: sans séparateur (dernier recours)
+    final plainPattern = RegExp(
+      r'\n\n\s*Sources\s*:.*',
+      caseSensitive: false,
+      dotAll: true,
+    );
+    result = result.replaceFirst(plainPattern, '');
+
+    return result;
   }
 
   /// Lit tout le texte d’une traite et attend la fin réelle de la parole.

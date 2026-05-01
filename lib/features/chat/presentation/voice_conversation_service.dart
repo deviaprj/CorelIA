@@ -142,9 +142,9 @@ class VoiceConversationNotifier
       if (!_isActive) break;
     }
 
-    if (_isActive) {
-      _reset();
-    }
+    // Forcer le reset quel que soit l'etat pour eviter que le state
+    // reste bloque sur speaking/listening quand on arrete manuellement.
+    _reset();
   }
 
   /// Ecoute avec VAD (Voice Activity Detection) natif.
@@ -178,10 +178,13 @@ class VoiceConversationNotifier
     await Future<void>.delayed(const Duration(milliseconds: 400));
 
     final finalTranscript = _voice.state.transcript;
-    state = state.copyWith(
-      transcript: finalTranscript,
-      state: VoiceConversationState.processingStt,
-    );
+    // Ne pas changer le state si on a ete arrete manuellement
+    if (_isActive) {
+      state = state.copyWith(
+        transcript: finalTranscript,
+        state: VoiceConversationState.processingStt,
+      );
+    }
 
     return finalTranscript.isEmpty ? null : finalTranscript;
   }
@@ -208,9 +211,9 @@ class VoiceConversationNotifier
 
     // Pause de garde apres le TTS pour eviter que le micro ne capte
     // le son du haut-parleur (echo) avant de relancer l'ecoute.
-    await Future<void>.delayed(const Duration(milliseconds: 1200));
-
+    // Si l'utilisateur a arrete, ne pas attendre inutilement.
     if (_isActive) {
+      await Future<void>.delayed(const Duration(milliseconds: 1200));
       state = state.copyWith(state: VoiceConversationState.idle);
       // La boucle while dans startConversation va relancer listening
     }
