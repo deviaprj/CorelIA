@@ -149,7 +149,7 @@ class VoiceConversationNotifier
 
   /// Ecoute avec VAD (Voice Activity Detection) natif.
   ///
-  /// Utilise speech_to_text avec pauseFor=2s comme detection de silence.
+  /// Utilise speech_to_text avec pauseFor=3s comme detection de silence.
   /// Transcription temps reel affichee via l'etat.
   Future<String?> _listenWithVad() async {
     final ok = await _voice.ensureInitialized();
