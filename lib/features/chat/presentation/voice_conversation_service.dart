@@ -217,12 +217,15 @@ class VoiceConversationNotifier
   }
 
   /// Arrete immediatement la conversation vocale.
-  void stop() {
+  Future<void> stop() async {
     _isActive = false;
     _pendingTranscript = null;
-    _voice.stopListening();
-    _voice.stopSpeaking();
+    await _voice.stopListening();
+    await _voice.stopSpeaking();
+    _voice.forceReset();
     _reset();
+    // Laisser le temps au plugin natif de liberer le micro
+    await Future<void>.delayed(const Duration(milliseconds: 400));
   }
 
   void _reset() {

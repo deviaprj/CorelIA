@@ -115,6 +115,15 @@ class VoiceServiceNotifier extends Notifier<VoiceState> {
     await _tts.stop();
     state = state.copyWith(isSpeaking: false);
   }
+
+  /// Force la reinitialisation de l'etat vocal (micro + TTS coupes).
+  /// Utilise quand on quitte le mode conversation pour eviter
+  /// qu'un prochain startListening() soit bloque par un etat fantome.
+  void forceReset() {
+    _stt.stop();
+    _tts.stop();
+    state = state.copyWith(isListening: false, isSpeaking: false, transcript: '');
+  }
 }
 
 final voiceServiceProvider =

@@ -163,9 +163,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
             isVoiceActive: isVoiceActive,
             onToggleSearch: notifier.toggleSearch,
             onAttachment: () => _showAttachmentSheet(notifier),
-            onToggleVoiceConv: () {
+            onToggleVoiceConv: () async {
               if (isVoiceActive) {
-                voiceConvNotifier.stop();
+                await voiceConvNotifier.stop();
               } else {
                 voiceConvNotifier.startConversation();
               }
@@ -180,9 +180,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     );
   }
 
-  Future<void> _handleImagePick(ChatNotifier notifier) async {
+  Future<void> _handleImagePick(ChatNotifier notifier, {required bool fromCamera}) async {
     final service = ImageUploadService();
-    final result = await service.pickFromGallery();
+    final result = fromCamera
+        ? await service.pickFromCamera()
+        : await service.pickFromGallery();
     if (result == null || !mounted) return;
 
     // Envoyer le message avec image au ChatNotifier
@@ -245,13 +247,23 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
             mainAxisSize: MainAxisSize.min,
             children: [
               ListTile(
-                leading: Icon(Icons.image_outlined,
+                leading: Icon(Icons.camera_alt_outlined,
                     color: Theme.of(ctx).colorScheme.primary),
-                title: const Text('Image'),
-                subtitle: const Text('Prendre ou choisir une photo'),
+                title: const Text('Caméra'),
+                subtitle: const Text('Prendre une photo'),
                 onTap: () {
                   Navigator.of(ctx).pop();
-                  _handleImagePick(notifier);
+                  _handleImagePick(notifier, fromCamera: true);
+                },
+              ),
+              ListTile(
+                leading: Icon(Icons.image_outlined,
+                    color: Theme.of(ctx).colorScheme.primary),
+                title: const Text('Galerie'),
+                subtitle: const Text('Choisir une photo existante'),
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  _handleImagePick(notifier, fromCamera: false);
                 },
               ),
               ListTile(
@@ -317,7 +329,7 @@ class _ChatToolbar extends StatelessWidget {
               color: useSearch ? colorScheme.primary : colorScheme.outlineVariant,
             ),
             visualDensity: VisualDensity.compact,
-            onPressed: isStreaming ? null : onToggleSearch,
+            onPressed: onToggleSearch,
           ),
           const SizedBox(width: 8),
           // Piece jointe (image + fichier)
@@ -334,7 +346,7 @@ class _ChatToolbar extends StatelessWidget {
             backgroundColor: colorScheme.surfaceContainerHighest,
             side: BorderSide(color: colorScheme.outlineVariant),
             visualDensity: VisualDensity.compact,
-            onPressed: isStreaming ? null : onAttachment,
+            onPressed: onAttachment,
           ),
           const SizedBox(width: 8),
           // Conversation vocale

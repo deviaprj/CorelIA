@@ -30,11 +30,45 @@ class TtsNaturalService {
     await _tts.setPitch(_pitch);
   }
 
+  /// Supprime les emojis d’un texte pour le TTS.
+  static String stripEmojis(String text) {
+    final buffer = StringBuffer();
+    for (final rune in text.runes) {
+      if (!_isEmoji(rune)) buffer.writeCharCode(rune);
+    }
+    return buffer.toString();
+  }
+
+  static bool _isEmoji(int rune) {
+    return (rune >= 0x1F600 && rune <= 0x1F64F) || // emoticons
+        (rune >= 0x1F300 && rune <= 0x1F5FF) || // symbols & pictographs
+        (rune >= 0x1F680 && rune <= 0x1F6FF) || // transport & map
+        (rune >= 0x1F1E0 && rune <= 0x1F1FF) || // flags
+        (rune >= 0x2600 && rune <= 0x26FF) || // misc symbols
+        (rune >= 0x2700 && rune <= 0x27BF) || // dingbats
+        (rune >= 0xFE00 && rune <= 0xFE0F) || // variation selectors
+        (rune >= 0x1F900 && rune <= 0x1F9FF) || // supplemental symbols
+        (rune >= 0x1F000 && rune <= 0x1F02F) || // mahjong, domino
+        (rune >= 0x1F0A0 && rune <= 0x1F0FF) || // playing cards
+        (rune >= 0x1F100 && rune <= 0x1F1FF) || // enclosed alphanum
+        (rune >= 0x1F700 && rune <= 0x1F77F) || // alchemical
+        (rune >= 0x1F780 && rune <= 0x1F7FF) || // geometric
+        (rune >= 0x1F800 && rune <= 0x1F8FF) || // arrows
+        (rune >= 0x1FA00 && rune <= 0x1FA6F) || // chess etc
+        (rune >= 0x1FA70 && rune <= 0x1FAFF) || // symbols extended-A
+        (rune >= 0x2300 && rune <= 0x23FF) || // misc technical
+        (rune == 0x00A9) || (rune == 0x00AE) || // copyright, registered
+        (rune == 0x2122) || (rune == 0x3030) || // trademark, wavy dash
+        (rune == 0x303D) || (rune == 0x3297) || // part alternation, congrats
+        (rune == 0x3299) || // secret
+        (rune >= 0x2B50 && rune <= 0x2B55); // stars
+  }
+
   /// Nettoie le markdown pour le rendu TTS.
   /// Conserve la structure (paragraphes, listes) pour que le moteur natif
   /// fasse les pauses aux retours à la ligne et ponctuations.
   static String cleanMarkdown(String text) {
-    return text
+    return stripEmojis(text)
         // Gras et italique → texte brut
         .replaceAllMapped(RegExp(r'\*\*\*(.+?)\*\*\*'), (m) => m.group(1) ?? '')
         .replaceAllMapped(RegExp(r'\*\*(.+?)\*\*'), (m) => m.group(1) ?? '')
