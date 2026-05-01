@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
@@ -65,11 +66,51 @@ class ChatBubble extends StatelessWidget {
                           ? Padding(
                               padding: const EdgeInsets.symmetric(
                                   horizontal: 14, vertical: 10),
-                              child: Text(
-                                message.content,
-                                style: TextStyle(
-                                  color: colorScheme.onPrimary,
-                                ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  if (message.hasImage && message.imageBase64 != null)
+                                    ClipRRect(
+                                      borderRadius: BorderRadius.circular(8),
+                                      child: Image.memory(
+                                        base64Decode(message.imageBase64!),
+                                        fit: BoxFit.cover,
+                                        width: 200,
+                                        height: 200,
+                                        errorBuilder: (_, __, ___) => const Icon(Icons.broken_image),
+                                      ),
+                                    ),
+                                  if (message.hasFile)
+                                    Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(
+                                          Icons.insert_drive_file,
+                                          size: 16,
+                                          color: colorScheme.onPrimary.withOpacity(0.8),
+                                        ),
+                                        const SizedBox(width: 6),
+                                        Flexible(
+                                          child: Text(
+                                            message.fileName!,
+                                            style: TextStyle(
+                                              color: colorScheme.onPrimary.withOpacity(0.9),
+                                              fontWeight: FontWeight.w500,
+                                            ),
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  if (message.content.isNotEmpty)
+                                    Text(
+                                      message.content,
+                                      style: TextStyle(
+                                        color: colorScheme.onPrimary,
+                                      ),
+                                    ),
+                                ],
                               ),
                             )
                           : Padding(

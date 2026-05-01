@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'package:cloud_functions/cloud_functions.dart';
-import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../data/ai_client.dart';
@@ -10,11 +9,11 @@ import '../data/mock_chat_repository.dart';
 import '../data/ollama_local_client.dart';
 import '../data/quota_service.dart';
 import '../data/search_service.dart';
+import '../data/file_quota_service.dart';
 import '../domain/conversation.dart';
 import '../domain/message.dart';
 import '../../../core/constants.dart';
 import '../../../core/providers/firebase_providers.dart';
-import '../../../core/secure_storage.dart';
 import '../../monetization/subscription/subscription_service.dart';
 import '../../../main.dart' show isDemoMode;
 
@@ -108,9 +107,16 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
     }
   }
 
-  Future<void> sendMessage(String text) async {
+  Future<void> sendMessage(
+    String text, {
+    String? imageBase64,
+    String? imageMimeType,
+    String? fileName,
+    String? fileContent,
+  }) async {
     final trimmed = text.trim();
-    if (trimmed.isEmpty || trimmed.length > 10000 || state.isStreaming) return;
+    if (trimmed.isEmpty && imageBase64 == null) return;
+    if (trimmed.length > 10000 || state.isStreaming) return;
 
     final user = ref.read(currentUserProvider);
     if (user == null) return;
@@ -129,14 +135,41 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
       } catch (e) {
         debugPrint('[Quota] Error checking quota: $e');
       }
+
+      // Quota fichiers (local, 100% autonome)
+      if (fileContent != null && fileContent.isNotEmpty) {
+        try {
+          await ref.read(fileQuotaServiceProvider).checkAndDecrement();
+        } on FileQuotaExceededException {
+          state = state.copyWith(
+            error: 'quota_files_exceeded',
+            isStreaming: false,
+          );
+          return;
+        } catch (e) {
+          debugPrint('[FileQuota] Error: $e');
+        }
+      }
     }
 
     // 1. Persister le message utilisateur dans le repo
     final userMsg = isDemoMode
         ? await mockChatRepository.addMessage(
-            conversationId: arg, role: Role.user, content: trimmed)
+            conversationId: arg,
+            role: Role.user,
+            content: trimmed,
+            imageBase64: imageBase64,
+            imageMimeType: imageMimeType,
+            fileName: fileName,
+          )
         : await ref.read(chatRepositoryProvider).addMessage(
-            conversationId: arg, role: Role.user, content: trimmed);
+            conversationId: arg,
+            role: Role.user,
+            content: trimmed,
+            imageBase64: imageBase64,
+            imageMimeType: imageMimeType,
+            fileName: fileName,
+          );
 
     // 2. ref.listen va sync le message utilisateur depuis le repo,
     //    mais en attendant on s'assure que le state le contient pour
@@ -184,8 +217,27 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
       }
     }
 
+    // Recherche web (autonome) — effectuee avant le stream
+    List<WebSearchResult>? searchResults;
+    if (state.useSearch) {
+      try {
+        state = state.copyWith(isSearching: true);
+        final searchService = ref.read(searchServiceProvider);
+        searchResults = await searchService.searchWithFallback(userMsg.content);
+      } catch (e) {
+        debugPrint('[ChatNotifier] Recherche web echouee : $e');
+      } finally {
+        state = state.copyWith(isSearching: false);
+      }
+    }
+
     try {
-      final stream = await _buildStream(userMsg, isPro);
+      final stream = await _buildStream(
+        userMsg,
+        isPro,
+        searchResults: searchResults,
+        fileContent: fileContent,
+      );
 
       await for (final token in stream) {
         buffer.write(token);
@@ -204,8 +256,15 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
 
       // 4. Stream terminé : transformer le placeholder en vrai message final
       //    (pas de suppression — on remplace isStreaming=false et on persiste)
-      final finalContent = buffer.toString();
+      var finalContent = buffer.toString();
       final model = isPro ? AppConstants.mistralModel : AppConstants.deepSeekModel;
+
+      // Ajouter les sources si recherche web active
+      if (searchResults != null && searchResults.isNotEmpty) {
+        final searchService = ref.read(searchServiceProvider);
+        final sources = searchService.formatSourcesForUi(searchResults);
+        finalContent = '$finalContent$sources';
+      }
 
       if (placeholderIndex != -1) {
         mutableMessages[placeholderIndex] = mutableMessages[placeholderIndex]
@@ -256,7 +315,12 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
     }
   }
 
-  Future<Stream<String>> _buildStream(Message userMsg, bool isPro) async {
+  Future<Stream<String>> _buildStream(
+    Message userMsg,
+    bool isPro, {
+    List<WebSearchResult>? searchResults,
+    String? fileContent,
+  }) async {
     // ── 1. Construire l'historique ───────────────────────────────────────
     final historyMessages = state.messages
         .where((m) => m.role != Role.system && !m.isStreaming)
@@ -267,38 +331,46 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
         .reversed
         .toList();
 
-    // ── 2. Recherche web directe (autonome, pas de backend) ────────────
-    if (state.useSearch) {
-      try {
-        state = state.copyWith(isSearching: true);
-        final searchService = ref.read(searchServiceProvider);
-        final results = await searchService.searchDirect(userMsg.content);
-        final searchContext = searchService.formatForAi(results, userMsg.content);
+    // ── 2. Injecter le contexte fichier ────────────────────────────────
+    if (fileContent != null && fileContent.isNotEmpty) {
+      const maxChars = 15000;
+      final truncated = fileContent.length > maxChars
+          ? '${fileContent.substring(0, maxChars)}... [tronque]'
+          : fileContent;
+      historyMessages.insert(0, Message(
+        id: 'file_context_${DateTime.now().millisecondsSinceEpoch}',
+        conversationId: arg,
+        role: Role.system,
+        content:
+            "L'utilisateur a fourni un document. "
+            'Utilise son contenu ci-dessous pour repondre '
+            "a la question de l'utilisateur.\n\n"
+            '$truncated',
+        createdAt: DateTime.now(),
+      ));
+    }
 
-        // Injecter les résultats comme un message système au début
-        historyMessages.insert(0, Message(
-          id: 'search_context_${DateTime.now().millisecondsSinceEpoch}',
-          conversationId: arg,
-          role: Role.system,
-          content:
-              'Tu es un assistant IA avec accès à internet. '
-              'Utilise les résultats de recherche ci-dessous pour répondre '
-              'à la question de l\'utilisateur. Cite tes sources quand c\'est pertinent.\n\n'
-              '$searchContext',
-          createdAt: DateTime.now(),
-        ));
+    // ── 3. Injecter le contexte recherche web ────────────────────────────
+    if (searchResults != null && searchResults.isNotEmpty) {
+      final searchService = ref.read(searchServiceProvider);
+      final searchContext = searchService.formatForAi(searchResults, userMsg.content);
 
-        debugPrint('[ChatNotifier] Recherche web directe : ${results.length} résultats');
-      } catch (e) {
-        debugPrint('[ChatNotifier] Recherche web échouée : $e');
-      } finally {
-        state = state.copyWith(isSearching: false);
-      }
+      historyMessages.insert(0, Message(
+        id: 'search_context_${DateTime.now().millisecondsSinceEpoch}',
+        conversationId: arg,
+        role: Role.system,
+        content:
+            'Tu es un assistant IA avec acces a internet. '
+            'Utilise les resultats de recherche ci-dessous pour repondre '
+            "a la question de l'utilisateur. Cite tes sources quand c'est pertinent.\n\n"
+            '$searchContext',
+        createdAt: DateTime.now(),
+      ));
     }
 
     final historyMaps = historyMessages.map((m) => m.toApiMap()).toList();
 
-    // ── 3. Ollama local (prioritaire si disponible) ────────────────────
+    // ── 4. Ollama local (prioritaire si disponible) ────────────────────
     if (_ollamaClient != null && _ollamaUrl != null) {
       return _ollamaClient!.streamChat(
         messages: historyMaps,
@@ -307,7 +379,7 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
       );
     }
 
-    // ── 4. DeepSeek / OpenRouter direct (100% autonome) ───────────────
+    // ── 5. DeepSeek / OpenRouter direct (100% autonome) ───────────────
     return _getDirectAiStream(historyMaps, isPro);
   }
 
@@ -326,8 +398,8 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
       }
     }
     final deepSeekKey = AppConstants.deepSeekApiKey;
-    if (deepSeekKey.isEmpty && isDemoMode) {
-      // Mode DEMO sans clé API → réponse mock pour tests
+    if (deepSeekKey.isEmpty) {
+      // Aucune clé API → réponse mock pour tests
       return _mockResponseStream();
     }
     return DeepSeekClient(apiKey: deepSeekKey)
@@ -342,7 +414,7 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
         'Posez-moi des questions sur n\'importe quel sujet !';
     for (final word in response.split(' ')) {
       yield '$word ';
-      await Future.delayed(const Duration(milliseconds: 80));
+      await Future<void>.delayed(const Duration(milliseconds: 80));
     }
   }
 

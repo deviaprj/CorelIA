@@ -82,7 +82,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           _SectionTitle('Apparence'),
           ListTile(
             leading: const Icon(Icons.nights_stay_outlined),
-            title: const Text('Thème sombre'),
+            title: const Text('Theme sombre'),
             trailing: Switch(
               value: themeMode == ThemeMode.dark,
               onChanged: (v) {
@@ -92,6 +92,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               },
             ),
           ),
+
+          // ── Vitesse TTS ──────────────────────────────────────────────────
+          _SectionTitle('Vitesse de lecture vocale'),
+          _TtsSpeedSlider(),
 
           // ── Clé API perso ────────────────────────────────────────────────
           _SectionTitle('Clé API DeepSeek (optionnel)'),
@@ -207,6 +211,48 @@ class _SectionTitle extends StatelessWidget {
               color: Theme.of(context).colorScheme.primary,
               letterSpacing: 1,
             ),
+      ),
+    );
+  }
+}
+
+class _TtsSpeedSlider extends ConsumerWidget {
+  const _TtsSpeedSlider();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final speed = ref.watch(ttsSpeedProvider);
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text('Lent'),
+              Text(
+                '${speed.toStringAsFixed(2)}x',
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      fontWeight: FontWeight.bold,
+                      color: Theme.of(context).colorScheme.primary,
+                    ),
+              ),
+              const Text('Rapide'),
+            ],
+          ),
+          Slider(
+            value: speed,
+            min: 0.5,
+            max: 2.0,
+            divisions: 15,
+            label: '${speed.toStringAsFixed(2)}x',
+            onChanged: (value) {
+              ref.read(ttsSpeedProvider.notifier).setSpeed(value);
+            },
+          ),
+        ],
       ),
     );
   }

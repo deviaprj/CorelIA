@@ -50,6 +50,16 @@ dependencies:
   # Storage
   flutter_secure_storage: ^9.2.0
   shared_preferences: ^2.3.0
+  firebase_storage: ^11.6.5
+
+  # Images & Files
+  image_picker: ^1.1.2
+  flutter_image_compress: ^2.3.0
+  path_provider: ^2.1.0
+  file_picker: ^8.0.0+1
+  archive: ^3.4.10
+  excel: ^4.0.2
+  xml: ^6.5.0
 
   # UI & Utilities
   flutter_markdown: ^0.7.0
@@ -65,6 +75,9 @@ dependencies:
 
   # Deep Links
   app_links: ^6.4.0
+
+  # Environment
+  flutter_dotenv: ^5.2.1
 
   # Platform detection
   web: ^1.0.0
@@ -96,3 +109,4 @@ flutter:
 
   assets:
     - assets/icons/
+    - .env

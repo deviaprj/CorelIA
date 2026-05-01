@@ -86,6 +86,9 @@ class MockChatRepository {
     required Role role,
     required String content,
     String? model,
+    String? imageBase64,
+    String? imageMimeType,
+    String? fileName,
   }) async {
     final msg = Message(
       id: _uuid.v4(),
@@ -94,6 +97,9 @@ class MockChatRepository {
       content: content,
       model: model,
       createdAt: DateTime.now(),
+      imageBase64: imageBase64,
+      imageMimeType: imageMimeType,
+      fileName: fileName,
     );
 
     if (!_messages.containsKey(conversationId)) {

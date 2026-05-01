@@ -5,8 +5,12 @@ import 'chat_notifier.dart';
 import 'chat_bubble.dart';
 import 'input_bar.dart';
 import 'voice_conversation_service.dart';
+import '../data/image_upload_service.dart';
+import '../data/file_upload_service.dart';
+import '../data/file_quota_service.dart';
 import '../../../core/platform/platform_service.dart';
 import '../../monetization/ads/ad_banner_widget.dart';
+import '../../monetization/subscription/subscription_service.dart';
 
 class ChatScreen extends ConsumerStatefulWidget {
   const ChatScreen({super.key, required this.conversationId});
@@ -42,13 +46,13 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   Widget build(BuildContext context) {
     final state = ref.watch(chatNotifierProvider(widget.conversationId));
     final notifier = ref.read(chatNotifierProvider(widget.conversationId).notifier);
-    final voiceConv = ref.watch(voiceConversationProvider);
-    final voiceConvNotifier = ref.read(voiceConversationProvider.notifier);
+    final voiceConv = ref.watch(voiceConversationProvider(widget.conversationId));
+    final voiceConvNotifier = ref.read(voiceConversationProvider(widget.conversationId).notifier);
 
     // Auto-scroll + afficher erreur quota
     ref.listen(chatNotifierProvider(widget.conversationId), (_, next) {
       _scrollToBottom();
-      if (next.error == 'quota_exceeded') {
+      if (next.error == 'quota_exceeded' || next.error == 'quota_files_exceeded') {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: const Text('Quota journalier atteint. Passez en Pro !'),
@@ -93,36 +97,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
           ],
         ),
         actions: [
-          // Toggle recherche web
-          IconButton(
-            icon: Icon(
-              state.useSearch ? Icons.travel_explore : Icons.travel_explore_outlined,
-              color: state.useSearch
-                  ? Theme.of(context).colorScheme.primary
-                  : null,
-            ),
-            tooltip: state.useSearch ? 'Recherche web activée' : 'Recherche web désactivée',
-            onPressed: state.isStreaming
-                ? null
-                : () => notifier.toggleSearch(),
-          ),
-          // Mode conversation vocale
-          IconButton(
-            icon: Icon(
-              isVoiceActive ? Icons.mic : Icons.mic_none_outlined,
-              color: isVoiceActive
-                  ? Theme.of(context).colorScheme.error
-                  : null,
-            ),
-            tooltip: isVoiceActive ? 'Arrêter la conversation vocale' : 'Conversation vocale',
-            onPressed: () {
-              if (isVoiceActive) {
-                voiceConvNotifier.stop();
-              } else {
-                voiceConvNotifier.startConversation();
-              }
-            },
-          ),
           if (state.remainingRequests != null && !state.isStreaming)
             Padding(
               padding: const EdgeInsets.only(right: 12),
@@ -182,10 +156,210 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
           ),
           // Bandeau publicitaire (mobile uniquement, pas extension)
           if (!isExtension) const AdBannerWidget(),
+          // Toolbar d'actions secondaires (visible, mutualisee)
+          _ChatToolbar(
+            useSearch: state.useSearch,
+            isStreaming: state.isStreaming,
+            isVoiceActive: isVoiceActive,
+            onToggleSearch: notifier.toggleSearch,
+            onAttachment: () => _showAttachmentSheet(notifier),
+            onToggleVoiceConv: () {
+              if (isVoiceActive) {
+                voiceConvNotifier.stop();
+              } else {
+                voiceConvNotifier.startConversation();
+              }
+            },
+          ),
           InputBar(
             isLoading: state.isStreaming,
             onSend: (text) => notifier.sendMessage(text),
           ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _handleImagePick(ChatNotifier notifier) async {
+    final service = ImageUploadService();
+    final result = await service.pickFromGallery();
+    if (result == null || !mounted) return;
+
+    // Envoyer le message avec image au ChatNotifier
+    await notifier.sendMessage(
+      'Decris cette image en detail.',
+      imageBase64: result.base64,
+      imageMimeType: result.mimeType,
+    );
+  }
+
+  Future<void> _handleFilePick(ChatNotifier notifier) async {
+    final isPro = await ref.read(isProProvider.future).catchError((_) => false);
+    final service = FileUploadService();
+    try {
+      final result = await service.pickAndExtract(isPro: isPro);
+      if (result == null || !mounted) return;
+
+      await notifier.sendMessage(
+        'Analyse ce document.',
+        fileName: result.fileName,
+        fileContent: result.extractedText,
+      );
+    } on FileUploadException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e.message)),
+        );
+      }
+    } on FileQuotaExceededException {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('Quota fichiers atteint (2/jour). Passez en Pro !'),
+            action: SnackBarAction(
+              label: 'Pro',
+              onPressed: () => context.push('/paywall'),
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Erreur fichier: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _showAttachmentSheet(ChatNotifier notifier) async {
+    showModalBottomSheet<void>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: Icon(Icons.image_outlined,
+                    color: Theme.of(ctx).colorScheme.primary),
+                title: const Text('Image'),
+                subtitle: const Text('Prendre ou choisir une photo'),
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  _handleImagePick(notifier);
+                },
+              ),
+              ListTile(
+                leading: Icon(Icons.insert_drive_file_outlined,
+                    color: Theme.of(ctx).colorScheme.primary),
+                title: const Text('Document'),
+                subtitle: const Text('PDF, Word, Excel, CSV, TXT, MD'),
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  _handleFilePick(notifier);
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ChatToolbar extends StatelessWidget {
+  const _ChatToolbar({
+    required this.useSearch,
+    required this.isStreaming,
+    required this.isVoiceActive,
+    required this.onToggleSearch,
+    required this.onAttachment,
+    required this.onToggleVoiceConv,
+  });
+
+  final bool useSearch;
+  final bool isStreaming;
+  final bool isVoiceActive;
+  final VoidCallback onToggleSearch;
+  final VoidCallback onAttachment;
+  final VoidCallback onToggleVoiceConv;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 4, 12, 2),
+      child: Row(
+        children: [
+          // Toggle recherche web — texte + icone visible
+          ActionChip(
+            avatar: Icon(
+              useSearch ? Icons.travel_explore : Icons.travel_explore_outlined,
+              size: 18,
+              color: useSearch ? colorScheme.onPrimaryContainer : colorScheme.outline,
+            ),
+            label: Text(
+              useSearch ? 'Web ON' : 'Web OFF',
+              style: TextStyle(
+                fontSize: 12,
+                color: useSearch ? colorScheme.onPrimaryContainer : colorScheme.outline,
+              ),
+            ),
+            backgroundColor:
+                useSearch ? colorScheme.primaryContainer : colorScheme.surfaceContainerHighest,
+            side: BorderSide(
+              color: useSearch ? colorScheme.primary : colorScheme.outlineVariant,
+            ),
+            visualDensity: VisualDensity.compact,
+            onPressed: isStreaming ? null : onToggleSearch,
+          ),
+          const SizedBox(width: 8),
+          // Piece jointe (image + fichier)
+          ActionChip(
+            avatar: Icon(
+              Icons.attach_file_outlined,
+              size: 18,
+              color: colorScheme.outline,
+            ),
+            label: Text(
+              'Fichier',
+              style: TextStyle(fontSize: 12, color: colorScheme.outline),
+            ),
+            backgroundColor: colorScheme.surfaceContainerHighest,
+            side: BorderSide(color: colorScheme.outlineVariant),
+            visualDensity: VisualDensity.compact,
+            onPressed: isStreaming ? null : onAttachment,
+          ),
+          const SizedBox(width: 8),
+          // Conversation vocale
+          ActionChip(
+            avatar: Icon(
+              isVoiceActive ? Icons.mic : Icons.mic_none_outlined,
+              size: 18,
+              color: isVoiceActive ? colorScheme.onErrorContainer : colorScheme.outline,
+            ),
+            label: Text(
+              isVoiceActive ? 'Vocal ON' : 'Vocal OFF',
+              style: TextStyle(
+                fontSize: 12,
+                color: isVoiceActive ? colorScheme.onErrorContainer : colorScheme.outline,
+              ),
+            ),
+            backgroundColor:
+                isVoiceActive ? colorScheme.errorContainer : colorScheme.surfaceContainerHighest,
+            side: BorderSide(
+              color: isVoiceActive ? colorScheme.error : colorScheme.outlineVariant,
+            ),
+            visualDensity: VisualDensity.compact,
+            onPressed: onToggleVoiceConv,
+          ),
+          const Spacer(),
         ],
       ),
     );

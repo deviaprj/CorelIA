@@ -1,12 +1,14 @@
 import 'package:flutter/foundation.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 /// Constantes globales de l'application.
-/// Les valeurs sensibles sont injectées via --dart-define-from-file=.env
+/// Les valeurs sensibles sont lues depuis .env a l'execution
+/// (embarque dans l'APK) ou via --dart-define pour les builds CI.
 abstract class AppConstants {
   // ── IA ──────────────────────────────────────────────────────────────────────
-  static const deepSeekApiKey = String.fromEnvironment('DEEPSEEK_API_KEY');
-  static const openRouterApiKey = String.fromEnvironment('OPENROUTER_API_KEY');
-  static const ollamaApiKey = String.fromEnvironment('OLLAMA_API_KEY', defaultValue: '');
+  static String get deepSeekApiKey => dotenv.get('DEEPSEEK_API_KEY', fallback: '');
+  static String get openRouterApiKey => dotenv.get('OPENROUTER_API_KEY', fallback: '');
+  static String get ollamaApiKey => dotenv.get('OLLAMA_API_KEY', fallback: '');
 
   static const deepSeekBaseUrl = 'https://api.deepseek.com/v1/chat/completions';
   static const openRouterBaseUrl = 'https://openrouter.ai/api/v1/chat/completions';
@@ -15,6 +17,7 @@ abstract class AppConstants {
   static const deepSeekModel = 'deepseek-chat';
   static const mistralModel = 'mistralai/mistral-large-2407';
   static const groqModel = 'meta-llama/llama-3.3-70b-instruct';
+  static const visionModel = 'openai/gpt-4o-mini';
   static const ollamaModel = 'kimi-k2.5:cloud';
 
   // ── Quotas ──────────────────────────────────────────────────────────────────
@@ -24,10 +27,10 @@ abstract class AppConstants {
   static const proMaxTokens = 8192;
 
   // ── AdMob ───────────────────────────────────────────────────────────────────
-  static const admobAppIdAndroid = String.fromEnvironment('ADMOB_APP_ID_ANDROID',
-      defaultValue: 'ca-app-pub-3940256099942544~3347511713');
-  static const admobAppIdIos = String.fromEnvironment('ADMOB_APP_ID_IOS',
-      defaultValue: 'ca-app-pub-3940256099942544~1458002511');
+  static String get admobAppIdAndroid => dotenv.get('ADMOB_APP_ID_ANDROID',
+      fallback: 'ca-app-pub-3940256099942544~3347511713');
+  static String get admobAppIdIos => dotenv.get('ADMOB_APP_ID_IOS',
+      fallback: 'ca-app-pub-3940256099942544~1458002511');
 
   // IDs bannière (test par défaut)
   static String get admobBannerId {
@@ -37,8 +40,8 @@ abstract class AppConstants {
           : 'ca-app-pub-3940256099942544/2934735716';
     }
     return defaultTargetPlatform == TargetPlatform.android
-        ? const String.fromEnvironment('ADMOB_BANNER_ID_ANDROID')
-        : const String.fromEnvironment('ADMOB_BANNER_ID_IOS');
+        ? dotenv.get('ADMOB_BANNER_ID_ANDROID', fallback: '')
+        : dotenv.get('ADMOB_BANNER_ID_IOS', fallback: '');
   }
 
   // IDs interstitiel (test par défaut)
@@ -49,8 +52,8 @@ abstract class AppConstants {
           : 'ca-app-pub-3940256099942544/4411468910';
     }
     return defaultTargetPlatform == TargetPlatform.android
-        ? const String.fromEnvironment('ADMOB_INTERSTITIAL_ID_ANDROID')
-        : const String.fromEnvironment('ADMOB_INTERSTITIAL_ID_IOS');
+        ? dotenv.get('ADMOB_INTERSTITIAL_ID_ANDROID', fallback: '')
+        : dotenv.get('ADMOB_INTERSTITIAL_ID_IOS', fallback: '');
   }
 
   // IDs rewarded (test par défaut)
@@ -61,30 +64,29 @@ abstract class AppConstants {
           : 'ca-app-pub-3940256099942544/1712485313';
     }
     return defaultTargetPlatform == TargetPlatform.android
-        ? const String.fromEnvironment('ADMOB_REWARDED_ID_ANDROID')
-        : const String.fromEnvironment('ADMOB_REWARDED_ID_IOS');
+        ? dotenv.get('ADMOB_REWARDED_ID_ANDROID', fallback: '')
+        : dotenv.get('ADMOB_REWARDED_ID_IOS', fallback: '');
   }
 
   // ── RevenueCat ──────────────────────────────────────────────────────────────
-  static const revenueCatApiKeyAndroid = String.fromEnvironment('REVENUECAT_API_KEY_ANDROID');
-  static const revenueCatApiKeyIos = String.fromEnvironment('REVENUECAT_API_KEY_IOS');
+  static String get revenueCatApiKeyAndroid => dotenv.get('REVENUECAT_API_KEY_ANDROID', fallback: '');
+  static String get revenueCatApiKeyIos => dotenv.get('REVENUECAT_API_KEY_IOS', fallback: '');
 
   static const entitlementPro = 'pro';
   static const offeringDefault = 'default';
 
   // ── Stripe ──────────────────────────────────────────────────────────────────
-  static const stripePublicKey = String.fromEnvironment('STRIPE_PUBLIC_KEY');
+  static String get stripePublicKey => dotenv.get('STRIPE_PUBLIC_KEY', fallback: '');
   static const stripeCheckoutBaseUrl = 'https://aironbot.app/checkout';
 
   // ── App ─────────────────────────────────────────────────────────────────────
   static const appName = 'AironBot';
   static const appVersion = '1.1.0';
   static const appWebUrl = 'https://aironbot.app';
-  static const shareTagline = '— Généré par AironBot\nhttps://aironbot.app';
+  static const shareTagline = '— Genere par AironBot\nhttps://aironbot.app';
 
   // ── Backend ─────────────────────────────────────────────────────────────────
-  static const backendBaseUrl = String.fromEnvironment('BACKEND_URL',
-      defaultValue: 'https://api.aironbot.app');
+  static String get backendBaseUrl => dotenv.get('BACKEND_URL', fallback: 'https://api.aironbot.app');
 
   // ── Firestore collections ───────────────────────────────────────────────────
   static const colUsers = 'users';

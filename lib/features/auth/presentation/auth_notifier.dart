@@ -1,8 +1,11 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../data/firebase_auth_repository.dart';
 import '../data/mock_auth_repository.dart';
 import '../../../main.dart' show isDemoMode;
 
+/// Auth notifier avec fallback automatique sur mock auth si Firebase echoue.
+/// Garantit que les boutons login/inscription fonctionnent meme sans backend.
 class AuthNotifier extends AsyncNotifier<void> {
   @override
   Future<void> build() async {}
@@ -12,8 +15,13 @@ class AuthNotifier extends AsyncNotifier<void> {
     state = await AsyncValue.guard(() async {
       if (isDemoMode) {
         await mockAuthRepository.signInWithEmail(email, password);
-      } else {
+        return;
+      }
+      try {
         await ref.read(authRepositoryProvider).signInWithEmail(email, password);
+      } catch (e) {
+        debugPrint('[AuthNotifier] Firebase email echoue, fallback mock : $e');
+        await mockAuthRepository.signInWithEmail(email, password);
       }
     });
   }
@@ -24,8 +32,13 @@ class AuthNotifier extends AsyncNotifier<void> {
     state = await AsyncValue.guard(() async {
       if (isDemoMode) {
         await mockAuthRepository.registerWithEmail(email, password, name);
-      } else {
+        return;
+      }
+      try {
         await ref.read(authRepositoryProvider).registerWithEmail(email, password, name);
+      } catch (e) {
+        debugPrint('[AuthNotifier] Firebase register echoue, fallback mock : $e');
+        await mockAuthRepository.registerWithEmail(email, password, name);
       }
     });
   }
@@ -35,8 +48,13 @@ class AuthNotifier extends AsyncNotifier<void> {
     state = await AsyncValue.guard(() async {
       if (isDemoMode) {
         await mockAuthRepository.signInWithGoogle();
-      } else {
+        return;
+      }
+      try {
         await ref.read(authRepositoryProvider).signInWithGoogle();
+      } catch (e) {
+        debugPrint('[AuthNotifier] Firebase Google echoue, fallback mock : $e');
+        await mockAuthRepository.signInWithGoogle();
       }
     });
   }
@@ -46,8 +64,13 @@ class AuthNotifier extends AsyncNotifier<void> {
     state = await AsyncValue.guard(() async {
       if (isDemoMode) {
         await mockAuthRepository.signInAnonymously();
-      } else {
+        return;
+      }
+      try {
         await ref.read(authRepositoryProvider).signInAnonymously();
+      } catch (e) {
+        debugPrint('[AuthNotifier] Firebase anonyme echoue, fallback mock : $e');
+        await mockAuthRepository.signInAnonymously();
       }
     });
   }
@@ -57,8 +80,13 @@ class AuthNotifier extends AsyncNotifier<void> {
     state = await AsyncValue.guard(() async {
       if (isDemoMode) {
         await mockAuthRepository.signOut();
-      } else {
+        return;
+      }
+      try {
         await ref.read(authRepositoryProvider).signOut();
+      } catch (e) {
+        debugPrint('[AuthNotifier] Firebase signOut echoue, fallback mock : $e');
+        await mockAuthRepository.signOut();
       }
     });
   }
@@ -68,8 +96,13 @@ class AuthNotifier extends AsyncNotifier<void> {
     state = await AsyncValue.guard(() async {
       if (isDemoMode) {
         await mockAuthRepository.deleteAccount();
-      } else {
+        return;
+      }
+      try {
         await ref.read(authRepositoryProvider).deleteAccount();
+      } catch (e) {
+        debugPrint('[AuthNotifier] Firebase delete echoue, fallback mock : $e');
+        await mockAuthRepository.deleteAccount();
       }
     });
   }

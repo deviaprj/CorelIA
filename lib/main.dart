@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'app/router.dart';
 import 'app/theme.dart';
@@ -13,30 +14,75 @@ import 'firebase_options.dart';
 import 'features/auth/data/mock_auth_repository.dart';
 
 // Global flag pour le mode demo local (sans Firebase)
-// Peut être forcé via --dart-define=DEMO_MODE=true
-bool isDemoMode = const bool.fromEnvironment('DEMO_MODE', defaultValue: false);
+// true par defaut pour le developpement : auth mock + IA reelle (DeepSeek via .env)
+// Forcer false avec : --dart-define=DEMO_MODE=false
+bool isDemoMode = const bool.fromEnvironment('DEMO_MODE', defaultValue: true);
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  if (isDemoMode) {
-    debugPrint('[DEMO MODE] Forcé via dart-define — pas de Firebase');
-    await mockAuthRepository.initialize();
-    // Connexion anonyme automatique pour skipper le login
-    if (mockAuthRepository.currentUser == null) {
-      await mockAuthRepository.signInAnonymously();
-    }
-  } else {
-    // Firebase (non supporté sur Linux desktop — uniquement Android/iOS/Web)
+  // Charger .env avant toute initialisation
+  try {
+    await dotenv.load(fileName: '.env');
+    debugPrint('[dotenv] .env charge avec succes');
+  } catch (e) {
+    debugPrint('[dotenv] .env introuvable ou illisible : $e');
+  }
+
+  // ── Firebase : tenter, fallback DEMO si indisponible ────────────────────
+  if (!isDemoMode) {
     try {
       await Firebase.initializeApp(
         options: DefaultFirebaseOptions.currentPlatform,
       );
+      debugPrint('[Firebase] Initialise avec succes');
+    } on FirebaseException catch (e) {
+      if (e.code == 'duplicate-app') {
+        try {
+          // Verifier que Firebase est vraiment fonctionnel
+          FirebaseAuth.instance.currentUser;
+          debugPrint('[Firebase] Deja initialise, fonctionnel');
+        } catch (_) {
+          debugPrint('[Firebase] Deja initialise mais dysfonctionnel — fallback DEMO');
+          isDemoMode = true;
+        }
+      } else {
+        debugPrint('[Firebase] Indisponible : $e');
+        isDemoMode = true;
+      }
     } catch (e) {
-      debugPrint('[Firebase] Non disponible sur cette plateforme : $e');
-      debugPrint('[DEMO MODE] Activation du mode de test local sans Firebase');
+      debugPrint('[Firebase] Indisponible : $e');
       isDemoMode = true;
-      await mockAuthRepository.initialize();
+    }
+  }
+
+  // ── Mode DEMO / fallback : auth mock + compte de test ─────────────────────
+  if (isDemoMode) {
+    debugPrint('[DEMO MODE] Auth mock active');
+    await mockAuthRepository.initialize();
+    if (mockAuthRepository.currentUser == null) {
+      // Compte de test automatique pour acces immediat au chat
+      try {
+        await mockAuthRepository.signInWithEmail(
+          'test@aironbot.app',
+          'test1234',
+        );
+        debugPrint('[DEMO] Connexion compte de test reussie');
+      } catch (_) {
+        // Le compte n'existe pas encore : le creer
+        try {
+          await mockAuthRepository.registerWithEmail(
+            'test@aironbot.app',
+            'test1234',
+            'Utilisateur Test',
+          );
+          debugPrint('[DEMO] Compte de test cree et connecte');
+        } catch (e2) {
+          // En dernier recours : anonyme
+          await mockAuthRepository.signInAnonymously();
+          debugPrint('[DEMO] Connexion anonyme de secours : $e2');
+        }
+      }
     }
   }
 

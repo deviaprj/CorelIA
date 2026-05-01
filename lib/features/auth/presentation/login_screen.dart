@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'auth_notifier.dart';
+import '../data/mock_auth_repository.dart';
+import '../../../core/providers/firebase_providers.dart';
+import '../../../main.dart' show isDemoMode;
 import '../../../shared/extensions/string_extensions.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
@@ -11,8 +14,8 @@ class LoginScreen extends ConsumerStatefulWidget {
 }
 
 class _LoginScreenState extends ConsumerState<LoginScreen> {
-  final _emailCtrl = TextEditingController();
-  final _passCtrl = TextEditingController();
+  final _emailCtrl = TextEditingController(text: 'test@aironbot.app');
+  final _passCtrl = TextEditingController(text: 'test1234');
   bool _isRegister = false;
   bool _obscurePass = true;
 
@@ -103,6 +106,32 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: 40),
+              // Badge compte de test
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF6C63FF).withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: const Color(0xFF6C63FF).withOpacity(0.3)),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.info_outline, size: 16, color: const Color(0xFF6C63FF)),
+                    const SizedBox(width: 8),
+                    Flexible(
+                      child: Text(
+                        'Compte de test pré-rempli : test@aironbot.app / test1234',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: const Color(0xFF6C63FF),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
               // Email
               TextField(
                 controller: _emailCtrl,
@@ -168,6 +197,28 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                         .read(authNotifierProvider.notifier)
                         .signInAnonymously(),
                 child: const Text('Continuer sans compte'),
+              ),
+              const SizedBox(height: 12),
+              // Mode test direct (bypass Firebase si bloque)
+              OutlinedButton.icon(
+                onPressed: isLoading
+                    ? null
+                    : () async {
+                        // Forcer le mode DEMO et utiliser le mock auth
+                        // pour bypasser Firebase si bloque
+                        isDemoMode = true;
+                        await mockAuthRepository.initialize();
+                        await mockAuthRepository.signInAnonymously();
+                        // Invalider le provider auth pour que le router
+                        // se re-evalue avec le mock auth
+                        ref.invalidate(authStateProvider);
+                      },
+                icon: const Icon(Icons.bug_report_outlined, size: 20),
+                label: const Text('Mode test (hors-ligne)'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.orange,
+                  side: const BorderSide(color: Colors.orange),
+                ),
               ),
               const SizedBox(height: 24),
               // Toggle register/login

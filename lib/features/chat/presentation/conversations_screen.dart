@@ -9,11 +9,18 @@ import '../data/firestore_chat_repository.dart';
 import '../../../core/providers/firebase_providers.dart';
 import '../../../shared/widgets/loading_widget.dart';
 
-class ConversationsScreen extends ConsumerWidget {
+class ConversationsScreen extends ConsumerStatefulWidget {
   const ConversationsScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<ConversationsScreen> createState() => _ConversationsScreenState();
+}
+
+class _ConversationsScreenState extends ConsumerState<ConversationsScreen> {
+  bool _hasAutoNavigated = false;
+
+  @override
+  Widget build(BuildContext context) {
     final user = ref.watch(currentUserProvider);
     if (user == null) {
       return const Scaffold(
@@ -43,12 +50,21 @@ class ConversationsScreen extends ConsumerWidget {
             onRetry: () => ref.invalidate(conversationsStreamProvider(user.uid)),
           ),
         ),
-        data: (conversations) => conversations.isEmpty
-            ? _EmptyState(onNewChat: () => _createNewConversation(context, ref, user.uid))
-            : _ConversationList(
-                conversations: conversations,
-                userId: user.uid,
-              ),
+        data: (conversations) {
+          if (conversations.isEmpty) {
+            if (!_hasAutoNavigated) {
+              _hasAutoNavigated = true;
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                _createNewConversation(context, ref, user.uid);
+              });
+            }
+            return const Center(child: CircularProgressIndicator());
+          }
+          return _ConversationList(
+            conversations: conversations,
+            userId: user.uid,
+          );
+        },
       ),
       floatingActionButton: FloatingActionButton(
         onPressed: () => _createNewConversation(context, ref, user.uid),

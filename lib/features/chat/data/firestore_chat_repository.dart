@@ -107,6 +107,9 @@ class FirestoreChatRepository {
     required Role role,
     required String content,
     String? model,
+    String? imageBase64,
+    String? imageMimeType,
+    String? fileName,
   }) async {
     if (_db == null) {
       return mockChatRepository.addMessage(
@@ -114,6 +117,9 @@ class FirestoreChatRepository {
         role: role,
         content: content,
         model: model,
+        imageBase64: imageBase64,
+        imageMimeType: imageMimeType,
+        fileName: fileName,
       );
     }
     final msg = Message(
@@ -123,6 +129,9 @@ class FirestoreChatRepository {
       content: content,
       model: model,
       createdAt: DateTime.now(),
+      imageBase64: imageBase64,
+      imageMimeType: imageMimeType,
+      fileName: fileName,
     );
     await _db!
         .collection(AppConstants.colConversations)
@@ -131,7 +140,7 @@ class FirestoreChatRepository {
         .doc(msg.id)
         .set(msg.toFirestore());
 
-    // Mettre à jour le compteur + titre si premier message
+    // Mettre a jour le compteur + titre si premier message
     await updateConversation(conversationId, {
       'messageCount': FieldValue.increment(1),
       if (role == Role.user && content.length > 3)

@@ -1,7 +1,8 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
-import 'package:flutter_tts/flutter_tts.dart';
+import '../../../core/providers/app_providers.dart';
+import 'tts_natural_service.dart';
 
 class VoiceState {
   final bool isAvailable;
@@ -32,14 +33,14 @@ class VoiceState {
 
 class VoiceServiceNotifier extends Notifier<VoiceState> {
   late final stt.SpeechToText _stt;
-  late final FlutterTts _tts;
+  late final TtsNaturalService _tts;
 
   @override
   VoiceState build() {
     _stt = stt.SpeechToText();
-    _tts = FlutterTts();
+    _tts = TtsNaturalService();
     ref.onDispose(() {
-      _tts.stop();
+      _tts.dispose();
       _stt.stop();
     });
     _init();
@@ -47,7 +48,7 @@ class VoiceServiceNotifier extends Notifier<VoiceState> {
   }
 
   Future<void> _init() async {
-    // Initialisation asynchrone ; si elle échoue on réessaiera au premier tap
+    // Initialisation asynchrone ; si elle echoue on reessayera au premier tap
     try {
       final available = await _stt.initialize(
         onError: (_) => state = state.copyWith(isListening: false),
@@ -57,16 +58,18 @@ class VoiceServiceNotifier extends Notifier<VoiceState> {
           }
         },
       );
-      await _tts.setLanguage('fr-FR');
-      await _tts.setSpeechRate(0.9);
+      await _tts.init();
+      // Appliquer la vitesse stockee dans les preferences
+      final speed = ref.read(ttsSpeedProvider);
+      await _tts.setSpeed(speed);
       state = state.copyWith(isAvailable: available);
     } catch (e) {
-      debugPrint('[VoiceService] Init STT échouée : $e');
+      debugPrint('[VoiceService] Init STT echouee : $e');
       state = state.copyWith(isAvailable: false);
     }
   }
 
-  /// Initialise à la demande si la première tentative a échoué
+  /// Initialise a la demande si la premiere tentative a echoue
   Future<bool> ensureInitialized() async {
     if (state.isAvailable) return true;
     await _init();
@@ -85,7 +88,7 @@ class VoiceServiceNotifier extends Notifier<VoiceState> {
       },
       localeId: 'fr_FR',
       listenFor: const Duration(seconds: 30),
-      pauseFor: const Duration(seconds: 5),
+      pauseFor: const Duration(seconds: 3),
     );
   }
 
@@ -94,18 +97,17 @@ class VoiceServiceNotifier extends Notifier<VoiceState> {
     state = state.copyWith(isListening: false);
   }
 
+  /// Lecture TTS naturelle avec decoupage intelligent et pauses.
   Future<void> speak(String text) async {
     if (text.isEmpty) return;
     if (state.isSpeaking) await _tts.stop();
     state = state.copyWith(isSpeaking: true);
     try {
-      await _tts.speak(text);
-      _tts.setCompletionHandler(() {
-        state = state.copyWith(isSpeaking: false);
-      });
+      await _tts.speakNaturally(text);
     } catch (e) {
-      state = state.copyWith(isSpeaking: false);
       debugPrint('[TTS] Error: $e');
+    } finally {
+      state = state.copyWith(isSpeaking: false);
     }
   }
 

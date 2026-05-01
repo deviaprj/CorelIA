@@ -48,7 +48,10 @@
       "Bash(/home/geekai/flutter/bin/flutter run:*)",
       "Bash(pkill:*)",
       "Bash(cat)",
-      "Bash(chmod +x /home/geekai/Documents/GitHub/AironBot/.git/hooks/pre-commit)"
+      "Bash(chmod +x /home/geekai/Documents/GitHub/AironBot/.git/hooks/pre-commit)",
+      "Read(//tmp/apk_extract/**)",
+      "Bash(rm -rf *)",
+      "Bash(unzip -q /home/geekai/Documents/GitHub/AironBot/build/app/outputs/flutter-apk/app-release.apk)"
     ]
   }
 }

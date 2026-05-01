@@ -1,14 +1,10 @@
 import 'dart:async';
-import 'dart:io';
-import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:path/path.dart' as p;
-import '../../../core/api/dio_client.dart';
-import 'voice_advanced_service.dart';
+import 'chat_notifier.dart';
 import 'voice_service.dart';
 
-/// État du mode conversation vocale mains-libres.
+/// Etat du mode conversation vocale mains-libres.
 enum VoiceConversationState {
   idle,
   listening,
@@ -37,150 +33,196 @@ class VoiceConversationStatus {
       VoiceConversationStatus(
         state: state ?? this.state,
         transcript: transcript ?? this.transcript,
-        error: error ?? this.error,
+        error: error,
       );
 }
 
-/// Service de conversation vocale mains-libres.
+/// Service de conversation vocale mains-libres — 100% autonome et natif.
 ///
-/// Flux :
-/// 1. Enregistrement audio (voice_advanced_service)
-/// 2. Envoi au backend /voice/stt (Ollama whisper)
-/// 3. Récupération du texte transcrit
-/// 4. Envoi au chat
-/// 5. Réception de la réponse texte
-/// 6. Lecture TTS (voice_service / flutter_tts natif en fallback)
-class VoiceConversationNotifier extends Notifier<VoiceConversationStatus> {
-  late final VoiceAdvancedNotifier _voiceAdvanced;
-  late final VoiceServiceNotifier _voiceBasic;
-  final _dio = DioClientFactory.create();
+/// Flux complet autonome :
+/// 1. LISTENING — speech_to_text natif avec VAD (pauseFor = silence detection)
+/// 2. THINKING — envoi automatique au ChatNotifier
+/// 3. SPEAKING — TTS naturel quand la reponse IA arrive (detectee via messagesStream)
+/// 4. IDLE — retour automatique pour conversation continue
+///
+/// Aucun appel backend — tout est natif : speech_to_text + flutter_tts.
+class VoiceConversationNotifier
+    extends FamilyNotifier<VoiceConversationStatus, String> {
+  late final VoiceServiceNotifier _voice;
   bool _isActive = false;
+  String? _pendingTranscript;
 
   @override
-  VoiceConversationStatus build() {
-    _voiceAdvanced = ref.read(voiceAdvancedProvider.notifier);
-    _voiceBasic = ref.read(voiceServiceProvider.notifier);
+  VoiceConversationStatus build(String conversationId) {
+    _voice = ref.read(voiceServiceProvider.notifier);
+
+    // Ecouter les messages pour detecter la reponse IA automatiquement
+    ref.listen(messagesStreamProvider(conversationId), (prev, next) {
+      if (!_isActive || !next.hasValue) return;
+      final messages = next.value!;
+      if (messages.isEmpty) return;
+
+      final lastMsg = messages.last;
+      // Si c'est un message assistant final (pas streaming) et qu'on attend une reponse
+      if (lastMsg.isAssistant &&
+          !lastMsg.isStreaming &&
+          lastMsg.content.isNotEmpty &&
+          state.state == VoiceConversationState.thinking &&
+          _pendingTranscript != null) {
+        _pendingTranscript = null;
+        _speakResponseAndLoop(lastMsg.content);
+      }
+    });
 
     ref.onDispose(() {
       _isActive = false;
+      _voice.stopListening();
+      _voice.stopSpeaking();
     });
 
     return const VoiceConversationStatus();
   }
 
-  /// Démarre une boucle conversation vocale.
+  /// Demarre une boucle conversation vocale mains-libres.
   Future<void> startConversation() async {
     if (_isActive) return;
     _isActive = true;
 
-    state = state.copyWith(state: VoiceConversationState.listening);
-
-    // 1. Enregistrer l'audio
-    try {
-      await _voiceAdvanced.startRecording();
-      // Attendre 5s ou jusqu'à ce que l'utilisateur arrête
-      await Future.delayed(const Duration(seconds: 5));
-      final audioPath = await _voiceAdvanced.stopRecording();
-
-      if (audioPath == null || !_isActive) {
-        _reset();
-        return;
-      }
-
-      // 2. Envoyer au backend STT
-      state = state.copyWith(state: VoiceConversationState.processingStt);
-      final transcript = await _sendToStt(audioPath);
+    while (_isActive) {
+      // 1. LISTENING — STT natif avec VAD
+      state = const VoiceConversationStatus(
+        state: VoiceConversationState.listening,
+      );
+      final transcript = await _listenWithVad();
 
       if (transcript == null || transcript.isEmpty || !_isActive) {
-        _reset();
-        return;
+        break;
       }
 
-      state = state.copyWith(transcript: transcript);
-      debugPrint('[VoiceConversation] Transcription : $transcript');
+      _pendingTranscript = transcript;
 
-      // 3. Transmettre le texte au caller (chat)
-      // Cette étape est gérée par l'appelant via onTranscript
-      // qui doit appeler sendMessage sur le ChatNotifier.
-      // On arrête ici et on attend la réponse.
-      state = state.copyWith(state: VoiceConversationState.thinking);
+      // 2. THINKING — envoi au chat
+      state = VoiceConversationStatus(
+        state: VoiceConversationState.thinking,
+        transcript: transcript,
+      );
 
-      // Nettoyer le fichier temporaire
       try {
-        await File(audioPath).delete();
-      } catch (_) {}
-    } catch (e) {
-      debugPrint('[VoiceConversation] Erreur : $e');
-      state = state.copyWith(state: VoiceConversationState.error, error: e.toString());
+        final chatNotifier =
+            ref.read(chatNotifierProvider(arg).notifier);
+        await chatNotifier.sendMessage(transcript);
+      } catch (e) {
+        debugPrint('[VoiceConversation] Erreur envoi chat : $e');
+        state = VoiceConversationStatus(
+          state: VoiceConversationState.error,
+          error: e.toString(),
+          transcript: transcript,
+        );
+        break;
+      }
+
+      // 3. Attendre que ref.listen detecte la reponse IA et passe a speaking
+      // Timeout de 60s pour la reponse IA
+      var attempts = 0;
+      while (_isActive &&
+             state.state == VoiceConversationState.thinking &&
+             attempts < 300) {
+        await Future<void>.delayed(const Duration(milliseconds: 200));
+        attempts++;
+      }
+
+      if (!_isActive) break;
+      if (state.state == VoiceConversationState.error) break;
+
+      // 4. Apres speaking, retour a idle puis on relance listening
+      // _speakResponseAndLoop s'occupe de la transition
+    }
+
+    if (_isActive) {
+      _reset();
     }
   }
 
-  /// Appelé par l'UI quand la réponse chat est reçue.
-  Future<void> playResponse(String text) async {
+  /// Ecoute avec VAD (Voice Activity Detection) natif.
+  ///
+  /// Utilise speech_to_text avec pauseFor=2s comme detection de silence.
+  /// Transcription temps reel affichee via l'etat.
+  Future<String?> _listenWithVad() async {
+    final ok = await _voice.ensureInitialized();
+    if (!ok) {
+      debugPrint('[VoiceConversation] STT natif non disponible');
+      return null;
+    }
+
+    await _voice.startListening();
+
+    // Poll temps reel pour mettre a jour le transcript dans l'UI
+    while (_voice.state.isListening && _isActive) {
+      state = state.copyWith(transcript: _voice.state.transcript);
+      await Future<void>.delayed(const Duration(milliseconds: 150));
+    }
+
+    // Attendre que le STT soit vraiment termine et laisser le temps
+    // au dernier resultat final d'arriver avant de relancer quoi que ce soit.
+    var waitCount = 0;
+    while (_voice.state.isListening && _isActive && waitCount < 20) {
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      waitCount++;
+    }
+
+    // Delai supplementaire pour stabiliser le transcript final
+    await Future<void>.delayed(const Duration(milliseconds: 800));
+
+    final finalTranscript = _voice.state.transcript;
+    state = state.copyWith(
+      transcript: finalTranscript,
+      state: VoiceConversationState.processingStt,
+    );
+
+    return finalTranscript.isEmpty ? null : finalTranscript;
+  }
+
+  /// Lit la reponse IA et relance la boucle.
+  Future<void> _speakResponseAndLoop(String text) async {
     if (!_isActive) return;
+
     state = state.copyWith(state: VoiceConversationState.speaking);
 
     try {
-      // Essayer TTS backend d'abord, sinon fallback natif
-      await _voiceBasic.speak(text);
-
-      // Attendre la fin de la lecture
-      await Future.delayed(const Duration(seconds: 1));
-      while (_voiceBasic.state.isSpeaking && _isActive) {
-        await Future.delayed(const Duration(milliseconds: 300));
+      await _voice.speak(text);
+      // Attendre la fin de la lecture TTS
+      while (_voice.state.isSpeaking && _isActive) {
+        await Future<void>.delayed(const Duration(milliseconds: 300));
       }
     } catch (e) {
       debugPrint('[VoiceConversation] TTS erreur : $e');
     }
 
+    // Pause de garde apres le TTS pour eviter que le micro ne capte
+    // le son du haut-parleur (echo) avant de relancer l'ecoute.
+    await Future<void>.delayed(const Duration(milliseconds: 1200));
+
     if (_isActive) {
-      // Relancer la boucle
       state = state.copyWith(state: VoiceConversationState.idle);
-      await startConversation();
+      // La boucle while dans startConversation va relancer listening
     }
   }
 
+  /// Arrete immediatement la conversation vocale.
   void stop() {
     _isActive = false;
-    _voiceAdvanced.stopRecording();
-    _voiceBasic.stopSpeaking();
+    _pendingTranscript = null;
+    _voice.stopListening();
+    _voice.stopSpeaking();
     _reset();
   }
 
   void _reset() {
     state = const VoiceConversationStatus();
   }
-
-  Future<String?> _sendToStt(String audioPath) async {
-    try {
-      final file = File(audioPath);
-      if (!await file.exists()) return null;
-
-      final formData = FormData.fromMap({
-        'audio': await MultipartFile.fromFile(
-          audioPath,
-          filename: p.basename(audioPath),
-        ),
-        'model': 'whisper',
-      });
-
-      final response = await _dio.post('/voice/stt', data: formData);
-      if (response.statusCode == 200 && response.data is Map) {
-        return response.data['text'] as String?;
-      }
-      return null;
-    } on DioException catch (e) {
-      debugPrint('[VoiceConversation] STT backend error : ${e.message}');
-      // Fallback silencieux : retourner null pour que l'UI bascule sur speech_to_text
-      return null;
-    } catch (e) {
-      debugPrint('[VoiceConversation] STT error : $e');
-      return null;
-    }
-  }
 }
 
-final voiceConversationProvider =
-    NotifierProvider<VoiceConversationNotifier, VoiceConversationStatus>(
+final voiceConversationProvider = NotifierProviderFamily<
+    VoiceConversationNotifier, VoiceConversationStatus, String>(
   VoiceConversationNotifier.new,
 );
