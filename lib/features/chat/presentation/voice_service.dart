@@ -88,7 +88,7 @@ class VoiceServiceNotifier extends Notifier<VoiceState> {
       },
       localeId: 'fr_FR',
       listenFor: const Duration(seconds: 30),
-      pauseFor: const Duration(seconds: 3),
+      pauseFor: const Duration(seconds: 1),
     );
   }
 

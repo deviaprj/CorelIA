@@ -134,8 +134,12 @@ class VoiceConversationNotifier
       if (!_isActive) break;
       if (state.state == VoiceConversationState.error) break;
 
-      // 4. Apres speaking, retour a idle puis on relance listening
-      // _speakResponseAndLoop s'occupe de la transition
+      // 4. Attendre explicitement la fin du TTS avant de relancer l'ecoute.
+      //    Sinon le micro se re-ouvre pendant que l'IA parle et boucle en monologue.
+      while (_isActive && state.state == VoiceConversationState.speaking) {
+        await Future<void>.delayed(const Duration(milliseconds: 300));
+      }
+      if (!_isActive) break;
     }
 
     if (_isActive) {
@@ -171,7 +175,7 @@ class VoiceConversationNotifier
     }
 
     // Delai supplementaire pour stabiliser le transcript final
-    await Future<void>.delayed(const Duration(milliseconds: 800));
+    await Future<void>.delayed(const Duration(milliseconds: 400));
 
     final finalTranscript = _voice.state.transcript;
     state = state.copyWith(
@@ -185,6 +189,10 @@ class VoiceConversationNotifier
   /// Lit la reponse IA et relance la boucle.
   Future<void> _speakResponseAndLoop(String text) async {
     if (!_isActive) return;
+
+    // Couper explicitement le micro avant de parler pour eviter
+    // que le STT ne capte la voix de l'IA (echo / monologue).
+    await _voice.stopListening();
 
     state = state.copyWith(state: VoiceConversationState.speaking);
 
