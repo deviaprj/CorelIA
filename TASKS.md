@@ -1,6 +1,6 @@
 # TASKS.md — Suivi AironBot
 
-Dernière mise à jour : 2026-05-04 — Session correctifs majeurs (commit `420b07ba`)
+Dernière mise à jour : 2026-05-04 — Session correctifs majeurs (commits `420b07ba`, `1512d607`)
 
 ## Terminé
 
@@ -10,13 +10,13 @@ Dernière mise à jour : 2026-05-04 — Session correctifs majeurs (commit `420b
 - [x] **Pièces jointes UX** — `AttachmentData` + `SendCallback`, chip preview + ✕, envoi simultané texte + fichier
 - [x] **Web Search** — `useSearch: true` par défaut, `enable_search: true` dans body DeepSeek
 - [x] **Chat bloqué** — `isStreaming: false` forcé dans tous les blocs catch
-- [x] **CLAUDE.md / MEMORY.md** — Documentation architecture vocale, vision, pièces jointes
+- [x] **Analyse fichiers** — BOM UTF-8/UTF-16 dans `_decodeTextFile()`, nom du fichier dans le contexte système
+- [x] **Documentation** — CLAUDE.md (routage, vocal, pièces jointes, erreurs), MEMORY.md, TASKS.md
 
 ## En cours
 
-- [ ] **Analyse fichiers TXT/MD** — Test live de l'extraction et injection contexte pour fichiers texte
 - [ ] **Vérification `deepseek-chat` vision** — Test live pour confirmer que le modèle supporte bien `image_url`
-- [ ] **Gestion fichiers conversation** — Améliorer la persistance du contexte fichier entre les messages
+- [ ] **Persistance contexte fichier** — Le contenu extrait est injecté en système mais pas persisté entre les messages
 
 ## Backlog
 
