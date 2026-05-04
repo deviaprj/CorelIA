@@ -23,9 +23,9 @@
 - [ ] **Fallback search** : S'assurer que SerpAPI n'est utilisé que si `SERPAPI_KEY` est configuré, sinon DuckDuckGo uniquement.
 
 ### 🔴 CRITIQUE — Voix Mains-Libres
-- [ ] **Intégration backend** : Connecter `voice_advanced_service.dart` aux endpoints `/voice/stt` et `/voice/tts` du backend.
 - [ ] **Mode conversation continue** : Bouton "Conversation vocale" qui boucle écoute → STT → chat → TTS → écoute automatiquement.
 - [ ] **UI état vocal** : Afficher clairement les états (écoute, traitement, réponse vocale) avec animations.
+- [ ] **Fallback STT/TTS** : Si Ollama local indisponible, bascule vers `speech_to_text` + `flutter_tts` natifs
 
 ### 🟠 HAUTE — Chat Longue Mémoire
 - [ ] **Pagination messages** : Lazy loading de l'historique (pas de limite 50 côté UI).
