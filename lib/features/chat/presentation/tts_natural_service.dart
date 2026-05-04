@@ -2,13 +2,15 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 
-/// Service TTS 100 % autonome — lit tout le texte d’un coup
+/// Service TTS 100% autonome — lit tout le texte d'un coup
 /// et attend réellement la fin avant de rendre la main.
 class TtsNaturalService {
   final FlutterTts _tts = FlutterTts();
   bool _isSpeaking = false;
-  double _speechRate = 0.50;
-  double _pitch = 1.0;
+  // Vitesse dynamique pour voix énergique mais pas trop rapide (0.65 = +30%)
+  double _speechRate = 0.65;
+  // Pitch plus élevé pour voix plus vivante et joyeuse (1.15 = +15%)
+  double _pitch = 1.15;
   String _language = 'fr-FR';
 
   Future<void> init() async {
@@ -30,7 +32,7 @@ class TtsNaturalService {
     await _tts.setPitch(_pitch);
   }
 
-  /// Supprime les emojis d’un texte pour le TTS.
+  /// Supprime les emojis d'un texte pour le TTS.
   static String stripEmojis(String text) {
     final buffer = StringBuffer();
     for (final rune in text.runes) {
@@ -64,6 +66,29 @@ class TtsNaturalService {
         (rune >= 0x2B50 && rune <= 0x2B55); // stars
   }
 
+  /// Pattern pour URL complète avec http/https et www (réutilisé par stripUrls).
+  static final _urlPattern = RegExp(
+    r'https?://(?:www\.)?([a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)+)',
+    caseSensitive: false,
+  );
+
+  /// Pattern pour citations entre crochets [1], [2], etc. (réutilisé par stripCitations).
+  static final _citationPattern = RegExp(r'\[\d+\]');
+
+  /// Supprime les URLs et les remplace par le nom de domaine seul (sans https/http/www).
+  /// Ex: "https://www.amazon.com" -> "amazon.com"
+  static String stripUrls(String text) {
+    return text.replaceAllMapped(_urlPattern, (match) {
+      final domain = match.group(1);
+      return domain ?? '';
+    });
+  }
+
+  /// Supprime les citations entre crochets [1], [2], etc.
+  static String stripCitations(String text) {
+    return text.replaceAll(_citationPattern, '');
+  }
+
   /// Nettoie le markdown pour le rendu TTS.
   /// Conserve la structure (paragraphes, listes) pour que le moteur natif
   /// fasse les pauses aux retours à la ligne et ponctuations.
@@ -71,56 +96,74 @@ class TtsNaturalService {
     // 1. Supprimer la section Sources et tout ce qui suit le séparateur final
     var working = _stripSourcesSection(text);
 
-    // 2. Supprimer les citations entre crochets [1], [2], etc.
-    working = working.replaceAll(RegExp(r'\[\d+\]'), '');
+    // 2. Supprimer les URLs (remplace par nom de domaine seul)
+    working = stripUrls(working);
 
-    return stripEmojis(working)
-        // Gras et italique → texte brut
-        .replaceAllMapped(RegExp(r'\*\*\*(.+?)\*\*\*'), (m) => m.group(1) ?? '')
+    // 3. Supprimer les citations entre crochets [1], [2], etc.
+    working = stripCitations(working);
+
+    // 4. Supprimer les emojis
+    working = stripEmojis(working);
+
+    // Gras et italique -> texte brut
+    working = working.replaceAllMapped(RegExp(r'\*\*\*(.+?)\*\*\*'), (m) => m.group(1) ?? '')
         .replaceAllMapped(RegExp(r'\*\*(.+?)\*\*'), (m) => m.group(1) ?? '')
         .replaceAllMapped(RegExp(r'\*(.+?)\*'), (m) => m.group(1) ?? '')
         .replaceAllMapped(RegExp(r'__(.+?)__'), (m) => m.group(1) ?? '')
-        .replaceAllMapped(RegExp(r'_(.+?)_'), (m) => m.group(1) ?? '')
-        // Titres → texte + double saut de ligne (pause forte TTS)
-        .replaceAllMapped(
-          RegExp(r'^#{1,6}\s+(.+)$', multiLine: true),
-          (m) => '${m.group(1) ?? ''}\n\n',
-        )
-        // Blocs de code → mention vocale
-        .replaceAllMapped(
-          RegExp(r'`{3}[\s\S]*?`{3}'),
-          (_) => ' [bloc de code] .\n\n',
-        )
-        // Code inline → texte brut
-        .replaceAllMapped(RegExp(r'`(.+?)`'), (m) => m.group(1) ?? '')
-        // Séparateurs → pause
-        .replaceAll(RegExp(r'^-{3,}\s*$', multiLine: true), '\n\n')
-        // Liens markdown → texte seul
-        .replaceAllMapped(RegExp(r'\[(.+?)\]\(.+?\)'), (m) => m.group(1) ?? '')
-        // Images → description
-        .replaceAllMapped(RegExp(r'!\[(.*?)\]\(.+?\)'), (m) {
-          final alt = m.group(1);
-          return alt != null && alt.isNotEmpty ? ' [image: $alt] ' : ' [image] ';
-        })
-        // Listes à puces → item seul sur sa ligne (pause natuelle au \n)
-        .replaceAllMapped(
-          RegExp(r'^\s*[-*+]\s+(.+)$', multiLine: true),
-          (m) => '${m.group(1) ?? ''}\n',
-        )
-        // Listes numérotées → item seul sur sa ligne
-        .replaceAllMapped(
-          RegExp(r'^\s*\d+\.\s+(.+)$', multiLine: true),
-          (m) => '${m.group(1) ?? ''}\n',
-        )
-        // Citations → texte brut
-        .replaceAll(RegExp(r'^>\s+', multiLine: true), '')
-        // HTML basique
-        .replaceAll(RegExp(r'<[^>]+>'), '')
-        // Nettoyage espaces multiples
-        .replaceAll(RegExp(r'[ \t]+'), ' ')
-        // Normaliser sauts de ligne
-        .replaceAll(RegExp(r'\n{3,}'), '\n\n')
-        .trim();
+        .replaceAllMapped(RegExp(r'_(.+?)_'), (m) => m.group(1) ?? '');
+
+    // Titres -> texte + double saut de ligne (pause forte TTS)
+    working = working.replaceAllMapped(
+      RegExp(r'^#{1,6}\s+(.+)$', multiLine: true),
+      (m) => '${m.group(1) ?? ''}\n\n',
+    );
+
+    // Blocs de code -> mention vocale
+    working = working.replaceAllMapped(
+      RegExp(r'`{3}[\s\S]*?`{3}'),
+      (_) => ' [bloc de code] .\n\n',
+    );
+
+    // Code inline -> texte brut
+    working = working.replaceAllMapped(RegExp(r'`(.+?)`'), (m) => m.group(1) ?? '');
+
+    // Séparateurs -> pause
+    working = working.replaceAll(RegExp(r'^-{3,}\s*$', multiLine: true), '\n\n');
+
+    // Liens markdown -> texte seul
+    working = working.replaceAllMapped(RegExp(r'\[(.+?)\]\(.+?\)'), (m) => m.group(1) ?? '');
+
+    // Images -> description
+    working = working.replaceAllMapped(RegExp(r'!\[(.*?)\]\(.+?\)'), (m) {
+      final alt = m.group(1);
+      return alt != null && alt.isNotEmpty ? ' [image: $alt] ' : ' [image] ';
+    });
+
+    // Listes à puces -> item seul sur sa ligne (pause natuelle au \n)
+    working = working.replaceAllMapped(
+      RegExp(r'^\s*[-*+]\s+(.+)$', multiLine: true),
+      (m) => '${m.group(1) ?? ''}\n',
+    );
+
+    // Listes numérotées -> item seul sur sa ligne
+    working = working.replaceAllMapped(
+      RegExp(r'^\s*\d+\.\s+(.+)$', multiLine: true),
+      (m) => '${m.group(1) ?? ''}\n',
+    );
+
+    // Citations -> texte brut
+    working = working.replaceAll(RegExp(r'^>\s+', multiLine: true), '');
+
+    // HTML basique
+    working = working.replaceAll(RegExp(r'<[^>]+>'), '');
+
+    // Nettoyage espaces multiples
+    working = working.replaceAll(RegExp(r'[ \t]+'), ' ');
+
+    // Normaliser sauts de ligne
+    working = working.replaceAll(RegExp(r'\n{3,}'), '\n\n');
+
+    return working.trim();
   }
 
   /// Supprime la section Sources de la fin du texte.
@@ -145,7 +188,7 @@ class TtsNaturalService {
     return result;
   }
 
-  /// Lit tout le texte d’une traite et attend la fin réelle de la parole.
+  /// Lit tout le texte d'une traite et attend la fin réelle de la parole.
   Future<void> speakNaturally(String text) async {
     if (_isSpeaking) await stop();
 
@@ -162,9 +205,7 @@ class TtsNaturalService {
     try {
       await _tts.speak(cleaned);
       // Attendre que la parole se termine ou que stop() soit appelé
-      while (_isSpeaking && !completer.isCompleted) {
-        await Future<void>.delayed(const Duration(milliseconds: 100));
-      }
+      await completer.future;
     } catch (e) {
       debugPrint('[TtsNaturalService] Error during speech: $e');
     } finally {

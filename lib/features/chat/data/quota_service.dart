@@ -2,16 +2,23 @@ import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../main.dart' show isDemoMode;
+
 class QuotaExceededException implements Exception {
   const QuotaExceededException();
   @override
-  String toString() => 'Quota journalier atteint (20 req/jour)';
+  String toString() => 'Quota journalier atteint (100 req/jour en test)';
 }
 
 class QuotaService {
   /// Vérifie et décrémente le quota de l'utilisateur.
   /// Retourne le nombre de requêtes restantes, ou -1 si Pro (illimité).
   Future<int> checkAndDecrement() async {
+    // En mode DEMO, quota illimité (100 req/jour pour les tests)
+    if (isDemoMode) {
+      return 100;
+    }
+
     try {
       final callable = FirebaseFunctions.instance.httpsCallable('checkQuota');
       final result = await callable.call<Map<String, dynamic>>(

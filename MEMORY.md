@@ -41,12 +41,11 @@ Chaque feature suit le pattern :
 
 ### IA & API Keys
 - **DeepSeek-V3** pour le tier gratuit (deepseek-chat)
-- **OpenRouter** pour le tier Pro (Mistral Large 2, Llama 3.3 70B)
 - API keys via `--dart-define` depuis `.env`
 - Clé personnelle DeepSeek stockable dans `SecureStorageService`
 
 ### Quotas
-- Gratuit : 20 requêtes/jour (reset à minuit UTC)
+- Gratuit : 50 requêtes/jour (reset à minuit UTC)
 - Pro : illimité
 - Vérification server-side via Cloud Function `checkQuota`
 - Mode dégradé si Cloud Function indisponible
@@ -135,4 +134,48 @@ firebase functions:secrets:set STRIPE_WEBHOOK_SECRET
 
 ---
 
-*Dernière mise à jour : 2026-03-27*
+## Sessions Récentes
+
+### Session 2026-05-04
+
+#### Bug Critique: Mode Vocal Se Coupe Instantanément
+**Problème**: Le micro n'était pas activé quand l'utilisateur déclenchait le mode vocal. Le code affichait "Écoute en cours..." mais n'enregistrait rien.
+
+**Cause**: Le code `startListening()` n'verifie pas la permission du microphone avant d'appeler `_stt.listen()`.
+
+**Solution**: Ajout de la vérification explicite de permission dans `VoiceServiceNotifier.startListening()`:
+```dart
+final status = await Permission.microphone.status;
+if (!status.isGranted) {
+  final result = await Permission.microphone.request();
+  if (!result.isGranted) {
+    state = state.copyWith(isListening: false);
+    return;
+  }
+}
+```
+
+**Optimisation**: Permission mise en cache (`_microphonePermissionGranted`) pour éviter les vérifications redondantes.
+
+#### Code Quality & Efficiency Fixes (via /simplify agent)
+1. **RegExp recreé à chaque appel** - Fix: `static final` pour `_urlPattern` et `_citationPattern` dans `tts_natural_service.dart`
+2. **Polling loop inutile dans `speakNaturally()`** - Fix: utiliser directement `completer.future` au lieu de polling
+3. **Timer unused `_timeoutTimer`** - Fix: suppression du champ et du cancel
+4. **Polling loop trop agressif (150ms)** - Fix: optimisé avec mise à jour conditionnelle du transcript
+5. **Permission check on every call** - Fix: cached after first grant
+
+#### Files Modified
+- `lib/features/chat/presentation/voice_conversation_service.dart`
+- `lib/features/chat/presentation/voice_service.dart`
+- `lib/features/chat/presentation/tts_natural_service.dart`
+- `lib/features/chat/presentation/aurora_splash.dart`
+- `lib/features/chat/presentation/chat_screen.dart`
+- `lib/features/chat/data/quota_service.dart`
+- `lib/features/chat/data/file_quota_service.dart`
+- `lib/features/chat/data/image_upload_service.dart`
+- `lib/features/chat/domain/message.dart`
+- `lib/features/chat/data/ollama_local_client.dart` (supprimé)
+
+---
+
+*Dernière mise à jour : 2026-05-04*

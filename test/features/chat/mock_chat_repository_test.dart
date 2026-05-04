@@ -1,6 +1,8 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:airon_bot/features/chat/data/mock_chat_repository.dart';
+import 'package:airon_bot/features/chat/domain/conversation.dart';
 import 'package:airon_bot/features/chat/domain/message.dart';
+import 'dart:async';
 
 void main() {
   late MockChatRepository repo;
@@ -130,16 +132,26 @@ void main() {
 
   group('MockChatRepository - Streams', () {
     test('watchConversations emits on create', () async {
-      final stream = repo.watchConversations('user1');
+      final completer = Completer<List<Conversation>>();
+      final stream = repo.watchConversations('user1').listen(
+        (data) {
+          if (data.isNotEmpty && !completer.isCompleted) {
+            completer.complete(data);
+          }
+        },
+        onError: (_) {},
+        onDone: () {},
+      );
 
       // Schedule a create
       Future<void>.delayed(
-        const Duration(milliseconds: 50),
+        const Duration(milliseconds: 100),
         () => repo.createConversation(userId: 'user1', title: 'New'),
       );
 
-      final first = await stream.first;
-      expect(first, isNotEmpty);
+      final result = await completer.future;
+      expect(result, isNotEmpty);
+      await stream.cancel();
     });
 
     test('watchMessages emits on addMessage', () async {
@@ -148,11 +160,20 @@ void main() {
         title: 'Chat',
       );
 
-      final stream = repo.watchMessages(conv.id);
+      final completer = Completer<List<Message>>();
+      final stream = repo.watchMessages(conv.id).listen(
+        (data) {
+          if (data.isNotEmpty && !completer.isCompleted) {
+            completer.complete(data);
+          }
+        },
+        onError: (_) {},
+        onDone: () {},
+      );
 
       // Schedule a message
       Future<void>.delayed(
-        const Duration(milliseconds: 50),
+        const Duration(milliseconds: 100),
         () => repo.addMessage(
           conversationId: conv.id,
           role: Role.user,
@@ -160,8 +181,9 @@ void main() {
         ),
       );
 
-      final first = await stream.first;
-      expect(first, isNotEmpty);
+      final result = await completer.future;
+      expect(result, isNotEmpty);
+      await stream.cancel();
     });
   });
 

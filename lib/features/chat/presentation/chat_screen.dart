@@ -5,6 +5,7 @@ import 'chat_notifier.dart';
 import 'chat_bubble.dart';
 import 'input_bar.dart';
 import 'voice_conversation_service.dart';
+import 'aurora_splash.dart';
 import '../data/image_upload_service.dart';
 import '../data/file_upload_service.dart';
 import '../data/file_quota_service.dart';
@@ -107,85 +108,110 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
             ),
         ],
       ),
-      body: Column(
+      body: Stack(
         children: [
-          // Indicateur recherche web
-          if (state.isSearching)
-            Container(
-              width: double.infinity,
-              color: Theme.of(context).colorScheme.primaryContainer,
-              padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 12),
-              child: Row(
-                children: [
-                  SizedBox(
-                    width: 14,
-                    height: 14,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: Theme.of(context).colorScheme.primary,
-                    ),
+          Column(
+            children: [
+              // Indicateur recherche web
+              if (state.isSearching)
+                Container(
+                  width: double.infinity,
+                  color: Theme.of(context).colorScheme.primaryContainer,
+                  padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 12),
+                  child: Row(
+                    children: [
+                      SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Theme.of(context).colorScheme.primary,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Recherche web en cours...',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Theme.of(context).colorScheme.onPrimaryContainer,
+                        ),
+                      ),
+                    ],
                   ),
-                  const SizedBox(width: 8),
-                  Text(
-                    'Recherche web en cours...',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Theme.of(context).colorScheme.onPrimaryContainer,
-                    ),
-                  ),
-                ],
+                ),
+              // Indicateur conversation vocale (splash en overlay, banner seul ici)
+              if (isVoiceActive)
+                _VoiceConversationBannerOnly(onStop: () => voiceConvNotifier.stop()),
+              Expanded(
+                child: state.displayedMessages.isEmpty
+                    ? const _WelcomeHint()
+                    : ListView.builder(
+                        controller: _scrollController,
+                        padding: const EdgeInsets.symmetric(
+                            vertical: 8, horizontal: 12),
+                        itemCount: state.canLoadMore
+                            ? state.displayedMessages.length + 1
+                            : state.displayedMessages.length,
+                        itemBuilder: (_, i) {
+                          if (state.canLoadMore && i == 0) {
+                            return _LoadMoreButton(
+                              onTap: notifier.loadMoreHistory,
+                            );
+                          }
+                          final msgIdx = state.canLoadMore ? i - 1 : i;
+                          return ChatBubble(
+                            message: state.displayedMessages[msgIdx],
+                          );
+                        },
+                      ),
+              ),
+              // Bandeau publicitaire (mobile uniquement, pas extension)
+              if (!isExtension) const AdBannerWidget(),
+              // Toolbar d'actions secondaires (visible, mutualisee)
+              _ChatToolbar(
+                useSearch: state.useSearch,
+                isStreaming: state.isStreaming,
+                isVoiceActive: isVoiceActive,
+                onToggleSearch: notifier.toggleSearch,
+                onAttachment: () => _showAttachmentSheet(notifier),
+                onToggleVoiceConv: () async {
+                  if (isVoiceActive) {
+                    await voiceConvNotifier.stop();
+                  } else {
+                    voiceConvNotifier.startConversation();
+                  }
+                },
+              ),
+              InputBar(
+                isLoading: state.isStreaming,
+                onSend: (text) => notifier.sendMessage(text),
+              ),
+            ],
+          ),
+          // Splash overlay - cache la conversation quand vocal est actif
+          // ignorePointer: true permet de cliquer à travers le splash
+          if (isVoiceActive)
+            Positioned.fill(
+              child: IgnorePointer(
+                ignoring: true,
+                child: SizedBox.expand(
+                  child: AuroraSplash(conversationId: widget.conversationId),
+                ),
               ),
             ),
-          // Indicateur conversation vocale
+          // Bouton flottant pour ajouter une photo (visible meme en mode vocal)
           if (isVoiceActive)
-            _VoiceConversationBanner(
-              status: voiceConv,
-              onStop: () => voiceConvNotifier.stop(),
+            Positioned(
+              right: 16,
+              bottom: 80, // Au-dessus du InputBar
+              child: FloatingActionButton(
+                backgroundColor: Theme.of(context).colorScheme.primary,
+                foregroundColor: Colors.white,
+                onPressed: () => _showAttachmentSheet(notifier),
+                child: const Icon(Icons.camera_alt),
+                tooltip: 'Prendre une photo',
+              ),
             ),
-          Expanded(
-            child: state.displayedMessages.isEmpty
-                ? const _WelcomeHint()
-                : ListView.builder(
-                    controller: _scrollController,
-                    padding: const EdgeInsets.symmetric(
-                        vertical: 8, horizontal: 12),
-                    itemCount: state.canLoadMore
-                        ? state.displayedMessages.length + 1
-                        : state.displayedMessages.length,
-                    itemBuilder: (_, i) {
-                      if (state.canLoadMore && i == 0) {
-                        return _LoadMoreButton(
-                          onTap: notifier.loadMoreHistory,
-                        );
-                      }
-                      final msgIdx = state.canLoadMore ? i - 1 : i;
-                      return ChatBubble(
-                        message: state.displayedMessages[msgIdx],
-                      );
-                    },
-                  ),
-          ),
-          // Bandeau publicitaire (mobile uniquement, pas extension)
-          if (!isExtension) const AdBannerWidget(),
-          // Toolbar d'actions secondaires (visible, mutualisee)
-          _ChatToolbar(
-            useSearch: state.useSearch,
-            isStreaming: state.isStreaming,
-            isVoiceActive: isVoiceActive,
-            onToggleSearch: notifier.toggleSearch,
-            onAttachment: () => _showAttachmentSheet(notifier),
-            onToggleVoiceConv: () async {
-              if (isVoiceActive) {
-                await voiceConvNotifier.stop();
-              } else {
-                voiceConvNotifier.startConversation();
-              }
-            },
-          ),
-          InputBar(
-            isLoading: state.isStreaming,
-            onSend: (text) => notifier.sendMessage(text),
-          ),
         ],
       ),
     );
@@ -198,16 +224,17 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         : await service.pickFromGallery();
     if (result == null || !mounted) return;
 
-    // Envoyer le message avec image au ChatNotifier
+    // Stocker l'image comme contexte, attendre la demande de l'utilisateur
+    // Envoyer un message indicatif
     await notifier.sendMessage(
-      'Decris cette image en detail.',
+      '[Image chargée - Prête à etre utilisee]',
       imageBase64: result.base64,
       imageMimeType: result.mimeType,
     );
   }
 
   Future<void> _handleFilePick(ChatNotifier notifier) async {
-    final isPro = await ref.read(isProProvider.future).catchError((_) => false);
+    final isPro = await notifier.ref.read(isProProvider.future).catchError((_) => false);
     final service = FileUploadService();
     try {
       final result = await service.pickAndExtract(isPro: isPro);
@@ -463,6 +490,35 @@ class _VoiceConversationBanner extends StatelessWidget {
             onPressed: onStop,
             tooltip: 'Arrêter',
             iconSize: 18,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Banner de contrôle solo (bouton stop) pour le mode vocal
+class _VoiceConversationBannerOnly extends StatelessWidget {
+  const _VoiceConversationBannerOnly({required this.onStop});
+
+  final VoidCallback onStop;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Container(
+      width: double.infinity,
+      color: Theme.of(context).colorScheme.errorContainer.withOpacity(0.4),
+      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.end,
+        children: [
+          IconButton(
+            icon: const Icon(Icons.stop, size: 20),
+            color: Theme.of(context).colorScheme.error,
+            onPressed: onStop,
+            tooltip: 'Arrêter le vocal',
+            iconSize: 20,
           ),
         ],
       ),

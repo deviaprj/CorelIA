@@ -22,7 +22,7 @@ class ChatApiException implements Exception {
 /// Responsabilités :
 /// - Envoyer les messages au backend avec JWT auth
 /// - Recevoir le streaming SSE des réponses
-/// - Gérer les fallback silencieux (Ollama local → Backend → Direct API)
+/// - Gérer les fallback silencieux (DeepSeek → OpenRouter → Fallback local)
 class ChatApiService {
   final Dio _dio;
 

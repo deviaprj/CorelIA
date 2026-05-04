@@ -5,13 +5,13 @@ import 'package:shared_preferences/shared_preferences.dart';
 class FileQuotaExceededException implements Exception {
   const FileQuotaExceededException();
   @override
-  String toString() => 'Quota fichiers journalier atteint (2/jour). Passez en Pro !';
+  String toString() => 'Quota fichiers journalier atteint (10/jour). Passez en Pro !';
 }
 
 /// Service de quota local pour les uploads de fichiers.
 /// 100% autonome — ne depend pas du backend.
 class FileQuotaService {
-  static const int freeUploadsPerDay = 2;
+  static const int freeUploadsPerDay = 10;
   static const String _prefsKey = 'file_upload_count';
   static const String _prefsDateKey = 'file_upload_date';
 

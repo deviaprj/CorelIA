@@ -43,7 +43,7 @@ class VoiceConversationStatus {
 /// 1. LISTENING — speech_to_text natif avec VAD (pauseFor = silence detection)
 /// 2. THINKING — envoi automatique au ChatNotifier
 /// 3. SPEAKING — TTS naturel quand la reponse IA arrive (detectee via messagesStream)
-/// 4. IDLE — retour automatique pour conversation continue
+/// 4. Boucle continue tant que l'utilisateur parle
 ///
 /// Aucun appel backend — tout est natif : speech_to_text + flutter_tts.
 class VoiceConversationNotifier
@@ -51,6 +51,14 @@ class VoiceConversationNotifier
   late final VoiceServiceNotifier _voice;
   bool _isActive = false;
   String? _pendingTranscript;
+
+  // Delais constants pour éviter les magic numbers
+  static const _pollInterval = Duration(milliseconds: 150);
+  static const _sttFinalWait = Duration(milliseconds: 100);
+  static const _sttMaxWait = 30;
+  static const _ttsPollInterval = Duration(milliseconds: 300);
+  static const _postTtsGuard = Duration(milliseconds: 500);
+  static const _stopDelay = Duration(milliseconds: 200);
 
   @override
   VoiceConversationStatus build(String conversationId) {
@@ -85,7 +93,6 @@ class VoiceConversationNotifier
 
   /// Demarre une boucle conversation vocale mains-libres.
   Future<void> startConversation() async {
-    if (_isActive) return;
     _isActive = true;
 
     while (_isActive) {
@@ -95,8 +102,11 @@ class VoiceConversationNotifier
       );
       final transcript = await _listenWithVad();
 
+      // Si transcript vide ou arret utilisateur
       if (transcript == null || transcript.isEmpty || !_isActive) {
-        break;
+        if (!_isActive) break;
+        // Si arret manuel, quitter directement
+        continue;
       }
 
       _pendingTranscript = transcript;
@@ -122,79 +132,30 @@ class VoiceConversationNotifier
       }
 
       // 3. Attendre que ref.listen detecte la reponse IA et passe a speaking
-      // Timeout de 60s pour la reponse IA
-      var attempts = 0;
-      while (_isActive &&
-             state.state == VoiceConversationState.thinking &&
-             attempts < 300) {
-        await Future<void>.delayed(const Duration(milliseconds: 200));
-        attempts++;
+      while (_isActive && state.state == VoiceConversationState.thinking) {
+        await Future<void>.delayed(_ttsPollInterval);
       }
 
       if (!_isActive) break;
       if (state.state == VoiceConversationState.error) break;
 
-      // 4. Attendre explicitement la fin du TTS avant de relancer l'ecoute.
-      //    Sinon le micro se re-ouvre pendant que l'IA parle et boucle en monologue.
+      // 4. Attendre explicitement la fin du TTS avant de relancer l'ecoute
       while (_isActive && state.state == VoiceConversationState.speaking) {
         await Future<void>.delayed(const Duration(milliseconds: 300));
       }
       if (!_isActive) break;
+
+      // Boucle continue - on retourne au etat listening
     }
 
-    // Forcer le reset quel que soit l'etat pour eviter que le state
-    // reste bloque sur speaking/listening quand on arrete manuellement.
     _reset();
-  }
-
-  /// Ecoute avec VAD (Voice Activity Detection) natif.
-  ///
-  /// Utilise speech_to_text avec pauseFor=3s comme detection de silence.
-  /// Transcription temps reel affichee via l'etat.
-  Future<String?> _listenWithVad() async {
-    final ok = await _voice.ensureInitialized();
-    if (!ok) {
-      debugPrint('[VoiceConversation] STT natif non disponible');
-      return null;
-    }
-
-    await _voice.startListening();
-
-    // Poll temps reel pour mettre a jour le transcript dans l'UI
-    while (_voice.state.isListening && _isActive) {
-      state = state.copyWith(transcript: _voice.state.transcript);
-      await Future<void>.delayed(const Duration(milliseconds: 150));
-    }
-
-    // Attendre que le STT soit vraiment termine et laisser le temps
-    // au dernier resultat final d'arriver avant de relancer quoi que ce soit.
-    var waitCount = 0;
-    while (_voice.state.isListening && _isActive && waitCount < 20) {
-      await Future<void>.delayed(const Duration(milliseconds: 100));
-      waitCount++;
-    }
-
-    // Delai supplementaire pour stabiliser le transcript final
-    await Future<void>.delayed(const Duration(milliseconds: 400));
-
-    final finalTranscript = _voice.state.transcript;
-    // Ne pas changer le state si on a ete arrete manuellement
-    if (_isActive) {
-      state = state.copyWith(
-        transcript: finalTranscript,
-        state: VoiceConversationState.processingStt,
-      );
-    }
-
-    return finalTranscript.isEmpty ? null : finalTranscript;
   }
 
   /// Lit la reponse IA et relance la boucle.
   Future<void> _speakResponseAndLoop(String text) async {
     if (!_isActive) return;
 
-    // Couper explicitement le micro avant de parler pour eviter
-    // que le STT ne capte la voix de l'IA (echo / monologue).
+    // Couper explicitement le micro avant de parler
     await _voice.stopListening();
 
     state = state.copyWith(state: VoiceConversationState.speaking);
@@ -210,13 +171,52 @@ class VoiceConversationNotifier
     }
 
     // Pause de garde apres le TTS pour eviter que le micro ne capte
-    // le son du haut-parleur (echo) avant de relancer l'ecoute.
-    // Si l'utilisateur a arrete, ne pas attendre inutilement.
+    // le son du haut-parleur (echo)
     if (_isActive) {
-      await Future<void>.delayed(const Duration(milliseconds: 1200));
-      state = state.copyWith(state: VoiceConversationState.idle);
-      // La boucle while dans startConversation va relancer listening
+      await Future<void>.delayed(const Duration(milliseconds: 500));
     }
+  }
+
+  /// Ecoute avec VAD (Voice Activity Detection) natif.
+  Future<String?> _listenWithVad() async {
+    final ok = await _voice.ensureInitialized();
+    if (!ok) {
+      debugPrint('[VoiceConversation] STT natif non disponible');
+      return null;
+    }
+
+    // Reset du transcript avant de commencer
+    _voice.state = VoiceState(transcript: '');
+    await _voice.startListening();
+
+    // Poll temps reel pour mettre a jour le transcript dans l'UI
+    while (_voice.state.isListening && _isActive) {
+      final newTranscript = _voice.state.transcript;
+      if (newTranscript != state.transcript) {
+        state = state.copyWith(transcript: newTranscript);
+      }
+      await Future<void>.delayed(_pollInterval);
+    }
+
+    // Attendre que le STT soit vraiment termine
+    for (var i = 0; i < _sttMaxWait; i++) {
+      if (!_voice.state.isListening || !_isActive) break;
+      await Future<void>.delayed(_sttFinalWait);
+    }
+
+    // Delai supplementaire pour stabiliser le transcript final
+    await Future<void>.delayed(_postTtsGuard);
+
+    final finalTranscript = _voice.state.transcript;
+    // Ne pas changer le state si on a ete arrete manuellement
+    if (_isActive) {
+      state = state.copyWith(
+        transcript: finalTranscript,
+        state: VoiceConversationState.processingStt,
+      );
+    }
+
+    return finalTranscript.isEmpty ? null : finalTranscript;
   }
 
   /// Arrete immediatement la conversation vocale.
@@ -225,10 +225,17 @@ class VoiceConversationNotifier
     _pendingTranscript = null;
     await _voice.stopListening();
     await _voice.stopSpeaking();
-    _voice.forceReset();
-    _reset();
-    // Laisser le temps au plugin natif de liberer le micro
-    await Future<void>.delayed(const Duration(milliseconds: 400));
+    state = const VoiceConversationStatus(state: VoiceConversationState.idle);
+    await Future<void>.delayed(_stopDelay);
+  }
+
+  /// Toggle pour reactivuer le mode vocal apres un arret
+  Future<void> toggle() async {
+    if (_isActive) {
+      await stop();
+    } else {
+      await startConversation();
+    }
   }
 
   void _reset() {

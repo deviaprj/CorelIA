@@ -33,11 +33,15 @@ class Message {
     this.searchSources,
   });
 
-  /// Convertit en format API (texte ou multimodal si image presente).
-  /// Utilise le format OpenAI standard (image_url avec data: URI).
+  /// Convertit en format API compatible DeepSeek.
+  ///
+  /// DeepSeek-V3 accepte le format texte simple ou le format multimodal avec images en base64.
+  /// Format supporté : {"role": "user", "content": [{"type": "image_url", "image_url": {"url": "..."}}]}
   Map<String, dynamic> toApiMap() {
     if (imageBase64 != null && imageBase64!.isNotEmpty) {
       final mime = imageMimeType ?? 'image/jpeg';
+      // Format compatible DeepSeek (et OpenAI)
+      // Utilise le format "content" tableau avec image_url
       return {
         'role': role.name,
         'content': [
@@ -47,13 +51,29 @@ class Message {
               'url': 'data:$mime;base64,$imageBase64',
             },
           },
-          {
-            'type': 'text',
-            'text': content,
-          },
+          if (content.isNotEmpty && content.length < 500)
+            {
+              'type': 'text',
+              'text': content,
+            }
+          else if (content.isNotEmpty)
+            {
+              'type': 'text',
+              'text': 'Image jointe. $content',
+            }
         ],
       };
     }
+    // Format texte simple
+    return {
+      'role': role.name,
+      'content': content,
+    };
+  }
+
+  /// Convertit en format texte seul (pour DeepSeek sans support d'images).
+  /// Utile si l'API refuse le format multimodal.
+  Map<String, dynamic> toApiMapTextOnly() {
     return {
       'role': role.name,
       'content': content,

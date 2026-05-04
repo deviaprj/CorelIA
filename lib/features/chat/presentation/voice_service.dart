@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
+import 'package:permission_handler/permission_handler.dart';
 import '../../../core/providers/app_providers.dart';
 import 'tts_natural_service.dart';
 
@@ -76,8 +77,29 @@ class VoiceServiceNotifier extends Notifier<VoiceState> {
     return state.isAvailable;
   }
 
+  // Cached permission status to avoid repeated checks
+  bool _microphonePermissionGranted = false;
+
   Future<void> startListening() async {
     if (!state.isAvailable || state.isListening) return;
+
+    // Skip permission check if already granted (cached)
+    if (!_microphonePermissionGranted) {
+      final status = await Permission.microphone.status;
+      if (!status.isGranted) {
+        debugPrint('[VoiceService] Demande permission microphone');
+        final result = await Permission.microphone.request();
+        if (!result.isGranted) {
+          debugPrint('[VoiceService] Permission microphone refusée');
+          state = state.copyWith(isListening: false);
+          return;
+        }
+        _microphonePermissionGranted = true;
+      } else {
+        _microphonePermissionGranted = true;
+      }
+    }
+
     state = state.copyWith(isListening: true, transcript: '');
     await _stt.listen(
       onResult: (result) {
@@ -87,8 +109,8 @@ class VoiceServiceNotifier extends Notifier<VoiceState> {
         );
       },
       localeId: 'fr_FR',
-      listenFor: const Duration(seconds: 30),
-      pauseFor: const Duration(seconds: 3),
+      listenFor: const Duration(seconds: 120), // 2 minutes d'écoute
+      pauseFor: const Duration(seconds: 10), // 10 secondes de silence avant arret
     );
   }
 
@@ -122,6 +144,7 @@ class VoiceServiceNotifier extends Notifier<VoiceState> {
   void forceReset() {
     _stt.stop();
     _tts.stop();
+    _microphonePermissionGranted = false;
     state = state.copyWith(isListening: false, isSpeaking: false, transcript: '');
   }
 }

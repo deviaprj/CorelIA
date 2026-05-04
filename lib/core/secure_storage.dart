@@ -75,5 +75,4 @@ abstract class StorageKeys {
   static const themeMode = 'theme_mode';
   static const ttsEnabled = 'tts_enabled';
   static const speechLang = 'speech_lang';
-  static const ollamaLocalUrl = 'ollama_local_url';
 }

@@ -67,8 +67,20 @@ class ImageUploadService {
 
       // Compression supplementaire si necessaire
       var compressedBytes = bytes;
-      if (originalSize > 2 * 1024 * 1024) {
-        // > 2MB : compresser davantage
+      if (originalSize > 5 * 1024 * 1024) {
+        // > 5MB : compresser davantage pour DeepSeek (limite recommandee)
+        final result = await FlutterImageCompress.compressWithFile(
+          file.absolute.path,
+          minWidth: 1024,
+          minHeight: 1024,
+          quality: 60,
+          format: CompressFormat.jpeg,
+        );
+        if (result != null) {
+          compressedBytes = result;
+        }
+      } else if (originalSize > 2 * 1024 * 1024) {
+        // 2-5MB : compresser modérément
         final result = await FlutterImageCompress.compressWithFile(
           file.absolute.path,
           minWidth: 1280,
@@ -81,9 +93,9 @@ class ImageUploadService {
         }
       }
 
-      // Limite : 5MB max pour gratuit, 20MB pour le base64 API
-      if (compressedBytes.length > 20 * 1024 * 1024) {
-        throw const ImageUploadException('Image trop volumineuse (max 20MB)');
+      // Limite : 5MB max recommande pour DeepSeek API (base64)
+      if (compressedBytes.length > 5 * 1024 * 1024) {
+        throw const ImageUploadException('Image trop volumineuse (max 5MB recommande)');
       }
 
       final base64 = base64Encode(compressedBytes);
