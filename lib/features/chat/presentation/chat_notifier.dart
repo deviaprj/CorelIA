@@ -257,6 +257,7 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
             isPro,
             searchResults: searchResults,
             fileContent: fileContent,
+            fileName: fileName,
           );
 
           await for (final token in stream) {
@@ -360,6 +361,7 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
     bool isPro, {
     List<WebSearchResult>? searchResults,
     String? fileContent,
+    String? fileName,
   }) async {
     // ── 1. Construire l'historique ───────────────────────────────────────
     final historyMessages = state.messages
@@ -377,13 +379,15 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
       final truncated = fileContent.length > maxChars
           ? '${fileContent.substring(0, maxChars)}... [tronque]'
           : fileContent;
+      final fileLabel = fileName != null ? 'Fichier : $fileName' : 'Document';
       historyMessages.insert(0, Message(
         id: 'file_context_${DateTime.now().millisecondsSinceEpoch}',
         conversationId: arg,
         role: Role.system,
         content:
-            "L'utilisateur a fourni un document. "
-            'Utilise son contenu ci-dessous pour repondre '
+            "$fileLabel\n\n"
+            "Contenu du document fourni par l'utilisateur. "
+            'Utilise ce contenu pour repondre '
             "a la question de l'utilisateur.\n\n"
             '$truncated',
         createdAt: DateTime.now(),

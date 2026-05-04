@@ -140,11 +140,101 @@ Required in `.env` (never commit):
 
 **Security**: Rules enforce user-owned data access
 
-## Quality Guidelines (from .github/skills/)
+## AI Models & Routing
 
-- **Architecture**: MVVM + Riverpod
-- **Responsiveness**: 100% responsive (mobile/web)
-- **Lint**: `very_good_analysis` package
-- **Performance**: Target <16ms frames (Flame charts)
-- **Coverage**: 80%+ via CI (GitHub Actions)
-- **Sync**: All UI/logic shared between app/extension; Firebase listeners for realtime sync
+**DeepSeek** (`lib/features/chat/data/ai_client.dart`):
+- `deepseek-v4-flash` — texte (gratuit, par défaut)
+- `deepseek-chat` — texte + vision (fallback image si pas OpenRouter)
+- Paramètres : `stream`, `max_tokens`, `enable_search`
+- Endpoint : `https://api.deepseek.com/v1/chat/completions`
+
+**OpenRouter** (Pro, `lib/features/chat/data/ai_client.dart`):
+- `mistralai/mistral-large-2407` — texte Pro
+- `openai/gpt-4o-mini` — vision Pro
+- Headers obligatoires : `HTTP-Referer`, `X-Title`
+
+**Routage des requêtes** (`_getDirectAiStream` dans `chat_notifier.dart`):
+1. **Image détectée** (`content` est un `List`) → `_getVisionStream()`
+   - OpenRouter GPT-4o-mini (si clé dispo)
+   - Sinon DeepSeek `deepseek-chat` (modèle vision)
+   - Sinon `AiException` avec message clair
+2. Pro sans image → OpenRouter Mistral
+3. Free sans image → DeepSeek V4 Flash
+
+**Format image** (`message.dart:toApiMap()`):
+```json
+{
+  "role": "user",
+  "content": [
+    {"type": "text", "text": "..."},
+    {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,..."}}
+  ]
+}
+```
+- Texte placé AVANT l'image dans le tableau `content`
+- Limite : 1 MB (raw bytes), vérification base64 < 1.5 MB
+- MIME types supportés : JPEG, PNG, WebP, GIF, BMP
+
+## Voice Mode Architecture
+
+**Deux modes distincts** :
+1. **Dictée** (bouton micro dans `InputBar`) → `VoiceServiceNotifier.startListening()`
+2. **Conversation vocale mains-libres** (toggle "Vocal ON/OFF" dans toolbar) → `VoiceConversationNotifier.startConversation()`
+
+**VoiceServiceNotifier** (`lib/features/chat/presentation/voice_service.dart`):
+- Instance `SpeechToText` fraîche créée à chaque `startListening()` via `_createAndInitStt()`
+- L'ancienne instance est détruite proprement (`stop()` puis `null`)
+- Permission micro : cache `_microphonePermissionGranted`, reset dans `forceReset()`
+- Timeout : `listenFor: 120s`, silence : `pauseFor: 10s`
+- `listenMode: ListenMode.dictation` pour écoute continue
+
+**VoiceConversationNotifier** (`lib/features/chat/presentation/voice_conversation_service.dart`):
+- Boucle : `listening → thinking → speaking → idle → listening`
+- `_speakResponseAndLoop()` : stop micro → TTS → pause anti-echo 500ms → **state = idle** (CRITIQUE : débloque la boucle)
+- Max 3 échecs STT consécutifs → état `error` (pas de boucle infinie)
+- `_listenWithVad()` : retourne `null` si STT indisponible, `""` si silence
+- `_pendingTranscript` protège contre les doublons de callback
+
+**TTS** (`lib/features/chat/presentation/tts_natural_service.dart`):
+- `flutter_tts` natif, vitesse par défaut : 0.65
+- Nettoyage markdown : strip URLs, citations `[n]`, emojis, formatting
+- `speakNaturally()` : nettoie → lit → attend la fin via `Completer`
+
+## Attachment UX (pièces jointes)
+
+**Nouveau flux** (refonte 2026-05-04) :
+1. Pick image/fichier → stocké dans `_pendingAttachment` (état `_ChatScreenState`)
+2. Chip affiché dans `InputBar` avec nom du fichier + bouton ✕
+3. L'utilisateur tape sa question
+4. Envoi → `SendCallback(text, imageBase64:, imageMimeType:, fileName:, fileContent:)`
+5. Texte + pièce jointe partent ensemble en un seul message
+
+**Classes** (`input_bar.dart`) :
+- `AttachmentData` : `imageBase64`, `imageMimeType`, `fileName`, `fileContent`, `previewLabel`
+- `SendCallback` = `void Function(String, {String? imageBase64, ...})`
+
+**Fichiers supportés** : PDF, DOCX, XLSX, TXT, CSV, MD
+- Extraction texte côté client (via `file_upload_service.dart`)
+- Limites : 5 MB gratuit, 50 MB Pro
+- Le contenu extrait est injecté comme message `system` dans l'historique
+
+## Error Handling
+
+**Exceptions** (`ai_client.dart`):
+- `AiException` : porte le `statusCode` HTTP + message
+- 401 → "Clé API invalide", 429 → "Trop de requêtes", 400 → "Erreur API..."
+
+**Formatage utilisateur** (`chat_notifier.dart:_formatAiError()`):
+- Erreurs "image" / "image_url" → message clair (pas de JSON brut)
+- Erreurs 429 → "Limite de requêtes atteinte"
+- Clé API → message conservé tel quel
+- Autres → "Erreur IA. Réessayez."
+
+**isStreaming** : forcé à `false` dans TOUS les blocs catch + finally
+
+## Known Limitations / TODO
+
+- [ ] Analyse fichiers TXT/MD : tester l'injection comme contexte conversationnel
+- [ ] Vision DeepSeek : `deepseek-chat` peut rejeter `image_url` selon version API
+- [ ] Documents volumineux : tronqués à 15000 caractères dans le contexte system
+- [ ] Pas de upload Firebase Storage pour les images (base64 consommé directement)

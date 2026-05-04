@@ -85,7 +85,7 @@ class FileUploadService {
         case 'txt':
         case 'csv':
         case 'md':
-          return utf8.decode(bytes, allowMalformed: true);
+          return _decodeTextFile(bytes);
         default:
           throw FileUploadException('Format non supporte: .$ext');
       }
@@ -93,6 +93,25 @@ class FileUploadService {
       debugPrint('[FileUploadService] Extraction error: $e');
       throw FileUploadException('Erreur extraction $name: $e');
     }
+  }
+
+  /// Decode un fichier texte en gerant le BOM UTF-8/UTF-16.
+  String _decodeTextFile(Uint8List bytes) {
+    if (bytes.length >= 3 &&
+        bytes[0] == 0xEF &&
+        bytes[1] == 0xBB &&
+        bytes[2] == 0xBF) {
+      return utf8.decode(bytes.sublist(3), allowMalformed: true);
+    }
+    if (bytes.length >= 2) {
+      if (bytes[0] == 0xFE && bytes[1] == 0xFF) {
+        return utf8.decode(bytes.sublist(2), allowMalformed: true);
+      }
+      if (bytes[0] == 0xFF && bytes[1] == 0xFE) {
+        return utf8.decode(bytes.sublist(2), allowMalformed: true);
+      }
+    }
+    return utf8.decode(bytes, allowMalformed: true);
   }
 
   String _extractPdf(Uint8List bytes) {
