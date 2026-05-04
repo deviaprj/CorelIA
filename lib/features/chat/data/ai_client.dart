@@ -24,13 +24,15 @@ class DeepSeekClient {
     required List<Map<String, dynamic>> messages,
     String? systemPrompt,
     int maxTokens = AppConstants.maxTokens,
+    bool enableSearch = true,
+    String? model,
   }) async* {
     if (apiKey.isEmpty) {
       throw const AiException('Clé API DeepSeek manquante', statusCode: 401);
     }
 
-    final body = jsonEncode({
-      'model': AppConstants.deepSeekModel,
+    final bodyMap = <String, dynamic>{
+      'model': model ?? AppConstants.deepSeekModel,
       'max_tokens': maxTokens,
       'stream': true,
       'messages': [
@@ -38,7 +40,13 @@ class DeepSeekClient {
           {'role': 'system', 'content': systemPrompt},
         ...messages,
       ],
-    });
+    };
+
+    if (enableSearch) {
+      bodyMap['enable_search'] = true;
+    }
+
+    final body = jsonEncode(bodyMap);
 
     final request = http.Request('POST', Uri.parse(AppConstants.deepSeekBaseUrl))
       ..headers.addAll({

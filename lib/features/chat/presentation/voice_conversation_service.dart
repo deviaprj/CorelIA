@@ -94,6 +94,8 @@ class VoiceConversationNotifier
   /// Demarre une boucle conversation vocale mains-libres.
   Future<void> startConversation() async {
     _isActive = true;
+    var consecutiveFailures = 0;
+    const maxFailures = 3;
 
     while (_isActive) {
       // 1. LISTENING — STT natif avec VAD
@@ -102,13 +104,29 @@ class VoiceConversationNotifier
       );
       final transcript = await _listenWithVad();
 
-      // Si transcript vide ou arret utilisateur
-      if (transcript == null || transcript.isEmpty || !_isActive) {
-        if (!_isActive) break;
-        // Si arret manuel, quitter directement
+      if (!_isActive) break;
+
+      // Echec ecoute (STT indisponible) — delai + retry
+      if (transcript == null) {
+        consecutiveFailures++;
+        if (consecutiveFailures >= maxFailures) {
+          state = VoiceConversationStatus(
+            state: VoiceConversationState.error,
+            error: 'Microphone non disponible. Verifiez les permissions.',
+          );
+          break;
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 1500));
         continue;
       }
 
+      // Transcript vide (silence) — on reessaie
+      if (transcript.isEmpty) {
+        consecutiveFailures = 0;
+        continue;
+      }
+
+      consecutiveFailures = 0;
       _pendingTranscript = transcript;
 
       // 2. THINKING — envoi au chat
@@ -118,8 +136,7 @@ class VoiceConversationNotifier
       );
 
       try {
-        final chatNotifier =
-            ref.read(chatNotifierProvider(arg).notifier);
+        final chatNotifier = ref.read(chatNotifierProvider(arg).notifier);
         await chatNotifier.sendMessage(transcript);
       } catch (e) {
         debugPrint('[VoiceConversation] Erreur envoi chat : $e');
@@ -131,38 +148,36 @@ class VoiceConversationNotifier
         break;
       }
 
-      // 3. Attendre que ref.listen detecte la reponse IA et passe a speaking
-      while (_isActive && state.state == VoiceConversationState.thinking) {
+      // 3. Attendre la fin de la reponse IA ET du TTS
+      //    La callback ref.listen declenche _speakResponseAndLoop qui
+      //    passe le state thinking→speaking→idle (ou error).
+      while (_isActive &&
+          (state.state == VoiceConversationState.thinking ||
+           state.state == VoiceConversationState.speaking)) {
         await Future<void>.delayed(_ttsPollInterval);
       }
 
       if (!_isActive) break;
       if (state.state == VoiceConversationState.error) break;
 
-      // 4. Attendre explicitement la fin du TTS avant de relancer l'ecoute
-      while (_isActive && state.state == VoiceConversationState.speaking) {
-        await Future<void>.delayed(const Duration(milliseconds: 300));
-      }
-      if (!_isActive) break;
-
-      // Boucle continue - on retourne au etat listening
+      // Retour automatique en haut de boucle → listening
     }
 
     _reset();
   }
 
-  /// Lit la reponse IA et relance la boucle.
+  /// Lit la reponse IA a voix haute puis rend la main.
   Future<void> _speakResponseAndLoop(String text) async {
     if (!_isActive) return;
 
-    // Couper explicitement le micro avant de parler
+    // Couper le micro avant de parler
     await _voice.stopListening();
 
     state = state.copyWith(state: VoiceConversationState.speaking);
 
     try {
       await _voice.speak(text);
-      // Attendre la fin de la lecture TTS
+      // Attendre la fin reelle de la lecture TTS
       while (_voice.state.isSpeaking && _isActive) {
         await Future<void>.delayed(const Duration(milliseconds: 300));
       }
@@ -170,24 +185,31 @@ class VoiceConversationNotifier
       debugPrint('[VoiceConversation] TTS erreur : $e');
     }
 
-    // Pause de garde apres le TTS pour eviter que le micro ne capte
-    // le son du haut-parleur (echo)
+    // Pause de garde anti-echo (le son du haut-parleur vers le micro)
     if (_isActive) {
-      await Future<void>.delayed(const Duration(milliseconds: 500));
+      await Future<void>.delayed(_postTtsGuard);
+    }
+
+    // Signaler a startConversation que la lecture est terminee
+    if (_isActive) {
+      state = state.copyWith(state: VoiceConversationState.idle);
     }
   }
 
   /// Ecoute avec VAD (Voice Activity Detection) natif.
+  /// Retourne le transcript final, ou null si le STT est indisponible.
   Future<String?> _listenWithVad() async {
-    final ok = await _voice.ensureInitialized();
-    if (!ok) {
-      debugPrint('[VoiceConversation] STT natif non disponible');
+    // Toujours arreter l'ecoute precedente avant d'en demarrer une nouvelle
+    await _voice.stopListening();
+
+    // startListening() gere tout : permission, creation STT fraiche, init, ecoute
+    await _voice.startListening();
+
+    // Si apres startListening() le STT n'est toujours pas dispo, echec
+    if (!_voice.state.isAvailable && !_voice.state.isListening) {
+      debugPrint('[VoiceConversation] STT non disponible');
       return null;
     }
-
-    // Reset du transcript avant de commencer
-    _voice.state = VoiceState(transcript: '');
-    await _voice.startListening();
 
     // Poll temps reel pour mettre a jour le transcript dans l'UI
     while (_voice.state.isListening && _isActive) {
@@ -198,17 +220,20 @@ class VoiceConversationNotifier
       await Future<void>.delayed(_pollInterval);
     }
 
+    if (!_isActive) return '';
+
     // Attendre que le STT soit vraiment termine
     for (var i = 0; i < _sttMaxWait; i++) {
       if (!_voice.state.isListening || !_isActive) break;
       await Future<void>.delayed(_sttFinalWait);
     }
 
+    if (!_isActive) return '';
+
     // Delai supplementaire pour stabiliser le transcript final
     await Future<void>.delayed(_postTtsGuard);
 
     final finalTranscript = _voice.state.transcript;
-    // Ne pas changer le state si on a ete arrete manuellement
     if (_isActive) {
       state = state.copyWith(
         transcript: finalTranscript,
@@ -216,7 +241,7 @@ class VoiceConversationNotifier
       );
     }
 
-    return finalTranscript.isEmpty ? null : finalTranscript;
+    return finalTranscript;
   }
 
   /// Arrete immediatement la conversation vocale.

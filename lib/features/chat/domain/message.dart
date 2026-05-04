@@ -40,28 +40,25 @@ class Message {
   Map<String, dynamic> toApiMap() {
     if (imageBase64 != null && imageBase64!.isNotEmpty) {
       final mime = imageMimeType ?? 'image/jpeg';
-      // Format compatible DeepSeek (et OpenAI)
-      // Utilise le format "content" tableau avec image_url
+      final parts = <Map<String, dynamic>>[];
+
+      // Texte d'abord (meilleure compatibilite avec les API vision)
+      if (content.isNotEmpty && content.length < 500) {
+        parts.add({'type': 'text', 'text': content});
+      } else if (content.isNotEmpty) {
+        parts.add({'type': 'text', 'text': 'Image jointe. $content'});
+      }
+
+      parts.add({
+        'type': 'image_url',
+        'image_url': {
+          'url': 'data:$mime;base64,$imageBase64',
+        },
+      });
+
       return {
         'role': role.name,
-        'content': [
-          {
-            'type': 'image_url',
-            'image_url': {
-              'url': 'data:$mime;base64,$imageBase64',
-            },
-          },
-          if (content.isNotEmpty && content.length < 500)
-            {
-              'type': 'text',
-              'text': content,
-            }
-          else if (content.isNotEmpty)
-            {
-              'type': 'text',
-              'text': 'Image jointe. $content',
-            }
-        ],
+        'content': parts,
       };
     }
     // Format texte simple

@@ -7,10 +7,10 @@ import 'package:flutter_tts/flutter_tts.dart';
 class TtsNaturalService {
   final FlutterTts _tts = FlutterTts();
   bool _isSpeaking = false;
-  // Vitesse dynamique pour voix énergique mais pas trop rapide (0.65 = +30%)
+  // Vitesse naturelle (0.9 ~ proche du debit normal, confortable a l'ecoute)
   double _speechRate = 0.65;
-  // Pitch plus élevé pour voix plus vivante et joyeuse (1.15 = +15%)
-  double _pitch = 1.15;
+  // Pitch legerement eleve pour voix plus vivante (1.10 = +10%)
+  double _pitch = 1.10;
   String _language = 'fr-FR';
 
   Future<void> init() async {

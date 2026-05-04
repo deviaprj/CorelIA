@@ -12,6 +12,7 @@ abstract class AppConstants {
   static const openRouterBaseUrl = 'https://openrouter.ai/api/v1/chat/completions';
 
   static const deepSeekModel = 'deepseek-v4-flash';
+  static const deepSeekVisionModel = 'deepseek-chat';
   static const mistralModel = 'mistralai/mistral-large-2407';
   static const groqModel = 'meta-llama/llama-3.3-70b-instruct';
   static const visionModel = 'openai/gpt-4o-mini';

@@ -93,12 +93,16 @@ class ImageUploadService {
         }
       }
 
-      // Limite : 5MB max recommande pour DeepSeek API (base64)
-      if (compressedBytes.length > 5 * 1024 * 1024) {
-        throw const ImageUploadException('Image trop volumineuse (max 5MB recommande)');
+      // Limite : 1MB max pour eviter les payloads API trop volumineux
+      if (compressedBytes.length > 1 * 1024 * 1024) {
+        throw const ImageUploadException('Image trop volumineuse (max 1MB)');
       }
 
       final base64 = base64Encode(compressedBytes);
+      // Securite supplementaire : verifier la taille du base64
+      if (base64.length > 1.5 * 1024 * 1024) {
+        throw const ImageUploadException('Image encodee trop volumineuse (max 1MB base64)');
+      }
       final mimeType = _detectMimeType(file.path);
 
       return ImageUploadResult(

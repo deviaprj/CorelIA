@@ -33,93 +33,150 @@ class VoiceState {
 }
 
 class VoiceServiceNotifier extends Notifier<VoiceState> {
-  late final stt.SpeechToText _stt;
+  stt.SpeechToText? _stt;
   late final TtsNaturalService _tts;
+  bool _microphonePermissionGranted = false;
 
   @override
   VoiceState build() {
-    _stt = stt.SpeechToText();
     _tts = TtsNaturalService();
     ref.onDispose(() {
       _tts.dispose();
-      _stt.stop();
+      _stt?.stop();
+      _stt = null;
     });
-    _init();
+    // Init TTS uniquement (le STT sera initialise a la demande dans startListening)
+    _initTts();
     return const VoiceState();
   }
 
-  Future<void> _init() async {
-    // Initialisation asynchrone ; si elle echoue on reessayera au premier tap
+  Future<void> _initTts() async {
     try {
-      final available = await _stt.initialize(
-        onError: (_) => state = state.copyWith(isListening: false),
+      await _tts.init();
+      final speed = ref.read(ttsSpeedProvider);
+      await _tts.setSpeed(speed);
+    } catch (e) {
+      debugPrint('[VoiceService] TTS init failed: $e');
+    }
+  }
+
+  /// Cree une instance fraiche de SpeechToText et l'initialise.
+  /// Appele a chaque entree en ecoute pour garantir un etat propre.
+  Future<bool> _createAndInitStt() async {
+    // Detruire l'ancienne instance proprement
+    if (_stt != null) {
+      try {
+        await _stt!.stop();
+      } catch (_) {}
+      _stt = null;
+    }
+
+    final newStt = stt.SpeechToText();
+    try {
+      final available = await newStt.initialize(
+        onError: (_) {
+          if (_stt == newStt) {
+            state = state.copyWith(isListening: false);
+          }
+        },
         onStatus: (status) {
-          if (status == 'done' || status == 'notListening') {
+          if (_stt == newStt &&
+              (status == 'done' || status == 'notListening')) {
             state = state.copyWith(isListening: false);
           }
         },
       );
-      await _tts.init();
-      // Appliquer la vitesse stockee dans les preferences
-      final speed = ref.read(ttsSpeedProvider);
-      await _tts.setSpeed(speed);
-      state = state.copyWith(isAvailable: available);
-    } catch (e) {
-      debugPrint('[VoiceService] Init STT echouee : $e');
-      state = state.copyWith(isAvailable: false);
-    }
-  }
-
-  /// Initialise a la demande si la premiere tentative a echoue
-  Future<bool> ensureInitialized() async {
-    if (state.isAvailable) return true;
-    await _init();
-    return state.isAvailable;
-  }
-
-  // Cached permission status to avoid repeated checks
-  bool _microphonePermissionGranted = false;
-
-  Future<void> startListening() async {
-    if (!state.isAvailable || state.isListening) return;
-
-    // Skip permission check if already granted (cached)
-    if (!_microphonePermissionGranted) {
-      final status = await Permission.microphone.status;
-      if (!status.isGranted) {
-        debugPrint('[VoiceService] Demande permission microphone');
-        final result = await Permission.microphone.request();
-        if (!result.isGranted) {
-          debugPrint('[VoiceService] Permission microphone refusée');
-          state = state.copyWith(isListening: false);
-          return;
-        }
-        _microphonePermissionGranted = true;
+      if (available) {
+        _stt = newStt;
+        state = state.copyWith(isAvailable: true);
+        debugPrint('[VoiceService] STT initialized successfully');
+        return true;
       } else {
-        _microphonePermissionGranted = true;
+        debugPrint('[VoiceService] STT not available on this device');
+        state = state.copyWith(isAvailable: false);
+        return false;
       }
+    } catch (e) {
+      debugPrint('[VoiceService] STT init failed: $e');
+      state = state.copyWith(isAvailable: false);
+      return false;
+    }
+  }
+
+  /// Verifie et demande la permission microphone si necessaire.
+  Future<bool> _ensureMicrophonePermission() async {
+    if (_microphonePermissionGranted) return true;
+
+    final status = await Permission.microphone.status;
+    if (status.isGranted) {
+      _microphonePermissionGranted = true;
+      return true;
     }
 
+    debugPrint('[VoiceService] Requesting microphone permission');
+    final result = await Permission.microphone.request();
+    if (result.isGranted) {
+      _microphonePermissionGranted = true;
+      return true;
+    }
+
+    debugPrint('[VoiceService] Microphone permission denied');
+    return false;
+  }
+
+  /// Demarre l'ecoute vocale.
+  /// Chaque appel cree une instance STT fraiche pour eviter
+  /// les etats corrompus herites d'une session precedente.
+  Future<void> startListening() async {
+    // 1. Si deja en ecoute, arreter proprement d'abord
+    if (state.isListening) {
+      await stopListening();
+      await Future<void>.delayed(const Duration(milliseconds: 150));
+    }
+
+    // 2. Permission microphone
+    final hasPermission = await _ensureMicrophonePermission();
+    if (!hasPermission) {
+      state = state.copyWith(isListening: false);
+      return;
+    }
+
+    // 3. Creer et initialiser une instance STT fraiche
+    final sttReady = await _createAndInitStt();
+    if (!sttReady || _stt == null) {
+      state = state.copyWith(isListening: false);
+      return;
+    }
+
+    // 4. Demarrer l'ecoute
     state = state.copyWith(isListening: true, transcript: '');
-    await _stt.listen(
-      onResult: (result) {
-        state = state.copyWith(
-          transcript: result.recognizedWords,
-          isListening: !result.finalResult,
-        );
-      },
-      localeId: 'fr_FR',
-      listenFor: const Duration(seconds: 120), // 2 minutes d'écoute
-      pauseFor: const Duration(seconds: 10), // 10 secondes de silence avant arret
-    );
+    try {
+      await _stt!.listen(
+        onResult: (result) {
+          state = state.copyWith(
+            transcript: result.recognizedWords,
+            isListening: !result.finalResult,
+          );
+        },
+        localeId: 'fr_FR',
+        listenFor: const Duration(seconds: 120),
+        pauseFor: const Duration(seconds: 10),
+        listenMode: stt.ListenMode.dictation,
+      );
+    } catch (e) {
+      debugPrint('[VoiceService] STT listen error: $e');
+      state = state.copyWith(isListening: false);
+    }
   }
 
   Future<void> stopListening() async {
-    await _stt.stop();
+    try {
+      await _stt?.stop();
+    } catch (_) {}
     state = state.copyWith(isListening: false);
   }
 
-  /// Lecture TTS naturelle avec decoupage intelligent et pauses.
+  /// Lecture TTS naturelle.
   Future<void> speak(String text) async {
     if (text.isEmpty) return;
     if (state.isSpeaking) await _tts.stop();
@@ -138,14 +195,18 @@ class VoiceServiceNotifier extends Notifier<VoiceState> {
     state = state.copyWith(isSpeaking: false);
   }
 
-  /// Force la reinitialisation de l'etat vocal (micro + TTS coupes).
-  /// Utilise quand on quitte le mode conversation pour eviter
-  /// qu'un prochain startListening() soit bloque par un etat fantome.
+  /// Reinitialisation complete — coupe micro + TTS, reinitialise permissions.
   void forceReset() {
-    _stt.stop();
+    _stt?.stop();
+    _stt = null;
     _tts.stop();
     _microphonePermissionGranted = false;
-    state = state.copyWith(isListening: false, isSpeaking: false, transcript: '');
+    state = state.copyWith(
+      isListening: false,
+      isSpeaking: false,
+      transcript: '',
+      isAvailable: false,
+    );
   }
 }
 

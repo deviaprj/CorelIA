@@ -24,6 +24,7 @@ class ChatScreen extends ConsumerStatefulWidget {
 
 class _ChatScreenState extends ConsumerState<ChatScreen> {
   final _scrollController = ScrollController();
+  AttachmentData? _pendingAttachment;
 
   @override
   void dispose() {
@@ -184,7 +185,17 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
               ),
               InputBar(
                 isLoading: state.isStreaming,
-                onSend: (text) => notifier.sendMessage(text),
+                attachment: _pendingAttachment,
+                onCancelAttachment: () => setState(() => _pendingAttachment = null),
+                onSend: (text, {imageBase64, imageMimeType, fileName, fileContent}) {
+                  notifier.sendMessage(
+                    text,
+                    imageBase64: imageBase64,
+                    imageMimeType: imageMimeType,
+                    fileName: fileName,
+                    fileContent: fileContent,
+                  );
+                },
               ),
             ],
           ),
@@ -224,13 +235,14 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         : await service.pickFromGallery();
     if (result == null || !mounted) return;
 
-    // Stocker l'image comme contexte, attendre la demande de l'utilisateur
-    // Envoyer un message indicatif
-    await notifier.sendMessage(
-      '[Image chargée - Prête à etre utilisee]',
-      imageBase64: result.base64,
-      imageMimeType: result.mimeType,
-    );
+    final sizeKB = (result.sizeBytes / 1024).toStringAsFixed(0);
+    setState(() {
+      _pendingAttachment = AttachmentData(
+        imageBase64: result.base64,
+        imageMimeType: result.mimeType,
+        previewLabel: 'Image ($sizeKB Ko) — tapez votre question',
+      );
+    });
   }
 
   Future<void> _handleFilePick(ChatNotifier notifier) async {
@@ -240,11 +252,16 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       final result = await service.pickAndExtract(isPro: isPro);
       if (result == null || !mounted) return;
 
-      await notifier.sendMessage(
-        'Analyse ce document.',
-        fileName: result.fileName,
-        fileContent: result.extractedText,
-      );
+      final preview = result.fileName.length > 40
+          ? '${result.fileName.substring(0, 40)}...'
+          : result.fileName;
+      setState(() {
+        _pendingAttachment = AttachmentData(
+          fileName: result.fileName,
+          fileContent: result.extractedText,
+          previewLabel: '$preview — tapez votre question',
+        );
+      });
     } on FileUploadException catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

@@ -59,7 +59,7 @@ class ChatState {
     this.error,
     this.remainingRequests,
     this.isSearching = false,
-    this.useSearch = false,
+    this.useSearch = true,
     this.displayCount = 30,
   });
 
@@ -336,14 +336,13 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
         );
       }
     } on AiException catch (e) {
-      state = state.copyWith(error: e.message);
+      final msg = _formatAiError(e);
+      state = state.copyWith(error: msg, isStreaming: false, isSearching: false);
     } on ChatApiException catch (e) {
-      state = state.copyWith(error: e.message);
+      state = state.copyWith(error: e.message, isStreaming: false, isSearching: false);
     } catch (e) {
-      state = state.copyWith(error: e.toString());
+      state = state.copyWith(error: e.toString(), isStreaming: false, isSearching: false);
     } finally {
-      // S'assurer que isStreaming est false et que le placeholder
-      // n'est pas orphelin (si une erreur est survenue en cours de stream)
       if (state.isStreaming) {
         state = state.copyWith(
           isStreaming: false,
@@ -419,6 +418,14 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
     List<Map<String, dynamic>> history,
     bool isPro,
   ) {
+    // 1. Les images passent TOUJOURS par un modele vision,
+    //    independamment du statut Pro/Free.
+    final hasImage = history.any((m) => m['content'] is List);
+    if (hasImage) {
+      return _getVisionStream(history);
+    }
+
+    // 2. Pro sans image → OpenRouter (Mistral)
     if (isPro) {
       final key = AppConstants.openRouterApiKey;
       if (key.isNotEmpty) {
@@ -429,13 +436,43 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
         );
       }
     }
+
+    // 3. Free (ou Pro sans OpenRouter) → DeepSeek texte
     final deepSeekKey = AppConstants.deepSeekApiKey;
     if (deepSeekKey.isEmpty) {
-      // Aucune clé API → réponse mock pour tests
       return _mockResponseStream();
     }
     return DeepSeekClient(apiKey: deepSeekKey)
-        .streamChat(messages: history);
+        .streamChat(messages: history, enableSearch: true);
+  }
+
+  /// Route une requete avec image vers un modele vision.
+  /// Priorite : OpenRouter GPT-4o-mini > DeepSeek chat (supporte vision).
+  Stream<String> _getVisionStream(List<Map<String, dynamic>> history) {
+    final openRouterKey = AppConstants.openRouterApiKey;
+    if (openRouterKey.isNotEmpty) {
+      debugPrint('[ChatNotifier] Vision via OpenRouter');
+      return OpenRouterClient(apiKey: openRouterKey).streamChat(
+        messages: history,
+        model: AppConstants.visionModel,
+        maxTokens: AppConstants.proMaxTokens,
+      );
+    }
+
+    final deepSeekKey = AppConstants.deepSeekApiKey;
+    if (deepSeekKey.isNotEmpty) {
+      debugPrint('[ChatNotifier] Vision via DeepSeek chat');
+      return DeepSeekClient(apiKey: deepSeekKey).streamChat(
+        messages: history,
+        model: AppConstants.deepSeekVisionModel,
+        enableSearch: true,
+      );
+    }
+
+    throw const AiException(
+      'Analyse d\'image non disponible. Ajoutez une cle API OpenRouter.',
+      statusCode: 400,
+    );
   }
 
   /// Réponse mock pour tests en mode DEMO
@@ -448,6 +485,20 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
       yield '$word ';
       await Future<void>.delayed(const Duration(milliseconds: 80));
     }
+  }
+
+  /// Formate les erreurs IA pour l'utilisateur.
+  String _formatAiError(AiException e) {
+    final msg = e.message;
+    if (msg.contains('image') || msg.contains('image_url')) {
+      return 'Ce modele ne supporte pas l\'analyse d\'images. '
+          'Ajoutez une cle OpenRouter dans les parametres.';
+    }
+    if (msg.contains('Clé API')) return msg;
+    if (msg.contains('429') || msg.contains('Trop de requêtes')) {
+      return 'Limite de requetes atteinte. Reessayez dans un moment.';
+    }
+    return 'Erreur IA. Reessayez.';
   }
 
   void toggleSearch() {
