@@ -2,6 +2,8 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'chat_notifier.dart';
+import 'edge_tts_service.dart';
+import 'emotion_parser.dart';
 import 'voice_service.dart';
 
 /// Etat du mode conversation vocale mains-libres.
@@ -18,22 +20,26 @@ class VoiceConversationStatus {
   final VoiceConversationState state;
   final String? transcript;
   final String? error;
+  final TtsEmotion emotion;
 
   const VoiceConversationStatus({
     this.state = VoiceConversationState.idle,
     this.transcript,
     this.error,
+    this.emotion = TtsEmotion.neutral,
   });
 
   VoiceConversationStatus copyWith({
     VoiceConversationState? state,
     String? transcript,
     String? error,
+    TtsEmotion? emotion,
   }) =>
       VoiceConversationStatus(
         state: state ?? this.state,
         transcript: transcript ?? this.transcript,
         error: error,
+        emotion: emotion ?? this.emotion,
       );
 }
 
@@ -45,14 +51,14 @@ class VoiceConversationStatus {
 /// 3. SPEAKING — TTS naturel quand la reponse IA arrive (detectee via messagesStream)
 /// 4. Boucle continue tant que l'utilisateur parle
 ///
-/// Aucun appel backend — tout est natif : speech_to_text + flutter_tts.
+/// Support des balises prosodiques : [joyeux], [triste], [sérieux], [excité]
+/// L'émotion détectée est exposée via VoiceConversationStatus.emotion
 class VoiceConversationNotifier
     extends FamilyNotifier<VoiceConversationStatus, String> {
   late final VoiceServiceNotifier _voice;
   bool _isActive = false;
   String? _pendingTranscript;
 
-  // Delais constants pour éviter les magic numbers
   static const _pollInterval = Duration(milliseconds: 150);
   static const _sttFinalWait = Duration(milliseconds: 100);
   static const _sttMaxWait = 30;
@@ -64,14 +70,12 @@ class VoiceConversationNotifier
   VoiceConversationStatus build(String conversationId) {
     _voice = ref.read(voiceServiceProvider.notifier);
 
-    // Ecouter les messages pour detecter la reponse IA automatiquement
     ref.listen(messagesStreamProvider(conversationId), (prev, next) {
       if (!_isActive || !next.hasValue) return;
       final messages = next.value!;
       if (messages.isEmpty) return;
 
       final lastMsg = messages.last;
-      // Si c'est un message assistant final (pas streaming) et qu'on attend une reponse
       if (lastMsg.isAssistant &&
           !lastMsg.isStreaming &&
           lastMsg.content.isNotEmpty &&
@@ -91,14 +95,12 @@ class VoiceConversationNotifier
     return const VoiceConversationStatus();
   }
 
-  /// Demarre une boucle conversation vocale mains-libres.
   Future<void> startConversation() async {
     _isActive = true;
     var consecutiveFailures = 0;
     const maxFailures = 3;
 
     while (_isActive) {
-      // 1. LISTENING — STT natif avec VAD
       state = const VoiceConversationStatus(
         state: VoiceConversationState.listening,
       );
@@ -106,7 +108,6 @@ class VoiceConversationNotifier
 
       if (!_isActive) break;
 
-      // Echec ecoute (STT indisponible) — delai + retry
       if (transcript == null) {
         consecutiveFailures++;
         if (consecutiveFailures >= maxFailures) {
@@ -120,7 +121,6 @@ class VoiceConversationNotifier
         continue;
       }
 
-      // Transcript vide (silence) — on reessaie
       if (transcript.isEmpty) {
         consecutiveFailures = 0;
         continue;
@@ -129,7 +129,6 @@ class VoiceConversationNotifier
       consecutiveFailures = 0;
       _pendingTranscript = transcript;
 
-      // 2. THINKING — envoi au chat
       state = VoiceConversationStatus(
         state: VoiceConversationState.thinking,
         transcript: transcript,
@@ -148,36 +147,39 @@ class VoiceConversationNotifier
         break;
       }
 
-      // 3. Attendre la fin de la reponse IA ET du TTS
-      //    La callback ref.listen declenche _speakResponseAndLoop qui
-      //    passe le state thinking→speaking→idle (ou error).
       while (_isActive &&
           (state.state == VoiceConversationState.thinking ||
-           state.state == VoiceConversationState.speaking)) {
+              state.state == VoiceConversationState.speaking)) {
         await Future<void>.delayed(_ttsPollInterval);
       }
 
       if (!_isActive) break;
       if (state.state == VoiceConversationState.error) break;
-
-      // Retour automatique en haut de boucle → listening
     }
 
     _reset();
   }
 
   /// Lit la reponse IA a voix haute puis rend la main.
+  /// Extrait l'émotion des balises prosodiques pour le splash.
   Future<void> _speakResponseAndLoop(String text) async {
     if (!_isActive) return;
 
-    // Couper le micro avant de parler
     await _voice.stopListening();
 
-    state = state.copyWith(state: VoiceConversationState.speaking);
+    // Parser l'émotion du texte
+    final parseResult = EmotionParser.parse(text);
+    final emotion = parseResult.hasEmotionTag
+        ? parseResult.emotion
+        : EmotionParser.inferFromText(text);
+
+    state = state.copyWith(
+      state: VoiceConversationState.speaking,
+      emotion: emotion,
+    );
 
     try {
-      await _voice.speak(text);
-      // Attendre la fin reelle de la lecture TTS
+      await _voice.speakWithEmotion(text, emotion);
       while (_voice.state.isSpeaking && _isActive) {
         await Future<void>.delayed(const Duration(milliseconds: 300));
       }
@@ -185,33 +187,24 @@ class VoiceConversationNotifier
       debugPrint('[VoiceConversation] TTS erreur : $e');
     }
 
-    // Pause de garde anti-echo (le son du haut-parleur vers le micro)
     if (_isActive) {
       await Future<void>.delayed(_postTtsGuard);
     }
 
-    // Signaler a startConversation que la lecture est terminee
     if (_isActive) {
       state = state.copyWith(state: VoiceConversationState.idle);
     }
   }
 
-  /// Ecoute avec VAD (Voice Activity Detection) natif.
-  /// Retourne le transcript final, ou null si le STT est indisponible.
   Future<String?> _listenWithVad() async {
-    // Toujours arreter l'ecoute precedente avant d'en demarrer une nouvelle
     await _voice.stopListening();
-
-    // startListening() gere tout : permission, creation STT fraiche, init, ecoute
     await _voice.startListening();
 
-    // Si apres startListening() le STT n'est toujours pas dispo, echec
     if (!_voice.state.isAvailable && !_voice.state.isListening) {
       debugPrint('[VoiceConversation] STT non disponible');
       return null;
     }
 
-    // Poll temps reel pour mettre a jour le transcript dans l'UI
     while (_voice.state.isListening && _isActive) {
       final newTranscript = _voice.state.transcript;
       if (newTranscript != state.transcript) {
@@ -222,7 +215,6 @@ class VoiceConversationNotifier
 
     if (!_isActive) return '';
 
-    // Attendre que le STT soit vraiment termine
     for (var i = 0; i < _sttMaxWait; i++) {
       if (!_voice.state.isListening || !_isActive) break;
       await Future<void>.delayed(_sttFinalWait);
@@ -230,7 +222,6 @@ class VoiceConversationNotifier
 
     if (!_isActive) return '';
 
-    // Delai supplementaire pour stabiliser le transcript final
     await Future<void>.delayed(_postTtsGuard);
 
     final finalTranscript = _voice.state.transcript;
@@ -244,7 +235,6 @@ class VoiceConversationNotifier
     return finalTranscript;
   }
 
-  /// Arrete immediatement la conversation vocale.
   Future<void> stop() async {
     _isActive = false;
     _pendingTranscript = null;
@@ -254,7 +244,6 @@ class VoiceConversationNotifier
     await Future<void>.delayed(_stopDelay);
   }
 
-  /// Toggle pour reactivuer le mode vocal apres un arret
   Future<void> toggle() async {
     if (_isActive) {
       await stop();

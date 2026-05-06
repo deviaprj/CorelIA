@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 import 'package:permission_handler/permission_handler.dart';
 import '../../../core/providers/app_providers.dart';
+import 'edge_tts_service.dart';
+import 'emotion_parser.dart';
 import 'tts_natural_service.dart';
 
 class VoiceState {
@@ -10,12 +12,16 @@ class VoiceState {
   final bool isListening;
   final bool isSpeaking;
   final String transcript;
+  final TtsEmotion currentEmotion;
+  final double micLevel;
 
   const VoiceState({
     this.isAvailable = false,
     this.isListening = false,
     this.isSpeaking = false,
     this.transcript = '',
+    this.currentEmotion = TtsEmotion.neutral,
+    this.micLevel = 0.0,
   });
 
   VoiceState copyWith({
@@ -23,12 +29,16 @@ class VoiceState {
     bool? isListening,
     bool? isSpeaking,
     String? transcript,
+    TtsEmotion? currentEmotion,
+    double? micLevel,
   }) =>
       VoiceState(
         isAvailable: isAvailable ?? this.isAvailable,
         isListening: isListening ?? this.isListening,
         isSpeaking: isSpeaking ?? this.isSpeaking,
         transcript: transcript ?? this.transcript,
+        currentEmotion: currentEmotion ?? this.currentEmotion,
+        micLevel: micLevel ?? this.micLevel,
       );
 }
 
@@ -45,7 +55,6 @@ class VoiceServiceNotifier extends Notifier<VoiceState> {
       _stt?.stop();
       _stt = null;
     });
-    // Init TTS uniquement (le STT sera initialise a la demande dans startListening)
     _initTts();
     return const VoiceState();
   }
@@ -60,10 +69,7 @@ class VoiceServiceNotifier extends Notifier<VoiceState> {
     }
   }
 
-  /// Cree une instance fraiche de SpeechToText et l'initialise.
-  /// Appele a chaque entree en ecoute pour garantir un etat propre.
   Future<bool> _createAndInitStt() async {
-    // Detruire l'ancienne instance proprement
     if (_stt != null) {
       try {
         await _stt!.stop();
@@ -80,8 +86,7 @@ class VoiceServiceNotifier extends Notifier<VoiceState> {
           }
         },
         onStatus: (status) {
-          if (_stt == newStt &&
-              (status == 'done' || status == 'notListening')) {
+          if (_stt == newStt && (status == 'done' || status == 'notListening')) {
             state = state.copyWith(isListening: false);
           }
         },
@@ -103,7 +108,6 @@ class VoiceServiceNotifier extends Notifier<VoiceState> {
     }
   }
 
-  /// Verifie et demande la permission microphone si necessaire.
   Future<bool> _ensureMicrophonePermission() async {
     if (_microphonePermissionGranted) return true;
 
@@ -124,32 +128,25 @@ class VoiceServiceNotifier extends Notifier<VoiceState> {
     return false;
   }
 
-  /// Demarre l'ecoute vocale.
-  /// Chaque appel cree une instance STT fraiche pour eviter
-  /// les etats corrompus herites d'une session precedente.
   Future<void> startListening() async {
-    // 1. Si deja en ecoute, arreter proprement d'abord
     if (state.isListening) {
       await stopListening();
       await Future<void>.delayed(const Duration(milliseconds: 150));
     }
 
-    // 2. Permission microphone
     final hasPermission = await _ensureMicrophonePermission();
     if (!hasPermission) {
       state = state.copyWith(isListening: false);
       return;
     }
 
-    // 3. Creer et initialiser une instance STT fraiche
     final sttReady = await _createAndInitStt();
     if (!sttReady || _stt == null) {
       state = state.copyWith(isListening: false);
       return;
     }
 
-    // 4. Demarrer l'ecoute
-    state = state.copyWith(isListening: true, transcript: '');
+    state = state.copyWith(isListening: true, transcript: '', micLevel: 0.0);
     try {
       await _stt!.listen(
         onResult: (result) {
@@ -157,6 +154,9 @@ class VoiceServiceNotifier extends Notifier<VoiceState> {
             transcript: result.recognizedWords,
             isListening: !result.finalResult,
           );
+        },
+        onSoundLevelChange: (level) {
+          state = state.copyWith(micLevel: level.abs().clamp(0.0, 120.0) / 120.0);
         },
         localeId: 'fr_FR',
         listenFor: const Duration(seconds: 120),
@@ -173,14 +173,35 @@ class VoiceServiceNotifier extends Notifier<VoiceState> {
     try {
       await _stt?.stop();
     } catch (_) {}
-    state = state.copyWith(isListening: false);
+    state = state.copyWith(isListening: false, micLevel: 0.0);
   }
 
-  /// Lecture TTS naturelle.
+  /// Lecture TTS naturelle avec détection d'émotion.
   Future<void> speak(String text) async {
     if (text.isEmpty) return;
     if (state.isSpeaking) await _tts.stop();
-    state = state.copyWith(isSpeaking: true);
+
+    final parseResult = EmotionParser.parse(text);
+    final emotion = parseResult.hasEmotionTag ? parseResult.emotion : EmotionParser.inferFromText(text);
+
+    state = state.copyWith(isSpeaking: true, currentEmotion: emotion);
+    _tts.setEmotion(emotion);
+
+    try {
+      await _tts.speakNaturally(text);
+    } catch (e) {
+      debugPrint('[TTS] Error: $e');
+    } finally {
+      state = state.copyWith(isSpeaking: false);
+    }
+  }
+
+  /// Alias pour speak() avec émotion explicite.
+  Future<void> speakWithEmotion(String text, TtsEmotion emotion) async {
+    if (text.isEmpty) return;
+    if (state.isSpeaking) await _tts.stop();
+    _tts.setEmotion(emotion);
+    state = state.copyWith(isSpeaking: true, currentEmotion: emotion);
     try {
       await _tts.speakNaturally(text);
     } catch (e) {
@@ -195,19 +216,15 @@ class VoiceServiceNotifier extends Notifier<VoiceState> {
     state = state.copyWith(isSpeaking: false);
   }
 
-  /// Reinitialisation complete — coupe micro + TTS, reinitialise permissions.
   void forceReset() {
     _stt?.stop();
     _stt = null;
     _tts.stop();
     _microphonePermissionGranted = false;
-    state = state.copyWith(
-      isListening: false,
-      isSpeaking: false,
-      transcript: '',
-      isAvailable: false,
-    );
+    state = const VoiceState();
   }
+
+  TtsNaturalService get ttsService => _tts;
 }
 
 final voiceServiceProvider =

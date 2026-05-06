@@ -4,11 +4,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-AironBot is a cross-platform AI chat application (Flutter) targeting 1M+ users. It includes:
+AironBot is a cross-platform AI chat application (Flutter/Dart) targeting 1M+ users. It includes:
 - **Mobile app**: Android/iOS with Firebase Auth, chat, voice input
 - **Chrome Extension**: Same codebase, built with Flutter Web + Manifest V3
+- **Backend** (optional cloud): Python FastAPI at `api.aironbot.app` with Redis rate limiting
 - **Monetization**: AdMob ads (free tier), RevenueCat subscriptions (Pro tier)
-- **AI**: DeepSeek-V3 (free), OpenRouter for pro models (Mistral/Groq)
+- **AI**: DeepSeek-V4-Flash (free text), DeepSeek-Chat (vision fallback), OpenRouter (Pro: Mistral-Large, GPT-4o-mini)
+
+### Contrainte d'autonomie (règle d'or)
+L'APK Android et l'extension Chrome doivent être 100% autonomes. Aucun backend local requis. Toutes les fonctionnalités doivent fonctionner via services natifs, appels API directs, ou packages Dart/Flutter embarqués. Le backend cloud (`api.aironbot.app`) est un bonus, pas une dépendance.
 
 ## Architecture
 
@@ -20,13 +24,43 @@ lib/
 ├── main.dart                    # Entry point, Firebase/AdMob/RevenueCat init
 ├── app/                         # Router (go_router) and theme
 ├── core/                        # Shared: providers, platform_service, secure_storage
-├── features/                    # Feature modules (auth, chat, projects, monetization, onboarding, settings)
-│   ├── auth/                    # FirebaseAuth + email/Google/Apple login
-│   ├── chat/                    # AI client, conversations, voice, quotas
+│   ├── platform/platform_service.dart  # Detects mobile/extension/web
+│   ├── providers/
+│   │   ├── app_providers.dart           # Theme, onboarding, search toggle
+│   │   └── firebase_providers.dart      # Auth state, Firestore, Messaging
+│   └── constants/app_constants.dart      # API URLs, model names, limits
+├── features/
+│   ├── auth/                    # FirebaseAuth + email/Google/Apple + mock auth
+│   ├── chat/
+│   │   ├── data/                # ai_client, search_service, file/image upload, quotas
+│   │   ├── domain/              # Message, Conversation models
+│   │   └── presentation/        # ChatNotifier, voice services, UI screens
 │   ├── projects/                # Pro feature: saved projects/folders
 │   ├── monetization/            # Ads (AdMob) + subscriptions (RevenueCat)
-│   └── onboarding/              # First-time user flow
+│   ├── referral/                # Deep links + referral service
+│   └── settings/               # Settings screen
 └── shared/                      # Widgets, extensions
+```
+
+**Backend** (`backend/`):
+```
+backend/
+├── agents/
+│   ├── chat_router.py           # AI stream routing (DeepSeek + OpenRouter + tools)
+│   └── search_engine.py         # DuckDuckGo + SerpAPI search
+├── core/                        # Config, auth, logging
+└── schemas/                     # Pydantic models
+```
+
+**Chrome Extension** (`web/`):
+```
+web/
+├── manifest.json                # Manifest V3 — sidePanel, contextMenus, scripting
+├── background.js                # Service worker — context menu, side panel open
+├── content_script.js            # Text selection capture on all pages
+├── speech_bridge.js             # Web Speech API bridge (STT only, no TTS)
+├── icons/                       # Extension icons
+└── index.html                   # Flutter Web bootstrap with CSS spinner
 ```
 
 **Platform Detection** (`lib/core/platform/platform_service.dart`):
@@ -34,13 +68,15 @@ lib/
 - Critical for conditional Firebase/AdMob/RevenueCat initialization
 
 **State Management**:
-- Riverpod providers in `lib/core/providers/app_providers.dart` (theme, onboarding)
-- Firebase providers in `lib/core/providers/firebase_providers.dart` (auth state)
+- Riverpod providers in `lib/core/providers/app_providers.dart` (theme, onboarding, search toggle)
+- Firebase providers in `lib/core/providers/firebase_providers.dart` (auth state, Firestore, Messaging)
 
 **Key Flows**:
 1. App start → Firebase init → check onboarding → check auth → route to appropriate screen
 2. Chat → Firestore repository → AI client (DeepSeek/OpenRouter) → quota check → response
-3. Extension build → Flutter Web + custom manifest.json + service worker removal
+3. Voice dictation → SpeechToText → text input → ChatNotifier
+4. Voice conversation loop → VoiceConversationNotifier (listening → thinking → speaking → idle → repeat)
+5. Extension build → Flutter Web + custom manifest.json + service worker removal
 
 ## Commands
 
@@ -52,42 +88,22 @@ cp .env.example .env  # Fill in API keys
 
 **Run**:
 ```bash
-# Mobile
 flutter run -d <device>
-
-# Web
 flutter run -d chrome
-
-# Extension (dev mode)
-bash scripts/build_extension.sh
-# Load build/extension/ in chrome://extensions
+bash scripts/build_extension.sh   # → build/extension/
 ```
 
 **Test**:
 ```bash
-# All tests (unit + widget)
 bash scripts/run_tests.sh all
-
-# Specific test types
-bash scripts/run_tests.sh unit
-bash scripts/run_tests.sh widget
-bash scripts/run_tests.sh integration  # Requires emulator/device
-bash scripts/run_tests.sh coverage
-
-# Single test
 flutter test path/to/test.dart
 ```
 
 **Build**:
 ```bash
-# Android APK
 flutter build apk
-
-# iOS
 flutter build ios
-
-# Chrome Extension
-bash scripts/build_extension.sh  # → aironbot-extension.zip
+bash scripts/build_extension.sh   # → aironbot-extension.zip
 ```
 
 **Lint**:
@@ -98,47 +114,11 @@ flutter analyze
 ## Environment Variables
 
 Required in `.env` (never commit):
-- `DEEPSEEK_API_KEY`, `OPENROUTER_API_KEY` – AI providers
-- `ADMOB_*` – AdMob app/banner/interstitial/rewarded IDs
-- `REVENUECAT_API_KEY_*` – iOS/Android subscription keys
-- `STRIPE_*` – Web payment (extension)
-- `APP_ENV` – development/production
-
-## Testing Conventions
-
-**Test Types**:
-- `test/core/` – Core utilities
-- `test/features/*/` – Feature-specific tests
-- `test/load/` – Load/stress tests
-- `integration_test/` – E2E tests (require emulator)
-
-**Tags**: Tests use `--tags` for filtering: `unit`, `widget`, `integration`, `performance`, `load`
-
-**Helpers**: `test/test_helpers.dart` provides shared test utilities
-
-## Chrome Extension Specifics
-
-**Build Process** (`scripts/build_extension.sh`):
-1. Flutter Web build with `--pwa-strategy=none`
-2. Copies manifest.json, background.js, content_script.js
-3. Removes Flutter service worker (conflicts with Manifest V3)
-4. Patches index.html to remove SW registration
-5. Creates ZIP for Chrome Web Store
-
-**Manifest V3** (`web/manifest.json`):
-- Side panel + popup UI
-- Background service worker
-- Content scripts for all URLs
-- Host permissions for AI APIs + Firebase
-
-## Firebase Structure
-
-**Collections** (Firestore):
-- `users` – User profiles, quota tracking
-- `chats` / `conversations` – Message history
-- `projects` – Pro user projects
-
-**Security**: Rules enforce user-owned data access
+- `DEEPSEEK_API_KEY`, `OPENROUTER_API_KEY` — AI providers
+- `ADMOB_*` — AdMob app/banner/interstitial/rewarded IDs
+- `REVENUECAT_API_KEY_*` — iOS/Android subscription keys
+- `STRIPE_*` — Web payment (extension)
+- `APP_ENV` — development/production
 
 ## AI Models & Routing
 
@@ -186,7 +166,7 @@ Required in `.env` (never commit):
 - L'ancienne instance est détruite proprement (`stop()` puis `null`)
 - Permission micro : cache `_microphonePermissionGranted`, reset dans `forceReset()`
 - Timeout : `listenFor: 120s`, silence : `pauseFor: 10s`
-- `listenMode: ListenMode.dictation` pour écoute continue
+- `listen_mode: ListenMode.dictation` pour écoute continue
 
 **VoiceConversationNotifier** (`lib/features/chat/presentation/voice_conversation_service.dart`):
 - Boucle : `listening → thinking → speaking → idle → listening`
@@ -198,11 +178,22 @@ Required in `.env` (never commit):
 **TTS** (`lib/features/chat/presentation/tts_natural_service.dart`):
 - `flutter_tts` natif, vitesse par défaut : 0.65
 - Nettoyage markdown : strip URLs, citations `[n]`, emojis, formatting
-- `speakNaturally()` : nettoie → lit → attend la fin via `Completer`
+- `speakNaturally()` : nettoye → lit → attend la fin via `Completer`
+
+**Aurora Splash** (`lib/features/chat/presentation/aurora_splash.dart`):
+- Overlay plein écran pendant le mode vocal mains-libres
+- 15 particules animées avec couleur cyclique
+- États : vert=micro (listening), bleu=thinking, orange=speaking, cyan=STT processing
+- Affiche le transcript en temps réel pendant l'écoute
+
+**Extension Chrome — Pont vocal** (`web/speech_bridge.js`):
+- STT uniquement via `webkitSpeechRecognition`
+- Événements CustomEvent : `aironbot_speech_start`, `aironbot_speech_result`, `aironbot_speech_end`, `aironbot_speech_error`
+- Pas de pont TTS (à créer)
 
 ## Attachment UX (pièces jointes)
 
-**Nouveau flux** (refonte 2026-05-04) :
+**Flux** :
 1. Pick image/fichier → stocké dans `_pendingAttachment` (état `_ChatScreenState`)
 2. Chip affiché dans `InputBar` avec nom du fichier + bouton ✕
 3. L'utilisateur tape sa question
@@ -217,6 +208,60 @@ Required in `.env` (never commit):
 - Extraction texte côté client (via `file_upload_service.dart`)
 - Limites : 5 MB gratuit, 50 MB Pro
 - Le contenu extrait est injecté comme message `system` dans l'historique
+
+## Web Search
+
+**Client** (`lib/features/chat/data/search_service.dart`):
+- `SearchService` avec fallback : backend cloud → DuckDuckGo HTML scraping direct
+- `formatForAi()` : injecte les résultats dans le contexte système (~4000 tokens / 16000 chars)
+- `formatSourcesForUi()` / `formatSourcesAsList()` : affichage dans le chat
+
+**Backend** (`backend/agents/search_engine.py`):
+- `search_duckduckgo()` : via package Python `duckduckgo_search`
+- `search_serpapi()` : fallback SerpAPI
+- Intégré dans `chat_router.py` via tool calling (`search_web`, `get_datetime`, `get_weather`)
+
+**Intégration chat** (`chat_notifier.dart`):
+- `useSearch: true` par défaut
+- `enable_search: true` dans le body DeepSeek
+- Résultats injectés comme message système avant l'historique
+
+## Chrome Extension Specifics
+
+**Build Process** (`scripts/build_extension.sh`):
+1. Flutter Web build with `--pwa-strategy=none`
+2. Copies manifest.json, background.js, content_script.js, speech_bridge.js, icons
+3. Removes Flutter service worker (conflicts with Manifest V3)
+4. Patches index.html to remove SW registration
+5. Creates ZIP for Chrome Web Store
+
+**Manifest V3** (`web/manifest.json`):
+- Side panel + popup UI
+- Background service worker
+- Content scripts for all URLs
+- Host permissions for AI APIs + Firebase
+- Permissions : storage, sidePanel, contextMenus, scripting, activeTab
+
+**Limitations actuelles de l'extension** :
+- Pas de pont TTS (speech_bridge.js gère uniquement STT)
+- Pas de document offscreen pour audio en Manifest V3
+- `content_script.js` ne fait que capturer la sélection de texte
+- Pas de résumé de page, pas d'extraction média, pas d'autofill
+
+## Firebase Structure
+
+**Collections** (Firestore):
+- `users` — User profiles, quota tracking
+- `chats` / `conversations` — Message history (real-time sync via snapshots)
+- `projects` — Pro user projects
+
+**Cloud Functions** (`functions/src/`):
+- `checkQuota` : rate limiting (100 req/day test)
+- `stripeWebhook` : Stripe payment webhooks
+
+**Security**: Rules enforce user-owned data access
+
+**Demo Mode**: When `isDemoMode = true`, all Firebase services replaced with in-memory mocks. App runs fully offline.
 
 ## Error Handling
 
@@ -238,3 +283,10 @@ Required in `.env` (never commit):
 - [ ] Vision DeepSeek : `deepseek-chat` peut rejeter `image_url` selon version API
 - [ ] Documents volumineux : tronqués à 15000 caractères dans le contexte system
 - [ ] Pas de upload Firebase Storage pour les images (base64 consommé directement)
+- [ ] PDF scannés/image : extraction texte uniquement, pas d'OCR
+- [ ] Pas de support HEIC/HEIF pour les images
+- [ ] Pas de cache pour la recherche web (chaque requête est un appel réseau frais)
+- [ ] Extension Chrome : pas de TTS, pas de résumé de page, pas d'extraction média
+- [ ] Aurora splash : couleurs toutes noires (effet aurora désactivé), pas de réaction au volume
+- [ ] Pas d'interruption vocale (barge-in) pendant le TTS
+- [ ] Pas de synchronisation temps réel des préférences entre mobile et extension

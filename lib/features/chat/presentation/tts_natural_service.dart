@@ -1,38 +1,113 @@
 import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 
-/// Service TTS 100% autonome — lit tout le texte d'un coup
-/// et attend réellement la fin avant de rendre la main.
+import '../../../core/platform/platform_service.dart';
+import 'audio_player_factory.dart';
+import 'emotion_parser.dart';
+import 'edge_tts_service.dart'
+    if (dart.library.io) 'edge_tts_service.dart'
+    if (dart.library.html) 'edge_tts_service_stub.dart';
+
+/// Moteur TTS sélectionné.
+enum TtsEngine {
+  edgeTts,
+  flutterTts,
+}
+
+/// Service TTS autonome — Edge TTS (voix neurales expressives) en priorité,
+/// flutter_tts (native platform) en fallback.
+///
+/// Architecture :
+/// - Mobile : Edge TTS (WebSocket → MP3 → just_audio) → fallback flutter_tts
+/// - Web/Extension : flutter_tts (via Web SpeechSynthesis) uniquement
 class TtsNaturalService {
-  final FlutterTts _tts = FlutterTts();
+  // ── Edge TTS (mobile uniquement) ─────────────────────────────────────────
+  EdgeTtsService? _edgeTts;
+  Object? _audioPlayer; // just_audio AudioPlayer — dynamique car non dispo sur web
+  bool _edgeTtsAvailable = false;
+  bool _edgeTtsChecked = false;
+
+  // ── flutter_tts (fallback universel) ───────────────────────────────────────
+  final FlutterTts _flutterTts = FlutterTts();
+  bool _flutterTtsReady = false;
+
+  // ── État commun ─────────────────────────────────────────────────────────
   bool _isSpeaking = false;
-  // Vitesse naturelle (0.9 ~ proche du debit normal, confortable a l'ecoute)
+  TtsEngine _activeEngine = TtsEngine.flutterTts;
+  TtsEmotion _currentEmotion = TtsEmotion.neutral;
   double _speechRate = 0.65;
-  // Pitch legerement eleve pour voix plus vivante (1.10 = +10%)
   double _pitch = 1.10;
   String _language = 'fr-FR';
 
+  bool get isSpeaking => _isSpeaking;
+  TtsEngine get activeEngine => _activeEngine;
+  TtsEmotion get currentEmotion => _currentEmotion;
+
   Future<void> init() async {
-    await _tts.setLanguage(_language);
-    await _tts.setSpeechRate(_speechRate);
-    await _tts.setPitch(_pitch);
-    await _tts.setVolume(1.0);
+    await _initFlutterTts();
+
+    if (PlatformService.isMobile) {
+      await _checkEdgeTtsAvailability();
+    }
+  }
+
+  Future<void> _initFlutterTts() async {
+    try {
+      await _flutterTts.setLanguage(_language);
+      await _flutterTts.setSpeechRate(_speechRate);
+      await _flutterTts.setPitch(_pitch);
+      await _flutterTts.setVolume(1.0);
+      _flutterTtsReady = true;
+    } catch (e) {
+      debugPrint('[TtsNaturalService] flutter_tts init failed: $e');
+    }
+  }
+
+  Future<void> _checkEdgeTtsAvailability() async {
+    if (_edgeTtsChecked) return;
+    _edgeTtsChecked = true;
+
+    try {
+      _edgeTts = EdgeTtsService();
+      _edgeTtsAvailable = await EdgeTtsService.isAvailable();
+      if (_edgeTtsAvailable) {
+        debugPrint('[TtsNaturalService] Edge TTS disponible');
+        _audioPlayer = AudioPlayerFactory.create();
+      } else {
+        debugPrint('[TtsNaturalService] Edge TTS indisponible, fallback flutter_tts');
+        _edgeTts = null;
+      }
+    } catch (e) {
+      debugPrint('[TtsNaturalService] Edge TTS check failed: $e');
+      _edgeTtsAvailable = false;
+      _edgeTts = null;
+    }
   }
 
   Future<void> setSpeed(double rate) async {
     _speechRate = rate.clamp(0.5, 2.0);
-    await _tts.setSpeechRate(_speechRate);
+    if (_flutterTtsReady) {
+      await _flutterTts.setSpeechRate(_speechRate);
+    }
   }
 
   double get speed => _speechRate;
 
   Future<void> setPitch(double pitch) async {
     _pitch = pitch.clamp(0.5, 2.0);
-    await _tts.setPitch(_pitch);
+    if (_flutterTtsReady) {
+      await _flutterTts.setPitch(_pitch);
+    }
   }
 
-  /// Supprime les emojis d'un texte pour le TTS.
+  void setEmotion(TtsEmotion emotion) {
+    _currentEmotion = emotion;
+  }
+
+  // ── Nettoyage markdown ──────────────────────────────────────────────────
+
   static String stripEmojis(String text) {
     final buffer = StringBuffer();
     for (final rune in text.runes) {
@@ -42,41 +117,39 @@ class TtsNaturalService {
   }
 
   static bool _isEmoji(int rune) {
-    return (rune >= 0x1F600 && rune <= 0x1F64F) || // emoticons
-        (rune >= 0x1F300 && rune <= 0x1F5FF) || // symbols & pictographs
-        (rune >= 0x1F680 && rune <= 0x1F6FF) || // transport & map
-        (rune >= 0x1F1E0 && rune <= 0x1F1FF) || // flags
-        (rune >= 0x2600 && rune <= 0x26FF) || // misc symbols
-        (rune >= 0x2700 && rune <= 0x27BF) || // dingbats
-        (rune >= 0xFE00 && rune <= 0xFE0F) || // variation selectors
-        (rune >= 0x1F900 && rune <= 0x1F9FF) || // supplemental symbols
-        (rune >= 0x1F000 && rune <= 0x1F02F) || // mahjong, domino
-        (rune >= 0x1F0A0 && rune <= 0x1F0FF) || // playing cards
-        (rune >= 0x1F100 && rune <= 0x1F1FF) || // enclosed alphanum
-        (rune >= 0x1F700 && rune <= 0x1F77F) || // alchemical
-        (rune >= 0x1F780 && rune <= 0x1F7FF) || // geometric
-        (rune >= 0x1F800 && rune <= 0x1F8FF) || // arrows
-        (rune >= 0x1FA00 && rune <= 0x1FA6F) || // chess etc
-        (rune >= 0x1FA70 && rune <= 0x1FAFF) || // symbols extended-A
-        (rune >= 0x2300 && rune <= 0x23FF) || // misc technical
-        (rune == 0x00A9) || (rune == 0x00AE) || // copyright, registered
-        (rune == 0x2122) || (rune == 0x3030) || // trademark, wavy dash
-        (rune == 0x303D) || (rune == 0x3297) || // part alternation, congrats
-        (rune == 0x3299) || // secret
-        (rune >= 0x2B50 && rune <= 0x2B55); // stars
+    return (rune >= 0x1F600 && rune <= 0x1F64F) ||
+        (rune >= 0x1F300 && rune <= 0x1F5FF) ||
+        (rune >= 0x1F680 && rune <= 0x1F6FF) ||
+        (rune >= 0x1F1E0 && rune <= 0x1F1FF) ||
+        (rune >= 0x2600 && rune <= 0x26FF) ||
+        (rune >= 0x2700 && rune <= 0x27BF) ||
+        (rune >= 0xFE00 && rune <= 0xFE0F) ||
+        (rune >= 0x1F900 && rune <= 0x1F9FF) ||
+        (rune >= 0x1F000 && rune <= 0x1F02F) ||
+        (rune >= 0x1F0A0 && rune <= 0x1F0FF) ||
+        (rune >= 0x1F100 && rune <= 0x1F1FF) ||
+        (rune >= 0x1F700 && rune <= 0x1F77F) ||
+        (rune >= 0x1F780 && rune <= 0x1F7FF) ||
+        (rune >= 0x1F800 && rune <= 0x1F8FF) ||
+        (rune >= 0x1FA00 && rune <= 0x1FA6F) ||
+        (rune >= 0x1FA70 && rune <= 0x1FAFF) ||
+        (rune >= 0x2300 && rune <= 0x23FF) ||
+        (rune == 0x00A9) ||
+        (rune == 0x00AE) ||
+        (rune == 0x2122) ||
+        (rune == 0x3030) ||
+        (rune == 0x303D) ||
+        (rune == 0x3297) ||
+        (rune == 0x3299) ||
+        (rune >= 0x2B50 && rune <= 0x2B55);
   }
 
-  /// Pattern pour URL complète avec http/https et www (réutilisé par stripUrls).
   static final _urlPattern = RegExp(
     r'https?://(?:www\.)?([a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)+)',
     caseSensitive: false,
   );
-
-  /// Pattern pour citations entre crochets [1], [2], etc. (réutilisé par stripCitations).
   static final _citationPattern = RegExp(r'\[\d+\]');
 
-  /// Supprime les URLs et les remplace par le nom de domaine seul (sans https/http/www).
-  /// Ex: "https://www.amazon.com" -> "amazon.com"
   static String stripUrls(String text) {
     return text.replaceAllMapped(_urlPattern, (match) {
       final domain = match.group(1);
@@ -84,145 +157,156 @@ class TtsNaturalService {
     });
   }
 
-  /// Supprime les citations entre crochets [1], [2], etc.
   static String stripCitations(String text) {
     return text.replaceAll(_citationPattern, '');
   }
 
-  /// Nettoie le markdown pour le rendu TTS.
-  /// Conserve la structure (paragraphes, listes) pour que le moteur natif
-  /// fasse les pauses aux retours à la ligne et ponctuations.
   static String cleanMarkdown(String text) {
-    // 1. Supprimer la section Sources et tout ce qui suit le séparateur final
     var working = _stripSourcesSection(text);
-
-    // 2. Supprimer les URLs (remplace par nom de domaine seul)
     working = stripUrls(working);
-
-    // 3. Supprimer les citations entre crochets [1], [2], etc.
     working = stripCitations(working);
-
-    // 4. Supprimer les emojis
     working = stripEmojis(working);
-
-    // Gras et italique -> texte brut
-    working = working.replaceAllMapped(RegExp(r'\*\*\*(.+?)\*\*\*'), (m) => m.group(1) ?? '')
+    working = working
+        .replaceAllMapped(RegExp(r'\*\*\*(.+?)\*\*\*'), (m) => m.group(1) ?? '')
         .replaceAllMapped(RegExp(r'\*\*(.+?)\*\*'), (m) => m.group(1) ?? '')
         .replaceAllMapped(RegExp(r'\*(.+?)\*'), (m) => m.group(1) ?? '')
         .replaceAllMapped(RegExp(r'__(.+?)__'), (m) => m.group(1) ?? '')
         .replaceAllMapped(RegExp(r'_(.+?)_'), (m) => m.group(1) ?? '');
-
-    // Titres -> texte + double saut de ligne (pause forte TTS)
     working = working.replaceAllMapped(
       RegExp(r'^#{1,6}\s+(.+)$', multiLine: true),
       (m) => '${m.group(1) ?? ''}\n\n',
     );
-
-    // Blocs de code -> mention vocale
     working = working.replaceAllMapped(
       RegExp(r'`{3}[\s\S]*?`{3}'),
       (_) => ' [bloc de code] .\n\n',
     );
-
-    // Code inline -> texte brut
     working = working.replaceAllMapped(RegExp(r'`(.+?)`'), (m) => m.group(1) ?? '');
-
-    // Séparateurs -> pause
     working = working.replaceAll(RegExp(r'^-{3,}\s*$', multiLine: true), '\n\n');
-
-    // Liens markdown -> texte seul
     working = working.replaceAllMapped(RegExp(r'\[(.+?)\]\(.+?\)'), (m) => m.group(1) ?? '');
-
-    // Images -> description
     working = working.replaceAllMapped(RegExp(r'!\[(.*?)\]\(.+?\)'), (m) {
       final alt = m.group(1);
       return alt != null && alt.isNotEmpty ? ' [image: $alt] ' : ' [image] ';
     });
-
-    // Listes à puces -> item seul sur sa ligne (pause natuelle au \n)
     working = working.replaceAllMapped(
       RegExp(r'^\s*[-*+]\s+(.+)$', multiLine: true),
       (m) => '${m.group(1) ?? ''}\n',
     );
-
-    // Listes numérotées -> item seul sur sa ligne
     working = working.replaceAllMapped(
       RegExp(r'^\s*\d+\.\s+(.+)$', multiLine: true),
       (m) => '${m.group(1) ?? ''}\n',
     );
-
-    // Citations -> texte brut
     working = working.replaceAll(RegExp(r'^>\s+', multiLine: true), '');
-
-    // HTML basique
     working = working.replaceAll(RegExp(r'<[^>]+>'), '');
-
-    // Nettoyage espaces multiples
     working = working.replaceAll(RegExp(r'[ \t]+'), ' ');
-
-    // Normaliser sauts de ligne
     working = working.replaceAll(RegExp(r'\n{3,}'), '\n\n');
-
     return working.trim();
   }
 
-  /// Supprime la section Sources de la fin du texte.
-  /// Reconnait les patterns : ---\n**Sources :**\n... ou \n\nSources :\n...
   static String _stripSourcesSection(String text) {
-    // Pattern 1 : séparateur markdown --- suivi de Sources
     final sepPattern = RegExp(
       r'\n?\s*---+\s*\n?\s*\*\*Sources\s*:\*\*.*',
       caseSensitive: false,
       dotAll: true,
     );
     var result = text.replaceFirst(sepPattern, '');
-
-    // Pattern 2 : Sources: sans séparateur (dernier recours)
     final plainPattern = RegExp(
       r'\n\n\s*Sources\s*:.*',
       caseSensitive: false,
       dotAll: true,
     );
     result = result.replaceFirst(plainPattern, '');
-
     return result;
   }
 
-  /// Lit tout le texte d'une traite et attend la fin réelle de la parole.
+  // ── Synthèse vocale ─────────────────────────────────────────────────────
+
   Future<void> speakNaturally(String text) async {
     if (_isSpeaking) await stop();
 
-    final cleaned = cleanMarkdown(text);
-    if (cleaned.trim().isEmpty) return;
+    final parseResult = EmotionParser.parse(text);
+    final emotion = parseResult.hasEmotionTag ? parseResult.emotion : _currentEmotion;
+    final cleanText = parseResult.hasEmotionTag ? parseResult.cleanText : cleanMarkdown(text);
+
+    if (cleanText.trim().isEmpty) return;
 
     _isSpeaking = true;
-    final completer = Completer<void>();
+    _currentEmotion = emotion;
 
-    _tts.setCompletionHandler(() {
+    // Edge TTS (mobile uniquement, si disponible)
+    if (PlatformService.isMobile && _edgeTtsAvailable && _edgeTts != null) {
+      try {
+        _activeEngine = TtsEngine.edgeTts;
+        await _speakWithEdgeTts(cleanText, emotion);
+        return;
+      } catch (e) {
+        debugPrint('[TtsNaturalService] Edge TTS failed, falling back: $e');
+      }
+    }
+
+    // flutter_tts (fallback universel)
+    _activeEngine = TtsEngine.flutterTts;
+    await _speakWithFlutterTts(cleanText);
+  }
+
+  Future<void> _speakWithEdgeTts(String text, TtsEmotion emotion) async {
+    if (_edgeTts == null || _audioPlayer == null) {
+      throw StateError('Edge TTS not available');
+    }
+
+    final config = emotionTtsConfigs[emotion] ?? emotionTtsConfigs[TtsEmotion.neutral]!;
+
+    _edgeTts!.setVoice(config.voice);
+    _edgeTts!.setRate(config.rate);
+    _edgeTts!.setPitch(config.pitch);
+
+    String? tempFilePath;
+    try {
+      tempFilePath = await _edgeTts!.synthesize(text);
+      await AudioPlayerFactory.setFilePath(_audioPlayer!, tempFilePath);
+      await AudioPlayerFactory.play(_audioPlayer!);
+      await AudioPlayerFactory.waitForCompletion(_audioPlayer!);
+    } catch (e) {
+      debugPrint('[TtsNaturalService] Edge TTS playback error: $e');
+      rethrow;
+    } finally {
+      await AudioPlayerFactory.stop(_audioPlayer!);
+    }
+  }
+
+  Future<void> _speakWithFlutterTts(String text) async {
+    if (!_flutterTtsReady) {
+      await _initFlutterTts();
+    }
+
+    final completer = Completer<void>();
+    _flutterTts.setCompletionHandler(() {
       if (!completer.isCompleted) completer.complete();
     });
 
     try {
-      await _tts.speak(cleaned);
-      // Attendre que la parole se termine ou que stop() soit appelé
+      await _flutterTts.speak(text);
       await completer.future;
     } catch (e) {
-      debugPrint('[TtsNaturalService] Error during speech: $e');
+      debugPrint('[TtsNaturalService] flutter_tts error: $e');
     } finally {
-      _tts.setCompletionHandler(() {});
-      _isSpeaking = false;
+      _flutterTts.setCompletionHandler(() {});
     }
   }
 
   Future<void> stop() async {
     _isSpeaking = false;
-    await _tts.stop();
+    if (_activeEngine == TtsEngine.edgeTts && _audioPlayer != null) {
+      await AudioPlayerFactory.stop(_audioPlayer!);
+    } else {
+      await _flutterTts.stop();
+    }
   }
-
-  bool get isSpeaking => _isSpeaking;
 
   void dispose() {
     _isSpeaking = false;
-    _tts.stop();
+    if (_audioPlayer != null) {
+      AudioPlayerFactory.dispose(_audioPlayer!);
+    }
+    _flutterTts.stop();
   }
 }

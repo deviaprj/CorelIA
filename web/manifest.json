@@ -38,7 +38,9 @@
     "sidePanel",
     "contextMenus",
     "scripting",
-    "activeTab"
+    "activeTab",
+    "tts",
+    "offscreen"
   ],
 
   "host_permissions": [

@@ -2,146 +2,104 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'edge_tts_service.dart';
 import 'voice_conversation_service.dart';
+import 'voice_service.dart';
 
-/// Splash animé style auréole boréale pour le mode vocal.
+/// Splash animé réactif à la voix pour le mode conversation vocale.
 ///
-/// Affiche une animation de lueurs colorées qui réagissent à la voix :
-/// - Vert/pourpre quand l'utilisateur parle (écoute)
-/// - Bleu/cyan quand l'IA réfléchit
-/// - Jaune/or quand l'IA parle (TTS)
-class AuroraSplash extends ConsumerWidget {
+/// Caractéristiques :
+/// - Forme centrale organique qui pulse avec le volume micro
+/// - Gradient animé concentrique qui change avec l'émotion
+/// - Transitions fluides entre les états (60fps)
+/// - Transcript en temps réel pendant l'écoute
+class AuroraSplash extends ConsumerStatefulWidget {
   const AuroraSplash({super.key, required this.conversationId});
 
   final String conversationId;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final voiceConv = ref.watch(voiceConversationProvider(conversationId));
+  ConsumerState<AuroraSplash> createState() => _AuroraSplashState();
+}
 
-    // Couleurs pour chaque état
-    Color getSplashColor(VoiceConversationState state) {
-      switch (state) {
-        case VoiceConversationState.listening:
-          // Vert pourpre opaque pour masquer la conversation
-          return Colors.black87;
-        case VoiceConversationState.thinking:
-          // Bleu intense opaque
-          return Colors.black87;
-        case VoiceConversationState.speaking:
-          // Jaune/or intense opaque
-          return Colors.black87;
-        case VoiceConversationState.processingStt:
-        case VoiceConversationState.error:
-        case VoiceConversationState.idle:
-          return Colors.black.withOpacity(0.95); // Opaque pour masquer la conversation
-      }
-    }
+class _AuroraSplashState extends ConsumerState<AuroraSplash>
+    with TickerProviderStateMixin {
+  late AnimationController _pulseController;
+  late AnimationController _gradientController;
+  late AnimationController _waveController;
 
-    final splashColor = getSplashColor(voiceConv.state);
+  double _smoothedAmplitude = 0.0;
+  double _targetAmplitude = 0.0;
+  static const _smoothingFactor = 0.15;
 
-    // Animations des particules
-    final particles = <AuroraParticle>[];
-    final rng = Random();
-    for (int i = 0; i < 15; i++) {
-      particles.add(AuroraParticle(
-        x: rng.nextDouble() * 100,
-        y: rng.nextDouble() * 100,
-        size: 2 + rng.nextDouble() * 6,
-        speed: 0.2 + rng.nextDouble() * 0.6,
-        color: _getRandomAuroraColor(rng),
-      ));
-    }
+  Color _currentColor = const Color(0xFF00BCD4); // cyan
+  Color _targetColor = const Color(0xFF00BCD4);
 
-    return Container(
-      color: splashColor,
-      child: Stack(
-        children: [
-          // Animation des particules
-          ...particles.map((p) => AnimatedParticle(particle: p)),
+  @override
+  void initState() {
+    super.initState();
+    _pulseController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1200),
+    )..repeat(reverse: true);
 
-          // Texte d'indication centré
-          if (voiceConv.state != VoiceConversationState.idle)
-            Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  // Indicateur d'état
-                  Container(
-                    width: 80,
-                    height: 80,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: _getStateColor(voiceConv.state).withOpacity(0.2),
-                      boxShadow: [
-                        BoxShadow(
-                          color: _getStateColor(voiceConv.state).withOpacity(0.4),
-                          blurRadius: 40,
-                          spreadRadius: 10,
-                        ),
-                      ],
-                    ),
-                    child: Center(
-                      child: Icon(
-                        _getStateIcon(voiceConv.state),
-                        size: 48,
-                        color: _getStateColor(voiceConv.state),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 24),
-                  // Texte d'état
-                  Text(
-                    _getStateText(voiceConv.state),
-                    style: TextStyle(
-                      fontSize: 16,
-                      color: Colors.white.withOpacity(0.9),
-                      fontWeight: FontWeight.w500,
-                      letterSpacing: 0.5,
-                    ),
-                  ),
-                  // Si en écoute, afficher la transcription en temps réel
-                  if (voiceConv.transcript != null &&
-                      voiceConv.transcript!.isNotEmpty)
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 24),
-                      child: Text(
-                        '"${voiceConv.transcript}"',
-                        style: TextStyle(
-                          fontSize: 14,
-                          color: Colors.white.withOpacity(0.7),
-                          fontStyle: FontStyle.italic,
-                        ),
-                        textAlign: TextAlign.center,
-                      ),
-                    ),
-                ],
-              ),
-            ),
-        ],
-      ),
-    );
+    _gradientController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 2000),
+    )..repeat(reverse: true);
+
+    _waveController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 3000),
+    )..repeat();
   }
 
-  Color _getStateColor(VoiceConversationState state) {
-    switch (state) {
+  @override
+  void dispose() {
+    _pulseController.dispose();
+    _gradientController.dispose();
+    _waveController.dispose();
+    super.dispose();
+  }
+
+  Color _getEmotionColor(TtsEmotion emotion) {
+    switch (emotion) {
+      case TtsEmotion.neutral:
+        return const Color(0xFF00BCD4); // cyan
+      case TtsEmotion.joyful:
+        return const Color(0xFFFFC107); // amber
+      case TtsEmotion.sad:
+        return const Color(0xFF3F51B5); // indigo
+      case TtsEmotion.serious:
+        return const Color(0xFF2E7D32); // vert foncé
+      case TtsEmotion.excited:
+        return const Color(0xFFFF5722); // deep orange
+      case TtsEmotion.cheerful:
+        return const Color(0xFFFF9800); // orange
+      case TtsEmotion.friendly:
+        return const Color(0xFF8BC34A); // light green
+    }
+  }
+
+  Color _getStateColor(VoiceConversationState convState) {
+    switch (convState) {
       case VoiceConversationState.listening:
-        return Colors.green;
+        return const Color(0xFF4CAF50); // green
       case VoiceConversationState.thinking:
-        return Colors.blue;
+        return const Color(0xFF2196F3); // blue
       case VoiceConversationState.speaking:
-        return Colors.orange;
+        return const Color(0xFFFF9800); // orange
       case VoiceConversationState.processingStt:
-        return Colors.cyan;
+        return const Color(0xFF00BCD4); // cyan
       case VoiceConversationState.error:
-        return Colors.red;
-      default:
-        return Colors.grey;
+        return const Color(0xFFF44336); // red
+      case VoiceConversationState.idle:
+        return const Color(0xFF9E9E9E); // grey
     }
   }
 
-  IconData _getStateIcon(VoiceConversationState state) {
-    switch (state) {
+  IconData _getStateIcon(VoiceConversationState convState) {
+    switch (convState) {
       case VoiceConversationState.listening:
         return Icons.mic;
       case VoiceConversationState.thinking:
@@ -152,132 +110,199 @@ class AuroraSplash extends ConsumerWidget {
         return Icons.transcribe;
       case VoiceConversationState.error:
         return Icons.error;
-      default:
+      case VoiceConversationState.idle:
         return Icons.help;
     }
   }
 
-  String _getStateText(VoiceConversationState state) {
-    switch (state) {
+  String _getStateText(VoiceConversationState convState) {
+    switch (convState) {
       case VoiceConversationState.listening:
         return 'Écoute en cours...';
       case VoiceConversationState.thinking:
         return 'Je réfléchis...';
       case VoiceConversationState.speaking:
-        return 'Je vous écoute !';
+        return 'Je parle...';
       case VoiceConversationState.processingStt:
         return 'Transcription...';
       case VoiceConversationState.error:
         return 'Erreur';
-      default:
+      case VoiceConversationState.idle:
         return 'Mode vocal';
     }
-  }
-}
-
-/// Particule pour l'animation auréole
-class AuroraParticle {
-  final double x;
-  final double y;
-  final double size;
-  final double speed;
-  final Color color;
-
-  AuroraParticle({
-    required this.x,
-    required this.y,
-    required this.size,
-    required this.speed,
-    required this.color,
-  });
-
-  AuroraParticle copyWith({
-    double? x,
-    double? y,
-    double? size,
-    double? speed,
-    Color? color,
-  }) => AuroraParticle(
-        x: x ?? this.x,
-        y: y ?? this.y,
-        size: size ?? this.size,
-        speed: speed ?? this.speed,
-        color: color ?? this.color,
-      );
-}
-
-/// Widget animé pour une particule
-class AnimatedParticle extends StatefulWidget {
-  final AuroraParticle particle;
-
-  const AnimatedParticle({super.key, required this.particle});
-
-  @override
-  State<AnimatedParticle> createState() => _AnimatedParticleState();
-}
-
-class _AnimatedParticleState extends State<AnimatedParticle>
-    with SingleTickerProviderStateMixin {
-  late AnimationController _controller;
-  late Animation<double> _animation;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = AnimationController(
-      vsync: this,
-      duration: Duration(seconds: (5 / widget.particle.speed).toInt()),
-    )..repeat();
-
-    _animation = Tween<double>(begin: 0, end: 1).animate(
-      CurvedAnimation(
-        parent: _controller,
-        curve: Curves.easeInOut,
-      ),
-    );
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final size = MediaQuery.of(context).size;
-    final x = (widget.particle.x + (sin(_animation.value * 3.14159) * 5)) % 100;
-    final y = (widget.particle.y + (_animation.value * 20)) % 100;
+    final voiceConv =
+        ref.watch(voiceConversationProvider(widget.conversationId));
+    final voiceState = ref.watch(voiceServiceProvider);
 
-    return Positioned(
-      left: (size.width * x / 100) - (widget.particle.size * 10),
-      top: (size.height * y / 100) - (widget.particle.size * 10),
-      child: AnimatedOpacity(
-        opacity: (1 - _animation.value) * 0.6,
-        duration: const Duration(milliseconds: 500),
-        child: Container(
-          width: widget.particle.size * 10,
-          height: widget.particle.size * 10,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: widget.particle.color.withOpacity(
-              (1 - _animation.value) * 0.6,
-            ),
+    // Amplitude cible
+    if (voiceConv.state == VoiceConversationState.listening) {
+      _targetAmplitude = voiceState.micLevel;
+    } else if (voiceConv.state == VoiceConversationState.speaking) {
+      _targetAmplitude = 0.5 + _pulseController.value * 0.3;
+    } else {
+      _targetAmplitude = 0.0;
+    }
+
+    // Lissage de l'amplitude
+    _smoothedAmplitude = _smoothedAmplitude +
+        (_targetAmplitude - _smoothedAmplitude) * _smoothingFactor;
+
+    // Couleur cible
+    if (voiceConv.state == VoiceConversationState.speaking) {
+      _targetColor = _getEmotionColor(voiceConv.emotion);
+    } else {
+      _targetColor = _getStateColor(voiceConv.state);
+    }
+    _currentColor = Color.lerp(_currentColor, _targetColor, 0.08)!;
+
+    final size = MediaQuery.of(context).size;
+    final baseRadius = size.shortestSide * 0.15;
+    final maxPulse = size.shortestSide * 0.12;
+    final amplitude = _smoothedAmplitude.clamp(0.0, 1.0);
+    final pulseRadius = baseRadius + (maxPulse * amplitude);
+
+    return Container(
+      color: Colors.black87,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          // Ondes concentriques
+          AnimatedBuilder(
+            animation: _waveController,
+            builder: (context, _) {
+              return Stack(
+                alignment: Alignment.center,
+                children: List.generate(3, (i) {
+                  final wavePhase =
+                      (_waveController.value + i * 0.33) % 1.0;
+                  final waveRadius = pulseRadius * (1.2 + wavePhase * 1.5);
+                  final waveOpacity =
+                      (1.0 - wavePhase) * 0.15 * (0.3 + amplitude * 0.7);
+
+                  return Container(
+                    width: waveRadius * 2,
+                    height: waveRadius * 2,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: _currentColor.withOpacity(waveOpacity),
+                        width: 2.0,
+                      ),
+                    ),
+                  );
+                }),
+              );
+            },
           ),
-        ),
+
+          // Gradient animé autour de la forme centrale
+          AnimatedBuilder(
+            animation:
+                Listenable.merge([_pulseController, _gradientController]),
+            builder: (context, _) {
+              final gradPhase = _gradientController.value;
+              final gradRadius = pulseRadius * (1.3 + gradPhase * 0.4);
+
+              return Container(
+                width: gradRadius * 2,
+                height: gradRadius * 2,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  gradient: RadialGradient(
+                    colors: [
+                      _currentColor
+                          .withOpacity(0.4 * (0.5 + amplitude * 0.5)),
+                      _currentColor
+                          .withOpacity(0.15 * (0.3 + amplitude * 0.7)),
+                      Colors.transparent,
+                    ],
+                    stops: const [0.0, 0.6, 1.0],
+                  ),
+                ),
+              );
+            },
+          ),
+
+          // Forme centrale (pulse avec le volume)
+          AnimatedBuilder(
+            animation: _pulseController,
+            builder: (context, _) {
+              final breathe = _pulseController.value;
+              final deform =
+                  1.0 + (breathe - 0.5) * 0.08 * (0.5 + amplitude);
+
+              return Transform.scale(
+                scale: deform,
+                child: Container(
+                  width: pulseRadius * 2,
+                  height: pulseRadius * 2,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: RadialGradient(
+                      colors: [
+                        _currentColor.withOpacity(0.9),
+                        _currentColor.withOpacity(0.5),
+                        _currentColor.withOpacity(0.1),
+                      ],
+                      stops: const [0.0, 0.5, 1.0],
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: _currentColor
+                            .withOpacity(0.4 * (0.3 + amplitude * 0.7)),
+                        blurRadius: 60 * (0.5 + amplitude),
+                        spreadRadius: 15 * (0.3 + amplitude * 0.7),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+
+          // Icône + texte d'état
+          if (voiceConv.state != VoiceConversationState.idle)
+            Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  _getStateIcon(voiceConv.state),
+                  size: 48,
+                  color: Colors.white.withOpacity(0.9),
+                ),
+                const SizedBox(height: 24),
+                Text(
+                  _getStateText(voiceConv.state),
+                  style: TextStyle(
+                    fontSize: 16,
+                    color: Colors.white.withOpacity(0.9),
+                    fontWeight: FontWeight.w500,
+                    letterSpacing: 0.5,
+                  ),
+                ),
+                if (voiceConv.transcript != null &&
+                    voiceConv.transcript!.isNotEmpty)
+                  Padding(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+                    child: Text(
+                      '"${voiceConv.transcript}"',
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: Colors.white.withOpacity(0.7),
+                        fontStyle: FontStyle.italic,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
+              ],
+            ),
+        ],
       ),
     );
   }
-}
-
-Color _getRandomAuroraColor(Random rng) {
-  final colors = [
-    Colors.green,
-    Colors.blue,
-    Colors.purple,
-    Colors.cyan,
-    Colors.pink,
-    Colors.orange,
-  ];
-  return colors[rng.nextInt(colors.length)];
 }
