@@ -2,6 +2,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import '../../../core/api/dio_client.dart';
 import '../../../core/constants.dart';
+import 'search_cache_service.dart';
 
 /// Exception specifique au service de recherche.
 class SearchException implements Exception {
@@ -30,20 +31,32 @@ class SearchService {
   SearchService({Dio? dio}) : _dio = dio ?? DioClientFactory.create();
 
   /// Recherche web fiable avec fallback : backend cloud → DuckDuckGo direct.
+  /// Utilise le cache si disponible et non expiré.
   Future<List<WebSearchResult>> searchWithFallback(String query, {String? lang}) async {
+    // 0. Vérifier le cache
+    final cached = searchCache.get(query, lang: lang);
+    if (cached != null) return cached;
+
     // 1. Essayer le backend cloud (si configure et disponible)
     final backendUrl = AppConstants.backendBaseUrl;
     if (backendUrl.isNotEmpty && !backendUrl.contains('localhost')) {
       try {
         final results = await _searchBackend(query, lang: lang);
-        if (results.isNotEmpty) return results;
+        if (results.isNotEmpty) {
+          searchCache.put(query, results, lang: lang);
+          return results;
+        }
       } catch (e) {
         debugPrint('[SearchService] Backend indisponible, fallback client-side : $e');
       }
     }
 
     // 2. Fallback client-side : DuckDuckGo HTML scraping (autonome)
-    return searchDirect(query);
+    final results = await searchDirect(query);
+    if (results.isNotEmpty) {
+      searchCache.put(query, results, lang: lang);
+    }
+    return results;
   }
 
   /// Recherche web via le backend cloud.

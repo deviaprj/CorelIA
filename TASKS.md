@@ -26,28 +26,30 @@ Dernière mise à jour : 2026-05-06 — Rewarded ads quota recovery + fix bip mi
 
 ## En cours
 
-- [ ] **Vérification bip micro sur appareil** — Tester que le fix STT reuse élimine les bips
-- [ ] **Vérification rewarded ad flow** — Tester le dialog quota sur appareil (AdMob test IDs)
-- [ ] **Vérification `deepseek-chat` vision** — Test live pour confirmer le support `image_url`
+- [ ] **P1 — Vision via Ollama** — `OllamaVisionService` + fallback cloud
+- [ ] **P1 — Cache recherche web** — `SearchCacheService` avec TTL 15 min
 
 ---
 
 ## 1. AMÉLIORATION DU DIALOGUE VOCAL
 
-### 1.1 TTS Expressif (Edge TTS + balises prosodiques)
-- [ ] Intégrer `edge_tts` Dart package ou wrapper HTTP pour Microsoft Edge TTS (gratuit, voix françaises : `fr-FR-HenriNeural`, `fr-FR-DeniseNeural`)
-- [ ] Remplacer `flutter_tts` par `EdgeTtsService` dans `TtsNaturalService` (garder `flutter_tts` comme fallback local)
-- [ ] Ajouter support des balises prosodiques `[joyeux]`, `[triste]`, `[sérieux]`, `[excité]` dans les réponses DeepSeek (prompt système + parsing côté client)
-- [ ] Mapper balises prosodiques → paramètres TTS (rate, pitch, voice)
-- [ ] Streaming audio depuis Edge TTS (HTTP chunked) pour réduire la latence
-- [ ] Cache TTS : hash du texte → fichier audio local (`path_provider` + `just_audio`)
-- [ ] Extension Chrome : pont TTS dans `speech_bridge.js` via `chrome.tts` ou `SpeechSynthesis`
+### 1.1 TTS Expressif (Edge TTS + balises prosodiques) ✅
+- [x] Intégrer `EdgeTtsService` (WebSocket, voix françaises Henri/Denise)
+- [x] `TtsNaturalService` avec Edge TTS primaire + flutter_tts fallback
+- [x] EmotionParser : balises `[joyeux]`, `[triste]`, `[sérieux]`, `[excité]`, `[amical]`
+- [x] Mapping émotion → rate/pitch/voice dans `emotionTtsConfigs`
+- [x] Conditional import web/mobile (`audio_player_factory.dart`)
+- [x] Extension Chrome : pont TTS dans `speech_bridge.js` via Web Speech API
+- [ ] Streaming audio Edge TTS (HTTP chunked) pour réduire la latence
+- [ ] Cache TTS : hash du texte → fichier audio local
 
-### 1.2 Pipeline Vocal Complet (STT → LLM → TTS)
-- [ ] Ajouter extraction d'émotions dans le prompt système DeepSeek : balises `[joyeux]`, `[triste]`, `[sérieux]`, `[excité]`
-- [ ] Parser les balises dans `VoiceConversationNotifier._speakResponseAndLoop()` et les retirer du texte avant TTS
-- [ ] Transmettre l'émotion détectée au service splash pour changement de couleur/gradient
-- [ ] Mode barge-in : permettre d'interrompre le TTS en parlant (détection volume micro)
+### 1.2 Pipeline Vocal Complet (STT → LLM → TTS) — Partiel ✅
+- [x] Parser les balises dans `VoiceConversationNotifier._speakResponseAndLoop()`
+- [x] Transmettre l'émotion détectée au service splash pour changement de couleur/gradient
+- [x] Fix bip micro : instance STT initialisée une fois, réutilisée
+- [x] Quota vocal : `VoiceQuotaService` (10/jour, +5 via ad)
+- [ ] Ajouter extraction d'émotions dans le prompt système DeepSeek
+- [ ] Mode barge-in : permettre d'interrompre le TTS en parlant
 
 ### 1.3 STT Whisper (fallback/amélioration)
 - [ ] Évaluer `whisper.dart` ou appel API OpenAI Whisper comme alternative à `speech_to_text`
@@ -151,28 +153,20 @@ Dernière mise à jour : 2026-05-06 — Rewarded ads quota recovery + fix bip mi
 
 ## 5. ÉCRAN DE SPLASH ANIMÉ PAR LA VOIX
 
-### 5.1 Forme réactive au volume
-- [ ] Remplacer les 15 `AuroraParticle` aléatoires par une forme centrale unique (cercle/losange organique)
-- [ ] `AnimationController` + `AnimatedBuilder` pour animation fluide 60fps
-- [ ] Brancher l'amplitude RMS du micro (`record` package) pour faire pulser la forme
-- [ ] Diamètre variable avec le volume : silence = taille min, voix forte = taille max
-- [ ] Interpolation `Curves.easeInOutCubic` pour transitions douces
+### 5.1 Forme réactive au volume ✅
+- [x] Forme centrale unique avec AnimationControllers (pulse, gradient, wave)
+- [x] Brancher l'amplitude RMS du micro pour faire pulser la forme
+- [x] `Curves.easeInOutCubic` pour transitions douces
 
-### 5.2 Gradient animé et émotions
-- [ ] Gradient animé autour de la forme centrale (onde concentrique)
-- [ ] Mapper les balises prosodiques aux palettes de couleurs :
-  - Joyeux : jaune/orange
-  - Triste : bleu/violet
-  - Sérieux : gris/vert foncé
-  - Excité : rouge/orange vif
-  - Neutre : bleu/cyan
-- [ ] Transitions de couleurs douces (1-2 secondes entre les palettes)
-- [ ] L'onde suit le volume : plus le volume est élevé, plus l'onde est intense
+### 5.2 Gradient animé et émotions ✅
+- [x] Gradient animé autour de la forme centrale (onde concentrique)
+- [x] Mapper les émotions aux palettes de couleurs (joyful=amber, sad=indigo, etc.)
+- [x] Transitions de couleurs douces via Color.lerp (0.08 factor per frame)
+- [x] Lissage de l'amplitude RMS (exponential moving average, 0.15 factor)
 
-### 5.3 Réduction du jitter visuel
-- [ ] State persistant pour les animations (ne pas régénérer les particules à chaque `build()`)
-- [ ] Lissage de l'amplitude RMS (moyenne mobile sur 3-5 frames)
-- [ ] Désactiver l'overlay pendant les transitions d'état rapides (thinking → speaking)
+### 5.3 Réduction du jitter visuel ✅
+- [x] ConsumerStatefulWidget avec state persistant
+- [x] Lissage de l'amplitude RMS (exponential moving average)
 
 ---
 

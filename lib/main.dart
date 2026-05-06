@@ -13,6 +13,7 @@ import 'features/monetization/ads/consent_service.dart';
 import 'features/monetization/subscription/subscription_service.dart';
 import 'firebase_options.dart';
 import 'features/auth/data/mock_auth_repository.dart';
+import 'features/chat/data/search_cache_service.dart';
 
 // Global flag pour le mode demo local (sans Firebase)
 // true par defaut pour le developpement : auth mock + IA reelle (DeepSeek via .env)
@@ -21,6 +22,9 @@ bool isDemoMode = const bool.fromEnvironment('DEMO_MODE', defaultValue: true);
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Charger le cache de recherche depuis SharedPreferences
+  await searchCache.loadFromPrefs();
 
   // Charger .env avant toute initialisation
   try {

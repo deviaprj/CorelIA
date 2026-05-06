@@ -11,6 +11,7 @@ import '../data/search_service.dart';
 import '../data/file_quota_service.dart';
 import '../data/search_quota_service.dart';
 import '../data/voice_quota_service.dart';
+import '../data/ollama_vision_service.dart';
 import '../domain/conversation.dart';
 import '../domain/message.dart';
 import '../../../core/constants.dart';
@@ -484,26 +485,73 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
   }
 
   /// Route une requete avec image vers un modele vision.
-  /// Priorite : OpenRouter GPT-4o-mini > DeepSeek chat (supporte vision).
-  Stream<String> _getVisionStream(List<Map<String, dynamic>> history) {
+  /// Priorite : Ollama (si configuré) > OpenRouter GPT-4o-mini > DeepSeek chat.
+  Stream<String> _getVisionStream(List<Map<String, dynamic>> history) async* {
+    // 0. Ollama vision locale (si configuré et disponible)
+    final ollama = ref.read(ollamaVisionServiceProvider);
+    await ollama.loadConfig();
+    if (ollama.enabled) {
+      final available = await ollama.isAvailable();
+      if (available) {
+        debugPrint('[ChatNotifier] Vision via Ollama');
+        try {
+          // Extraire l'image base64 du dernier message utilisateur
+          final lastUserMsg = history.lastWhere(
+            (m) => m['role'] == 'user',
+            orElse: () => {},
+          );
+          final content = lastUserMsg['content'];
+          String? imageBase64;
+          String textPrompt = '';
+          if (content is List) {
+            for (final part in content) {
+              if (part is Map) {
+                if (part['type'] == 'text') textPrompt = part['text'] as String? ?? '';
+                if (part['type'] == 'image_url') {
+                  final url = part['image_url']?['url'] as String? ?? '';
+                  if (url.startsWith('data:')) {
+                    imageBase64 = url.substring(url.indexOf(',') + 1);
+                  }
+                }
+              }
+            }
+          }
+          if (imageBase64 != null) {
+            final description = await ollama.analyzeImage(
+              imageBase64: imageBase64,
+              prompt: textPrompt.isNotEmpty ? textPrompt : 'Décris cette image en détail.',
+            );
+            yield description;
+            return;
+          }
+        } catch (e) {
+          debugPrint('[ChatNotifier] Ollama vision error, fallback cloud: $e');
+        }
+      }
+    }
+
+    // 1. OpenRouter GPT-4o-mini
     final openRouterKey = AppConstants.openRouterApiKey;
     if (openRouterKey.isNotEmpty) {
       debugPrint('[ChatNotifier] Vision via OpenRouter');
-      return OpenRouterClient(apiKey: openRouterKey).streamChat(
+      yield* OpenRouterClient(apiKey: openRouterKey).streamChat(
         messages: history,
         model: AppConstants.visionModel,
         maxTokens: AppConstants.proMaxTokens,
       );
+      return;
     }
 
+    // 2. DeepSeek chat (supporte vision)
     final deepSeekKey = AppConstants.deepSeekApiKey;
     if (deepSeekKey.isNotEmpty) {
       debugPrint('[ChatNotifier] Vision via DeepSeek chat');
-      return DeepSeekClient(apiKey: deepSeekKey).streamChat(
+      yield* DeepSeekClient(apiKey: deepSeekKey).streamChat(
         messages: history,
         model: AppConstants.deepSeekVisionModel,
         enableSearch: true,
       );
+      return;
     }
 
     throw const AiException(
