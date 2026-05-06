@@ -3,12 +3,46 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../../core/providers/app_providers.dart';
 import '../../../core/providers/firebase_providers.dart';
 import '../../../core/secure_storage.dart';
 import '../../auth/presentation/auth_notifier.dart';
 import '../../monetization/subscription/subscription_service.dart';
 import '../../referral/data/referral_service.dart';
+
+// ── System prompt provider ──────────────────────────────────────────────────
+const _systemPromptKey = 'corely_system_prompt';
+const _defaultSystemPrompt =
+    'Tu es Corely, un assistant IA conversationnel chaleureux et intelligent. '
+    'Tu rédiges en français par défaut. Tu es direct, utile, et concis. '
+    'Tu utilises le tutoiement par défaut. Tu ne dis JAMAIS "en tant que modèle de langage".';
+
+final systemPromptProvider = StateNotifierProvider<SystemPromptNotifier, String>(
+  (ref) => SystemPromptNotifier(),
+);
+
+class SystemPromptNotifier extends StateNotifier<String> {
+  SystemPromptNotifier() : super(_defaultSystemPrompt);
+
+  Future<void> load() async {
+    final prefs = await SharedPreferences.getInstance();
+    final saved = prefs.getString(_systemPromptKey);
+    if (saved != null) state = saved;
+  }
+
+  Future<void> save(String prompt) async {
+    state = prompt;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_systemPromptKey, prompt);
+  }
+
+  Future<void> reset() async {
+    state = _defaultSystemPrompt;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_systemPromptKey);
+  }
+}
 
 class SettingsScreen extends ConsumerStatefulWidget {
   const SettingsScreen({super.key});
@@ -18,37 +52,24 @@ class SettingsScreen extends ConsumerStatefulWidget {
 }
 
 class _SettingsScreenState extends ConsumerState<SettingsScreen> {
-  final _apiKeyController = TextEditingController();
-  bool _apiKeyVisible = false;
+  late TextEditingController _systemPromptController;
 
   @override
   void initState() {
     super.initState();
-    _loadApiKey();
-  }
-
-  Future<void> _loadApiKey() async {
-    final storage = ref.read(secureStorageProvider);
-    final key = await storage.read(StorageKeys.apiKeyDeepSeek);
-    if (key != null && mounted) {
-      _apiKeyController.text = key;
-    }
+    _systemPromptController = TextEditingController(text: ref.read(systemPromptProvider));
+    // Charger le prompt système sauvegardé
+    ref.read(systemPromptProvider.notifier).load().then((_) {
+      if (mounted) {
+        _systemPromptController.text = ref.read(systemPromptProvider);
+      }
+    });
   }
 
   @override
   void dispose() {
-    _apiKeyController.dispose();
+    _systemPromptController.dispose();
     super.dispose();
-  }
-
-  Future<void> _saveApiKey() async {
-    final storage = ref.read(secureStorageProvider);
-    await storage.write(StorageKeys.apiKeyDeepSeek, _apiKeyController.text.trim());
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Clé API sauvegardée')),
-      );
-    }
   }
 
   @override
@@ -82,7 +103,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           _SectionTitle('Apparence'),
           ListTile(
             leading: const Icon(Icons.nights_stay_outlined),
-            title: const Text('Theme sombre'),
+            title: const Text('Thème sombre'),
             trailing: Switch(
               value: themeMode == ThemeMode.dark,
               onChanged: (v) {
@@ -93,46 +114,73 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             ),
           ),
 
-          // ── Vitesse TTS ──────────────────────────────────────────────────
-          _SectionTitle('Vitesse de lecture vocale'),
-          _TtsSpeedSlider(),
-
-          // ── Clé API perso ────────────────────────────────────────────────
-          _SectionTitle('Clé API DeepSeek (optionnel)'),
+          // ── Prompt système ──────────────────────────────────────────────
+          _SectionTitle('Prompt système'),
           Padding(
-            padding:
-                const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            child: TextField(
-              controller: _apiKeyController,
-              obscureText: !_apiKeyVisible,
-              decoration: InputDecoration(
-                labelText: 'sk-...',
-                helperText: 'Utilisez votre propre quota',
-                suffixIcon: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    IconButton(
-                      icon: Icon(_apiKeyVisible
-                          ? Icons.visibility_off
-                          : Icons.visibility),
-                      onPressed: () => setState(
-                          () => _apiKeyVisible = !_apiKeyVisible),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Personnalisez le comportement de Corely. '
+                  'Ce prompt est injecté au début de chaque conversation.',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: _systemPromptController,
+                  maxLines: 8,
+                  minLines: 6,
+                  decoration: InputDecoration(
+                    hintText: 'Décrivez comment Corely doit se comporter...',
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
                     ),
-                    IconButton(
-                      icon: const Icon(Icons.save_outlined),
-                      onPressed: _saveApiKey,
+                    filled: true,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    // Charger un fichier .txt/.md
+                    OutlinedButton.icon(
+                      icon: const Icon(Icons.upload_file, size: 18),
+                      label: const Text('Fichier'),
+                      onPressed: _loadSystemPromptFromFile,
+                    ),
+                    const SizedBox(width: 8),
+                    OutlinedButton(
+                      onPressed: () {
+                        _systemPromptController.text = _defaultSystemPrompt;
+                        ref.read(systemPromptProvider.notifier).reset();
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Prompt réinitialisé')),
+                        );
+                      },
+                      child: const Text('Réinitialiser'),
+                    ),
+                    const SizedBox(width: 8),
+                    FilledButton(
+                      onPressed: () {
+                        final prompt = _systemPromptController.text.trim();
+                        if (prompt.isEmpty) return;
+                        ref.read(systemPromptProvider.notifier).save(prompt);
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Prompt sauvegardé')),
+                        );
+                      },
+                      child: const Text('Sauvegarder'),
                     ),
                   ],
                 ),
-              ),
+              ],
             ),
           ),
 
-          // ── Réglage vocal (TTS) ─────────────────────────────────────────
-          _SectionTitle('Régler la voix'),
-          const _TtsSpeedSlider(),
-
-          // ── Mode vocal (micro + TTS) ────────────────────────────────────
+          // ── Parrainage ─────────────────────────────────────────────────
           _SectionTitle('Parrainage'),
           _ReferralSection(),
 
@@ -160,7 +208,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           const SizedBox(height: 24),
           Center(
             child: Text(
-              'AironBot v1.0.0',
+              'Corely v1.1.0',
               style: Theme.of(context).textTheme.bodySmall,
             ),
           ),
@@ -168,6 +216,23 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         ],
       ),
     );
+  }
+
+  Future<void> _loadSystemPromptFromFile() async {
+    // Utiliser le package file_picker ou un InputElement web
+    // Pour l'instant, on utilise Clipboard comme fallback
+    final data = await Clipboard.getData(Clipboard.kTextPlain);
+    final text = data?.text;
+    if (text != null && text.isNotEmpty) {
+      _systemPromptController.text = text;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Collé depuis le presse-papier')),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Presse-papier vide. Copiez le contenu d\'un fichier .txt ou .md puis appuyez sur Fichier.')),
+      );
+    }
   }
 
   Future<void> _confirmDeleteAccount(BuildContext context) async {
@@ -211,48 +276,6 @@ class _SectionTitle extends StatelessWidget {
               color: Theme.of(context).colorScheme.primary,
               letterSpacing: 1,
             ),
-      ),
-    );
-  }
-}
-
-class _TtsSpeedSlider extends ConsumerWidget {
-  const _TtsSpeedSlider();
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final speed = ref.watch(ttsSpeedProvider);
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const Text('Lent'),
-              Text(
-                '${speed.toStringAsFixed(2)}x',
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      fontWeight: FontWeight.bold,
-                      color: Theme.of(context).colorScheme.primary,
-                    ),
-              ),
-              const Text('Rapide'),
-            ],
-          ),
-          Slider(
-            value: speed,
-            min: 0.5,
-            max: 2.0,
-            divisions: 15,
-            label: '${speed.toStringAsFixed(2)}x',
-            onChanged: (value) {
-              ref.read(ttsSpeedProvider.notifier).setSpeed(value);
-            },
-          ),
-        ],
       ),
     );
   }
@@ -309,7 +332,7 @@ class _ReferralSectionState extends ConsumerState<_ReferralSection> {
   }
 
   void _shareCode(String code) {
-    final text = 'Rejoins AironBot avec mon code parrain : $code\n'
+    final text = 'Rejoins Corely avec mon code parrain : $code\n'
         'On gagne chacun +5 requêtes IA gratuites !\n'
         'https://aironbot.app';
     Share.share(text);
@@ -330,7 +353,6 @@ class _ReferralSectionState extends ConsumerState<_ReferralSection> {
 
     return Column(
       children: [
-        // Mon code de parrainage
         codeAsync.when(
           data: (code) => code != null
               ? ListTile(
@@ -364,7 +386,6 @@ class _ReferralSectionState extends ConsumerState<_ReferralSection> {
           error: (_, __) => const SizedBox.shrink(),
         ),
 
-        // Nombre de filleuls
         countAsync.when(
           data: (count) => ListTile(
             leading: const Icon(Icons.people_outline),
@@ -377,7 +398,6 @@ class _ReferralSectionState extends ConsumerState<_ReferralSection> {
           error: (_, __) => const SizedBox.shrink(),
         ),
 
-        // Appliquer un code parrain
         hasReferrerAsync.when(
           data: (hasReferrer) => hasReferrer
               ? const ListTile(

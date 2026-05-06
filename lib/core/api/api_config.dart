@@ -1,6 +1,7 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import '../../core/constants.dart';
+import '../platform/platform_service.dart';
 
 /// Configuration centralisée de l'API backend AironBot.
 abstract class ApiConfig {
@@ -20,6 +21,6 @@ abstract class ApiConfig {
     'Content-Type': 'application/json',
     'Accept': 'text/event-stream',
     'X-Client-Version': AppConstants.appVersion,
-    'X-Platform': defaultTargetPlatform.name,
+    'X-Platform': PlatformService.current.name,
   };
 }

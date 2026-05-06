@@ -1,4 +1,4 @@
-// AironBot — Content Script
+// Corely — Content Script
 // Capture le texte sélectionné et l'envoie au background SW
 'use strict';
 

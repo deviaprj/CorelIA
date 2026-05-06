@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'ad_service.dart';
 import '../../chat/data/search_quota_service.dart';
 import '../../chat/data/voice_quota_service.dart';
@@ -159,8 +158,7 @@ class _QuotaExceededDialogState extends State<QuotaExceededDialog> {
 
     final earned = await AdService.showRewarded(
       loadAd: AdService.loadRewarded,
-      onEarned: (reward) {
-        // Le bonus est accordé uniquement si la récompense est gagnée
+      onEarned: (_) {
         _grantBonus();
       },
     );
@@ -176,8 +174,6 @@ class _QuotaExceededDialogState extends State<QuotaExceededDialog> {
   }
 
   void _grantBonus() {
-    // Le bonus est accordé par le callback onEarned de l'ad récompensé.
-    // On ferme le dialog et on notifie le parent.
     widget.onBonusGranted?.call();
     if (mounted) {
       Navigator.of(context).pop(true);

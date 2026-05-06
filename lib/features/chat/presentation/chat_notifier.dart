@@ -17,6 +17,7 @@ import '../domain/message.dart';
 import '../../../core/constants.dart';
 import '../../../core/providers/firebase_providers.dart';
 import '../../monetization/subscription/subscription_service.dart';
+import '../../settings/presentation/settings_screen.dart' show systemPromptProvider;
 import '../../monetization/credits/credit_providers.dart';
 import '../../monetization/credits/credit_service.dart';
 import '../../../main.dart' show isDemoMode;
@@ -62,7 +63,7 @@ class ChatState {
     this.error,
     this.remainingRequests,
     this.isSearching = false,
-    this.useSearch = true,
+    this.useSearch = false,
     this.displayCount = 30,
   });
 
@@ -267,13 +268,15 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
       }
     }
 
-    // Recherche web (autonome) — effectuee avant le stream
+    // Recherche web — uniquement si l'utilisateur l'a activée OU si l'intent le nécessite
     List<WebSearchResult>? searchResults;
-    if (state.useSearch) {
+    final shouldSearch = state.useSearch || _needsWebSearch(userMsg.content);
+    if (shouldSearch) {
       try {
         state = state.copyWith(isSearching: true);
         final searchService = ref.read(searchServiceProvider);
-        searchResults = await searchService.searchWithFallback(userMsg.content);
+        final searchQuery = _extractSearchQuery(userMsg.content);
+        searchResults = await searchService.searchWithFallback(searchQuery);
       } catch (e) {
         debugPrint('[ChatNotifier] Recherche web echouee : $e');
       } finally {
@@ -397,6 +400,9 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
     String? fileContent,
     String? fileName,
   }) async {
+    // ── 0. Prompt système Corely ───────────────────────────────────────────
+    final corelySystemPrompt = ref.read(systemPromptProvider);
+
     // ── 1. Construire l'historique ───────────────────────────────────────
     final historyMessages = state.messages
         .where((m) => m.role != Role.system && !m.isStreaming)
@@ -406,6 +412,15 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
         .toList()
         .reversed
         .toList();
+
+    // Insérer le prompt système en tête
+    historyMessages.insert(0, Message(
+      id: 'corely_system_${DateTime.now().millisecondsSinceEpoch}',
+      conversationId: arg,
+      role: Role.system,
+      content: corelySystemPrompt,
+      createdAt: DateTime.now(),
+    ));
 
     // ── 2. Injecter le contexte fichier ────────────────────────────────
     if (fileContent != null && fileContent.isNotEmpty) {
@@ -438,9 +453,8 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
         conversationId: arg,
         role: Role.system,
         content:
-            'Tu es un assistant IA avec acces a internet. '
-            'Utilise les resultats de recherche ci-dessous pour repondre '
-            "a la question de l'utilisateur. Cite tes sources quand c'est pertinent.\n\n"
+            'Voici des resultats de recherche web pertinents pour la question. '
+            'Utilise-les pour enrichir ta reponse et cite tes sources.\n\n'
             '$searchContext',
         createdAt: DateTime.now(),
       ));
@@ -481,7 +495,7 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
       return _mockResponseStream();
     }
     return DeepSeekClient(apiKey: deepSeekKey)
-        .streamChat(messages: history, enableSearch: true);
+        .streamChat(messages: history, enableSearch: false);
   }
 
   /// Route une requete avec image vers un modele vision.
@@ -563,7 +577,7 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
   /// Réponse mock pour tests en mode DEMO
   Stream<String> _mockResponseStream() async* {
     const response =
-        'Bonjour ! Je suis AironBot, votre assistant IA. '
+        'Bonjour ! Je suis Corely, votre assistant IA. '
         'En mode démo, je fonctionne sans connexion externe. '
         'Posez-moi des questions sur n\'importe quel sujet !';
     for (final word in response.split(' ')) {
@@ -591,6 +605,66 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
   }
 
   void clearError() => state = state.copyWith(error: null);
+
+  // ── Intent classification ────────────────────────────────────────────────
+  // Détermine si le message nécessite une recherche web.
+  // Les questions factuelles, temporelles ou sur l'actualité en ont besoin.
+  // Les conversations générales, la créativité et le code n'en ont pas besoin.
+  static bool _needsWebSearch(String message) {
+    final lower = message.toLowerCase();
+    // Mots-clés déclencheurs : informations factuelles/temporelles
+    final triggerWords = [
+      'actualité', 'actualites', 'news', 'aujourd\'hui', 'en ce moment',
+      'quelle est la', 'quel est le', 'combien de', 'combien coûte',
+      'où est', 'ou est', 'où trouver', 'ou trouver',
+      'qui est', 'qui a', 'quand est', 'quelle année', 'quel année',
+      'dernier', 'dernière', 'latest', 'newest', 'current',
+      'prix de', 'cours de', 'taux de', 'météo', 'meteo',
+      'score de', 'résultat de', 'classement de',
+      'est-ce que', 'est-il vrai', 'vrai ou faux',
+      'comment aller', 'itinéraire', 'distance entre',
+    ];
+    // Mots-clés exclus : créativité, code, opinion, conversation
+    final excludeWords = [
+      'écris', 'ecris', 'rédige', 'redige', 'raconte', 'invente',
+      'imagine', 'crée', 'cree', 'dessine', 'compose',
+      'code', 'programme', 'fonction', 'script', 'algorithme',
+      'explique-moi', 'explique comment', 'pourquoi le',
+      'qu\'en penses-tu', 'ton avis', 'selon toi',
+      'story', 'poème', 'poeme', 'chanson', 'blague',
+    ];
+    // Si le message contient un mot-clé exclusif, pas de recherche
+    if (excludeWords.any((w) => lower.contains(w))) return false;
+    // Si le message contient un mot-clé déclencheur, recherche
+    if (triggerWords.any((w) => lower.contains(w))) return true;
+    // Questions explicites avec "?" — heuristique
+    if (lower.contains('?')) {
+      // Les questions longues et détaillées sont souvent conversationnelles
+      if (lower.length > 100) return false;
+      return true;
+    }
+    // Par défaut, pas de recherche (conversation normale)
+    return false;
+  }
+
+  /// Extrait une requête de recherche optimisée à partir du message utilisateur.
+  /// Supprime les salutations et le contexte conversationnel superflu.
+  static String _extractSearchQuery(String message) {
+    var query = message.trim();
+    // Retirer les salutations courantes
+    const salutations = ['bonjour', 'salut', 'hello', 'hi', 'hey', 'coucou'];
+    for (final s in salutations) {
+      if (query.toLowerCase().startsWith(s)) {
+        query = query.substring(s.length).trim();
+        break;
+      }
+    }
+    // Limiter la longueur de la requête
+    if (query.length > 200) {
+      query = '${query.substring(0, 200)}...';
+    }
+    return query;
+  }
 
   /// Charge plus de messages dans l'historique (UI pagination).
   void loadMoreHistory() {

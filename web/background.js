@@ -1,12 +1,12 @@
-// AironBot — Service Worker (Manifest V3)
+// Corely — Service Worker (Manifest V3)
 'use strict';
 
 // ── Initialisation ────────────────────────────────────────────────────────────
 chrome.runtime.onInstalled.addListener(() => {
-  // Menu contextuel "Demander à AironBot"
+  // Menu contextuel "Demander à Corely"
   chrome.contextMenus.create({
     id: 'ask_aironbot',
-    title: 'Demander à AironBot : "%s"',
+    title: 'Demander à Corely : "%s"',
     contexts: ['selection'],
   });
 

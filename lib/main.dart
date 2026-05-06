@@ -110,13 +110,13 @@ Future<void> main() async {
     }
   }
 
-  runApp(ProviderScope(child: AironBotApp(isDemoMode: isDemoMode)));
+  runApp(ProviderScope(child: CorelyApp(isDemoMode: isDemoMode)));
 }
 
-class AironBotApp extends ConsumerWidget {
+class CorelyApp extends ConsumerWidget {
   final bool isDemoMode;
 
-  const AironBotApp({super.key, required this.isDemoMode});
+  const CorelyApp({super.key, required this.isDemoMode});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -132,7 +132,7 @@ class AironBotApp extends ConsumerWidget {
     });
 
     return MaterialApp.router(
-      title: 'AironBot${isDemoMode ? " (DEMO)" : ""}',
+      title: 'Corely${isDemoMode ? " (DEMO)" : ""}',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.light,
       darkTheme: AppTheme.dark,

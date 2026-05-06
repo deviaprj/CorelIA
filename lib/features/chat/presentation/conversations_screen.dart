@@ -33,7 +33,7 @@ class _ConversationsScreenState extends ConsumerState<ConversationsScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('AironBot'),
+        title: const Text('Corely'),
         actions: [
           IconButton(
             icon: const Icon(Icons.settings_outlined),

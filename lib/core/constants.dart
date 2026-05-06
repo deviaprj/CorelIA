@@ -2,11 +2,35 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 /// Lecture sécurisée d'une variable d'environnement.
-/// Retourne null si dotenv n'est pas initialisé ou si la clé n'existe pas.
+/// 1. Priorité : --dart-define (compilé dans le binaire, fonctionne dans chrome-extension://)
+/// 2. Fallback : dotenv (.env file, peut échouer dans chrome-extension://)
 String? _env(String key) {
+  // --dart-define a priorité (toujours disponible, même sans .env)
+  final dartDefine = _dartDefineValue(key);
+  if (dartDefine != null && dartDefine.isNotEmpty) return dartDefine;
+  // Fallback dotenv
   if (!dotenv.isInitialized) return null;
   return dotenv.maybeGet(key);
 }
+
+/// Map des clés vers leurs valeurs --dart-define (const au compile time)
+String? _dartDefineValue(String key) => switch (key) {
+  'DEEPSEEK_API_KEY' => const String.fromEnvironment('DEEPSEEK_API_KEY', defaultValue: ''),
+  'OPENROUTER_API_KEY' => const String.fromEnvironment('OPENROUTER_API_KEY', defaultValue: ''),
+  'BACKEND_URL' => const String.fromEnvironment('BACKEND_URL', defaultValue: ''),
+  'ADMOB_APP_ID_ANDROID' => const String.fromEnvironment('ADMOB_APP_ID_ANDROID', defaultValue: ''),
+  'ADMOB_APP_ID_IOS' => const String.fromEnvironment('ADMOB_APP_ID_IOS', defaultValue: ''),
+  'ADMOB_BANNER_ID_ANDROID' => const String.fromEnvironment('ADMOB_BANNER_ID_ANDROID', defaultValue: ''),
+  'ADMOB_BANNER_ID_IOS' => const String.fromEnvironment('ADMOB_BANNER_ID_IOS', defaultValue: ''),
+  'ADMOB_INTERSTITIAL_ID_ANDROID' => const String.fromEnvironment('ADMOB_INTERSTITIAL_ID_ANDROID', defaultValue: ''),
+  'ADMOB_INTERSTITIAL_ID_IOS' => const String.fromEnvironment('ADMOB_INTERSTITIAL_ID_IOS', defaultValue: ''),
+  'ADMOB_REWARDED_ID_ANDROID' => const String.fromEnvironment('ADMOB_REWARDED_ID_ANDROID', defaultValue: ''),
+  'ADMOB_REWARDED_ID_IOS' => const String.fromEnvironment('ADMOB_REWARDED_ID_IOS', defaultValue: ''),
+  'REVENUECAT_API_KEY_ANDROID' => const String.fromEnvironment('REVENUECAT_API_KEY_ANDROID', defaultValue: ''),
+  'REVENUECAT_API_KEY_IOS' => const String.fromEnvironment('REVENUECAT_API_KEY_IOS', defaultValue: ''),
+  'STRIPE_PUBLIC_KEY' => const String.fromEnvironment('STRIPE_PUBLIC_KEY', defaultValue: ''),
+  _ => null,
+};
 
 /// Constantes globales de l'application.
 /// Les valeurs sensibles sont lues depuis .env a l'execution
@@ -85,10 +109,10 @@ abstract class AppConstants {
   static const stripeCheckoutBaseUrl = 'https://aironbot.app/checkout';
 
   // ── App ─────────────────────────────────────────────────────────────────────
-  static const appName = 'AironBot';
+  static const appName = 'Corely';
   static const appVersion = '1.1.0';
   static const appWebUrl = 'https://aironbot.app';
-  static const shareTagline = '— Genere par AironBot\nhttps://aironbot.app';
+  static const shareTagline = '— Genere par Corely\nhttps://aironbot.app';
 
   // ── Backend ─────────────────────────────────────────────────────────────────
   static String get backendBaseUrl => _env('BACKEND_URL') ?? 'https://api.aironbot.app';

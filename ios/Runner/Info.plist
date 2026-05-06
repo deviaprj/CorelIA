@@ -5,7 +5,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>AironBot</string>
+	<string>Corely</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -29,12 +29,12 @@
 
 	<!-- Permissions microphone -->
 	<key>NSMicrophoneUsageDescription</key>
-	<string>AironBot utilise le microphone pour la reconnaissance vocale.</string>
+	<string>Corely utilise le microphone pour la reconnaissance vocale.</string>
 	<!-- Permissions photos / fichiers -->
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>AironBot accède à vos photos pour les joindre à vos conversations.</string>
+	<string>Corely accède à vos photos pour les joindre à vos conversations.</string>
 	<key>NSCameraUsageDescription</key>
-	<string>AironBot utilise la caméra pour capturer des images.</string>
+	<string>Corely utilise la caméra pour capturer des images.</string>
 
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>

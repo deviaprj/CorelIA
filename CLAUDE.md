@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-AironBot is a cross-platform AI chat application (Flutter/Dart) targeting 1M+ users. It includes:
+Corely is a cross-platform AI chat application (Flutter/Dart) targeting 1M+ users. It includes:
 - **Mobile app**: Android/iOS with Firebase Auth, chat, voice input
 - **Chrome Extension**: Same codebase, built with Flutter Web + Manifest V3
 - **Backend** (optional cloud): Python FastAPI at `api.aironbot.app` with Redis rate limiting
@@ -18,17 +18,33 @@ L'APK Android et l'extension Chrome doivent être 100% autonomes. Aucun backend 
 
 **Pattern**: MVVM + Riverpod for state management
 
+**Conditional Imports** (mobile vs web/extension):
+Many services use conditional exports so the same codebase compiles for mobile and web:
+```dart
+// barrel file (e.g., dio_client.dart)
+export 'dio_client_io.dart' if (dart.library.html) 'dio_client_web.dart';
+```
+Files with conditional exports:
+- `lib/core/api/dio_client.dart` → `_io` (dart:io, cert pinning) / `_web` (no dart:io)
+- `lib/features/chat/data/image_upload_service.dart` → `_io` (compress, camera) / `_web` (stub)
+- `lib/features/chat/data/ollama_vision_service.dart` → `_io` (local Ollama) / `_web` (unavailable)
+- `lib/features/monetization/ads/ad_service.dart` → `_mobile` (AdMob) / `_web` (no-op stub)
+- `lib/features/monetization/ads/ad_banner_widget.dart` → `_mobile` (AdMob banner) / `_web` (SizedBox.shrink)
+- `lib/features/monetization/subscription/subscription_service.dart` → `_mobile` (RevenueCat) / `_web` (no-op stub)
+- `lib/features/monetization/subscription/paywall_screen.dart` → `_mobile` (real paywall) / `_web` (info message)
+- `lib/features/referral/data/deep_link_service.dart` → `_io` (app_links) / `_web` (URL-based)
+
 **Core Structure**:
 ```
 lib/
-├── main.dart                    # Entry point, Firebase/AdMob/RevenueCat init
+├── main.dart                    # Entry point, Firebase/AdMob/RevenueCat init, CorelyApp
 ├── app/                         # Router (go_router) and theme
 ├── core/                        # Shared: providers, platform_service, secure_storage
-│   ├── platform/platform_service.dart  # Detects mobile/extension/web
+│   ├── platform/platform_service.dart  # Detects mobile/extension/web, AppPlatform.name
 │   ├── providers/
 │   │   ├── app_providers.dart           # Theme, onboarding, search toggle
 │   │   └── firebase_providers.dart      # Auth state, Firestore, Messaging
-│   └── constants/app_constants.dart      # API URLs, model names, limits
+│   └── constants/app_constants.dart      # API URLs, model names, limits, String.fromEnvironment
 ├── features/
 │   ├── auth/                    # FirebaseAuth + email/Google/Apple + mock auth
 │   ├── chat/
@@ -38,7 +54,7 @@ lib/
 │   ├── projects/                # Pro feature: saved projects/folders
 │   ├── monetization/            # Ads (AdMob) + subscriptions (RevenueCat)
 │   ├── referral/                # Deep links + referral service
-│   └── settings/               # Settings screen
+│   └── settings/               # Settings screen, systemPromptProvider
 └── shared/                      # Widgets, extensions
 ```
 
@@ -55,28 +71,32 @@ backend/
 **Chrome Extension** (`web/`):
 ```
 web/
-├── manifest.json                # Manifest V3 — sidePanel, contextMenus, scripting
-├── background.js                # Service worker — context menu, side panel open
+├── manifest.json                # Manifest V3 — no "type": "module", CSP with worker-src blob:
+├── background.js                # Service worker — context menu "Demander à Corely"
 ├── content_script.js            # Text selection capture on all pages
 ├── speech_bridge.js             # Web Speech API bridge (STT only, no TTS)
-├── icons/                       # Extension icons
+├── icons/                       # Extension icons (Corely "C" logo, purple #6C63FF)
 └── index.html                   # Flutter Web bootstrap with CSS spinner
 ```
 
 **Platform Detection** (`lib/core/platform/platform_service.dart`):
 - Detects: mobile Android, mobile iOS, Chrome extension, web
+- `AppPlatform.name` getter: returns 'android', 'ios', 'extension', 'web'
 - Critical for conditional Firebase/AdMob/RevenueCat initialization
 
 **State Management**:
 - Riverpod providers in `lib/core/providers/app_providers.dart` (theme, onboarding, search toggle)
 - Firebase providers in `lib/core/providers/firebase_providers.dart` (auth state, Firestore, Messaging)
+- `systemPromptProvider` in `settings_screen.dart` (StateNotifier + SharedPreferences)
 
 **Key Flows**:
 1. App start → Firebase init → check onboarding → check auth → route to appropriate screen
 2. Chat → Firestore repository → AI client (DeepSeek/OpenRouter) → quota check → response
-3. Voice dictation → SpeechToText → text input → ChatNotifier
-4. Voice conversation loop → VoiceConversationNotifier (listening → thinking → speaking → idle → repeat)
-5. Extension build → Flutter Web + custom manifest.json + service worker removal
+3. Chat → system prompt injected as first system message → Corely personality
+4. Chat → intent classification (`_needsWebSearch()`) → web search only for factual/temporal queries
+5. Voice dictation → SpeechToText → text input → ChatNotifier
+6. Voice conversation loop → VoiceConversationNotifier (listening → thinking → speaking → idle → repeat)
+7. Extension build → Flutter Web + base href patch + SW removal + manifest fix
 
 ## Commands
 
@@ -103,7 +123,7 @@ flutter test path/to/test.dart
 ```bash
 flutter build apk
 flutter build ios
-bash scripts/build_extension.sh   # → aironbot-extension.zip
+bash scripts/build_extension.sh   # → corely-extension.zip
 ```
 
 **Lint**:
@@ -120,12 +140,18 @@ Required in `.env` (never commit):
 - `STRIPE_*` — Web payment (extension)
 - `APP_ENV` — development/production
 
+**For Chrome extension builds**, API keys are embedded via `--dart-define`:
+```bash
+flutter build web --dart-define=DEEPSEEK_API_KEY=sk-xxx --dart-define=OPENROUTER_API_KEY=sk-xxx
+```
+`AppConstants._env()` checks `String.fromEnvironment` first, then falls back to `.env`.
+
 ## AI Models & Routing
 
 **DeepSeek** (`lib/features/chat/data/ai_client.dart`):
 - `deepseek-v4-flash` — texte (gratuit, par défaut)
 - `deepseek-chat` — texte + vision (fallback image si pas OpenRouter)
-- Paramètres : `stream`, `max_tokens`, `enable_search`
+- Paramètres : `stream`, `max_tokens`, `enable_search` (désactivé par défaut)
 - Endpoint : `https://api.deepseek.com/v1/chat/completions`
 
 **OpenRouter** (Pro, `lib/features/chat/data/ai_client.dart`):
@@ -140,6 +166,11 @@ Required in `.env` (never commit):
    - Sinon `AiException` avec message clair
 2. Pro sans image → OpenRouter Mistral
 3. Free sans image → DeepSeek V4 Flash
+
+**System prompt** — Injecté en tête de chaque conversation:
+- Par défaut: personnalité Corely (chaleureux, direct, tutoiement, français)
+- Personnalisable via `systemPromptProvider` dans les paramètres
+- Sauvegardé en SharedPreferences (`corely_system_prompt`)
 
 **Format image** (`message.dart:toApiMap()`):
 ```json
@@ -222,20 +253,32 @@ Required in `.env` (never commit):
 - Intégré dans `chat_router.py` via tool calling (`search_web`, `get_datetime`, `get_weather`)
 
 **Intégration chat** (`chat_notifier.dart`):
-- `useSearch: true` par défaut
-- `enable_search: true` dans le body DeepSeek
+- `useSearch: false` par défaut (recherche désactivée)
+- Classification d'intent `_needsWebSearch()` : déclencheurs factuels/temporels, exclusions créatives/code
+- Extraction de requête `_extractSearchQuery()` : supprime salutations, limite longueur
+- Recherche déclenchée si `state.useSearch || _needsWebSearch(userMsg.content)`
+- `enable_search: false` dans l'appel DeepSeek (on contrôle la recherche nous-mêmes)
 - Résultats injectés comme message système avant l'historique
+
+**Cache** (`lib/features/chat/data/search_cache_service.dart`):
+- LRU cache avec clés SHA-256, TTL 15 min
+- Sauvegardé en SharedPreferences
 
 ## Chrome Extension Specifics
 
 **Build Process** (`scripts/build_extension.sh`):
 1. Flutter Web build with `--pwa-strategy=none`
 2. Copies manifest.json, background.js, content_script.js, speech_bridge.js, icons
-3. Removes Flutter service worker (conflicts with Manifest V3)
-4. Patches index.html to remove SW registration
-5. Creates ZIP for Chrome Web Store
+3. Patches `<base href="/">` → `./` in output HTML
+4. Removes Flutter service worker (conflicts with Manifest V3)
+5. Strips SW registration from index.html and flutter_bootstrap.js
+6. Python3 script patches manifest.json: removes `"type": "module"`, fixes CSP, adds `*.wasm`
+7. Creates ZIP for Chrome Web Store
 
 **Manifest V3** (`web/manifest.json`):
+- No `"type": "module"` (required for content scripts)
+- CSP: `script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:;`
+- `web_accessible_resources` includes `*.wasm` files
 - Side panel + popup UI
 - Background service worker
 - Content scripts for all URLs
@@ -279,14 +322,17 @@ Required in `.env` (never commit):
 
 ## Known Limitations / TODO
 
+- [x] Extension Chrome : démarrage cassé (13 bugs corrigés, conditional imports, CSP, base href, SW)
+- [x] Logos/icons : remplacés par logo Corely "C" (toutes tailles)
+- [x] Comportement conversationnel : recherche web seulement sur questions factuelles/temporelles
+- [x] Settings : prompt système personnalisable avec sauvegarde
+- [x] Cache recherche web : LRU + SHA-256 + TTL 15 min
 - [ ] Analyse fichiers TXT/MD : tester l'injection comme contexte conversationnel
 - [ ] Vision DeepSeek : `deepseek-chat` peut rejeter `image_url` selon version API
 - [ ] Documents volumineux : tronqués à 15000 caractères dans le contexte system
 - [ ] Pas de upload Firebase Storage pour les images (base64 consommé directement)
 - [ ] PDF scannés/image : extraction texte uniquement, pas d'OCR
 - [ ] Pas de support HEIC/HEIF pour les images
-- [ ] Pas de cache pour la recherche web (chaque requête est un appel réseau frais)
 - [ ] Extension Chrome : pas de TTS, pas de résumé de page, pas d'extraction média
-- [ ] Aurora splash : couleurs toutes noires (effet aurora désactivé), pas de réaction au volume
 - [ ] Pas d'interruption vocale (barge-in) pendant le TTS
 - [ ] Pas de synchronisation temps réel des préférences entre mobile et extension

@@ -1,4 +1,4 @@
-// AironBot — Web Speech API bridge (STT + TTS)
+// Corely — Web Speech API bridge (STT + TTS)
 // Injecté dans la page d'extension (index.html) pour accéder à
 // window.SpeechRecognition et window.SpeechSynthesis,
 // qui ne sont pas disponibles dans les Service Workers.
