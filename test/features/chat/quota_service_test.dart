@@ -35,7 +35,7 @@ void main() {
 
       expect(
         exception.toString(),
-        equals('Quota journalier atteint (20 req/jour)'),
+        equals('Quota journalier atteint (100 req/jour en test)'),
       );
     });
 

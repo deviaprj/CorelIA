@@ -1,4 +1,4 @@
-import 'edge_tts_service.dart';
+import 'tts_emotion.dart';
 
 /// Parse les balises prosodiques du texte LLM et extrait l'émotion + le texte nettoyé.
 ///

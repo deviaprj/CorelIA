@@ -3,7 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 import 'package:permission_handler/permission_handler.dart';
 import '../../../core/providers/app_providers.dart';
-import 'edge_tts_service.dart';
+import 'tts_emotion.dart';
 import 'emotion_parser.dart';
 import 'tts_natural_service.dart';
 
@@ -44,6 +44,7 @@ class VoiceState {
 
 class VoiceServiceNotifier extends Notifier<VoiceState> {
   stt.SpeechToText? _stt;
+  bool _sttInitialized = false;
   late final TtsNaturalService _tts;
   bool _microphonePermissionGranted = false;
 
@@ -54,8 +55,11 @@ class VoiceServiceNotifier extends Notifier<VoiceState> {
       _tts.dispose();
       _stt?.stop();
       _stt = null;
+      _sttInitialized = false;
     });
     _initTts();
+    // Initialiser le STT une seule fois au build
+    _initSttOnce();
     return const VoiceState();
   }
 
@@ -69,42 +73,35 @@ class VoiceServiceNotifier extends Notifier<VoiceState> {
     }
   }
 
-  Future<bool> _createAndInitStt() async {
-    if (_stt != null) {
-      try {
-        await _stt!.stop();
-      } catch (_) {}
-      _stt = null;
-    }
+  /// Initialise le STT une seule fois. Ne recrée JAMAIS l'instance sauf
+  /// si elle est dans un état irrécupérable (null ou _sttInitialized = false).
+  Future<void> _initSttOnce() async {
+    if (_sttInitialized && _stt != null) return;
 
     final newStt = stt.SpeechToText();
     try {
       final available = await newStt.initialize(
         onError: (_) {
-          if (_stt == newStt) {
-            state = state.copyWith(isListening: false);
-          }
+          state = state.copyWith(isListening: false);
         },
         onStatus: (status) {
-          if (_stt == newStt && (status == 'done' || status == 'notListening')) {
+          if (status == 'done' || status == 'notListening') {
             state = state.copyWith(isListening: false);
           }
         },
       );
       if (available) {
         _stt = newStt;
+        _sttInitialized = true;
         state = state.copyWith(isAvailable: true);
-        debugPrint('[VoiceService] STT initialized successfully');
-        return true;
+        debugPrint('[VoiceService] STT initialized (once)');
       } else {
         debugPrint('[VoiceService] STT not available on this device');
         state = state.copyWith(isAvailable: false);
-        return false;
       }
     } catch (e) {
       debugPrint('[VoiceService] STT init failed: $e');
       state = state.copyWith(isAvailable: false);
-      return false;
     }
   }
 
@@ -128,23 +125,24 @@ class VoiceServiceNotifier extends Notifier<VoiceState> {
     return false;
   }
 
+  /// Démarre l'écoute. Réutilise l'instance STT existante.
+  /// Appelle .listen() sur l'instance déjà initialisée → pas de bip de reconnexion.
   Future<void> startListening() async {
-    if (state.isListening) {
-      await stopListening();
-      await Future<void>.delayed(const Duration(milliseconds: 150));
-    }
-
     final hasPermission = await _ensureMicrophonePermission();
     if (!hasPermission) {
       state = state.copyWith(isListening: false);
       return;
     }
 
-    final sttReady = await _createAndInitStt();
-    if (!sttReady || _stt == null) {
+    // S'assurer que le STT est initialisé (une seule fois)
+    await _initSttOnce();
+    if (_stt == null || !_sttInitialized) {
       state = state.copyWith(isListening: false);
       return;
     }
+
+    // Si déjà en écoute, ne rien faire (évite le double listen)
+    if (state.isListening) return;
 
     state = state.copyWith(isListening: true, transcript: '', micLevel: 0.0);
     try {
@@ -165,6 +163,9 @@ class VoiceServiceNotifier extends Notifier<VoiceState> {
       );
     } catch (e) {
       debugPrint('[VoiceService] STT listen error: $e');
+      // Si l'instance est corrompue, la réinitialiser au prochain appel
+      _sttInitialized = false;
+      _stt = null;
       state = state.copyWith(isListening: false);
     }
   }
@@ -196,7 +197,6 @@ class VoiceServiceNotifier extends Notifier<VoiceState> {
     }
   }
 
-  /// Alias pour speak() avec émotion explicite.
   Future<void> speakWithEmotion(String text, TtsEmotion emotion) async {
     if (text.isEmpty) return;
     if (state.isSpeaking) await _tts.stop();
@@ -218,6 +218,7 @@ class VoiceServiceNotifier extends Notifier<VoiceState> {
 
   void forceReset() {
     _stt?.stop();
+    _sttInitialized = false;
     _stt = null;
     _tts.stop();
     _microphonePermissionGranted = false;

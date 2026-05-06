@@ -1,6 +1,6 @@
 # TASKS.md — Suivi AironBot
 
-Dernière mise à jour : 2026-05-06 — Session V2 : TTS expressif, vision Ollama, extension enrichie, splash animé, sync multi-appareils
+Dernière mise à jour : 2026-05-06 — Rewarded ads quota recovery + fix bip micro
 
 ## Terminé (sessions précédentes)
 
@@ -13,8 +13,21 @@ Dernière mise à jour : 2026-05-06 — Session V2 : TTS expressif, vision Ollam
 - [x] **Analyse fichiers** — BOM UTF-8/UTF-16, nom du fichier dans le contexte système
 - [x] **Documentation** — CLAUDE.md, MEMORY.md, TASKS.md
 
+## Terminé (session 2026-05-06)
+
+- [x] **Edge TTS + EmotionParser** — `EdgeTtsService` (WebSocket, voix françaises), `EmotionParser` (balises prosodiques), conditional import web/mobile
+- [x] **TTS naturel refactorisé** — `TtsNaturalService` avec Edge TTS primaire + flutter_tts fallback, `AudioPlayerFactory`
+- [x] **Splash aurora réactif** — `AuroraSplash` avec AnimationControllers, réaction micro, couleurs par émotion
+- [x] **Voice conversation + émotion** — `VoiceConversationNotifier` parse les balises, splash change de couleur
+- [x] **TTS bridge extension** — `speech_bridge.js` pont TTS avec Web Speech API + mapping émotion
+- [x] **Fix bip micro** — Instance STT initialisée une seule fois dans `_initSttOnce()`, réutilisée sans destruction
+- [x] **Rewarded ads quota recovery** — `SearchQuotaService` (5/j), `VoiceQuotaService` (10/j), `addBonus()` sur tous les quotas, `QuotaExceededDialog` avec vidéo récompensée, câblage complet chat_notifier + chat_screen
+- [x] **Tests** — 45 tests TTS/Edge/emotion + 13 tests quotas/bonus, 241 passants (4 échecs préexistants dotenv)
+
 ## En cours
 
+- [ ] **Vérification bip micro sur appareil** — Tester que le fix STT reuse élimine les bips
+- [ ] **Vérification rewarded ad flow** — Tester le dialog quota sur appareil (AdMob test IDs)
 - [ ] **Vérification `deepseek-chat` vision** — Test live pour confirmer le support `image_url`
 
 ---

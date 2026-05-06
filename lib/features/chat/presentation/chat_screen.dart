@@ -9,9 +9,14 @@ import 'aurora_splash.dart';
 import '../data/image_upload_service.dart';
 import '../data/file_upload_service.dart';
 import '../data/file_quota_service.dart';
+import '../data/search_quota_service.dart';
+import '../data/voice_quota_service.dart';
 import '../../../core/platform/platform_service.dart';
 import '../../monetization/ads/ad_banner_widget.dart';
+import '../../monetization/ads/quota_exceeded_dialog.dart';
 import '../../monetization/subscription/subscription_service.dart';
+import '../../monetization/credits/credit_service.dart';
+import '../../monetization/credits/credit_providers.dart';
 
 class ChatScreen extends ConsumerStatefulWidget {
   const ChatScreen({super.key, required this.conversationId});
@@ -44,6 +49,33 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     });
   }
 
+  Future<void> _showQuotaDialog(QuotaType type) async {
+    final granted = await showQuotaExceededDialog(
+      context,
+      quotaType: type,
+      onBonusGranted: () async {
+        switch (type) {
+          case QuotaType.requests:
+            await ref.read(creditServiceProvider).addBonus(amount: 5);
+          case QuotaType.searches:
+            await ref.read(searchQuotaServiceProvider).addBonus(amount: 2);
+          case QuotaType.files:
+            await ref.read(fileQuotaServiceProvider).addBonus(amount: 1);
+          case QuotaType.voice:
+            await ref.read(voiceQuotaServiceProvider).addBonus(amount: 5);
+        }
+      },
+    );
+    if (granted && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Bonus accordé ! Vous pouvez continuer.'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(chatNotifierProvider(widget.conversationId));
@@ -54,16 +86,17 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     // Auto-scroll + afficher erreur quota
     ref.listen(chatNotifierProvider(widget.conversationId), (_, next) {
       _scrollToBottom();
-      if (next.error == 'quota_exceeded' || next.error == 'quota_files_exceeded') {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text('Quota journalier atteint. Passez en Pro !'),
-            action: SnackBarAction(
-              label: 'Pro',
-              onPressed: () => context.push('/paywall'),
-            ),
-          ),
-        );
+      if (next.error == 'quota_exceeded') {
+        _showQuotaDialog(QuotaType.requests);
+        notifier.clearError();
+      } else if (next.error == 'quota_files_exceeded') {
+        _showQuotaDialog(QuotaType.files);
+        notifier.clearError();
+      } else if (next.error == 'quota_search_exceeded') {
+        _showQuotaDialog(QuotaType.searches);
+        notifier.clearError();
+      } else if (next.error == 'quota_voice_exceeded') {
+        _showQuotaDialog(QuotaType.voice);
         notifier.clearError();
       } else if (next.error != null) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -270,15 +303,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       }
     } on FileQuotaExceededException {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text('Quota fichiers atteint (2/jour). Passez en Pro !'),
-            action: SnackBarAction(
-              label: 'Pro',
-              onPressed: () => context.push('/paywall'),
-            ),
-          ),
-        );
+        _showQuotaDialog(QuotaType.files);
       }
     } catch (e) {
       if (mounted) {

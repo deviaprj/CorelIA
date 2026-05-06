@@ -8,6 +8,7 @@ import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:uuid/uuid.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
+import 'tts_emotion.dart';
 
 /// Service TTS via Microsoft Edge TTS (gratuit, voix neurales).
 ///
@@ -203,38 +204,3 @@ class EdgeTtsService {
     }
   }
 }
-
-/// Émotions mappées à des voix et paramètres Edge TTS.
-enum TtsEmotion {
-  neutral,
-  joyful,
-  sad,
-  serious,
-  excited,
-  cheerful,
-  friendly,
-}
-
-/// Configuration TTS pour une émotion donnée.
-class EmotionTtsConfig {
-  final String voice;
-  final double rate;
-  final double pitch;
-
-  const EmotionTtsConfig({
-    required this.voice,
-    required this.rate,
-    required this.pitch,
-  });
-}
-
-/// Mapping émotion → configuration Edge TTS.
-const emotionTtsConfigs = {
-  TtsEmotion.neutral: EmotionTtsConfig(voice: 'fr-FR-HenriNeural', rate: 1.0, pitch: 1.0),
-  TtsEmotion.joyful: EmotionTtsConfig(voice: 'fr-FR-HenriNeural', rate: 1.15, pitch: 1.25),
-  TtsEmotion.sad: EmotionTtsConfig(voice: 'fr-FR-HenriNeural', rate: 0.85, pitch: 0.85),
-  TtsEmotion.serious: EmotionTtsConfig(voice: 'fr-FR-HenriNeural', rate: 0.9, pitch: 0.9),
-  TtsEmotion.excited: EmotionTtsConfig(voice: 'fr-FR-HenriNeural', rate: 1.25, pitch: 1.35),
-  TtsEmotion.cheerful: EmotionTtsConfig(voice: 'fr-FR-DeniseNeural', rate: 1.1, pitch: 1.2),
-  TtsEmotion.friendly: EmotionTtsConfig(voice: 'fr-FR-DeniseNeural', rate: 1.05, pitch: 1.1),
-};

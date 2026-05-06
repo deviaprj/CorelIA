@@ -47,6 +47,16 @@ class CreditService {
     return updated;
   }
 
+  /// Ajoute des crédits bonus (après avoir regardé une publicité récompensée).
+  Future<int> addBonus({int amount = 5}) async {
+    final prefs = await SharedPreferences.getInstance();
+    final remaining = await getRemainingCredits();
+    final updated = remaining + amount;
+    await prefs.setInt(_prefsKeyCredits, updated);
+    debugPrint('[CreditService] Bonus +$amount → credits restants : $updated');
+    return updated;
+  }
+
   /// Reinitialise les credits (apres achat Pro ou reset admin).
   Future<void> reset({int amount = _dailyFreeCredits}) async {
     final prefs = await SharedPreferences.getInstance();

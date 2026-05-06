@@ -6,6 +6,7 @@ import 'package:flutter_tts/flutter_tts.dart';
 import '../../../core/platform/platform_service.dart';
 import 'audio_player_factory.dart';
 import 'emotion_parser.dart';
+import 'tts_emotion.dart';
 import 'edge_tts_service.dart'
     if (dart.library.io) 'edge_tts_service.dart'
     if (dart.library.html) 'edge_tts_service_stub.dart';

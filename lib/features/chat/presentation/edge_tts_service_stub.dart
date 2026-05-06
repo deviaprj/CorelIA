@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'tts_emotion.dart';
 
 /// Stub EdgeTtsService pour web — Edge TTS n'est pas disponible sur web
 /// car il nécessite WebSocket + écriture de fichiers locaux.

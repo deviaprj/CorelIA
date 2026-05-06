@@ -9,6 +9,8 @@ import '../data/mock_chat_repository.dart';
 import '../data/quota_service.dart';
 import '../data/search_service.dart';
 import '../data/file_quota_service.dart';
+import '../data/search_quota_service.dart';
+import '../data/voice_quota_service.dart';
 import '../domain/conversation.dart';
 import '../domain/message.dart';
 import '../../../core/constants.dart';
@@ -109,6 +111,7 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
     String? imageMimeType,
     String? fileName,
     String? fileContent,
+    bool isVoiceConversation = false,
   }) async {
     final trimmed = text.trim();
     if (trimmed.isEmpty && imageBase64 == null) return;
@@ -164,6 +167,36 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
           return;
         } catch (e) {
           debugPrint('[FileQuota] Error: $e');
+        }
+      }
+
+      // Quota recherches web (local, 100% autonome)
+      if (state.useSearch) {
+        try {
+          await ref.read(searchQuotaServiceProvider).checkAndDecrement();
+        } on SearchQuotaExceededException {
+          state = state.copyWith(
+            error: 'quota_search_exceeded',
+            isStreaming: false,
+          );
+          return;
+        } catch (e) {
+          debugPrint('[SearchQuota] Error: $e');
+        }
+      }
+
+      // Quota vocal (local, 100% autonome)
+      if (isVoiceConversation) {
+        try {
+          await ref.read(voiceQuotaServiceProvider).checkAndDecrement();
+        } on VoiceQuotaExceededException {
+          state = state.copyWith(
+            error: 'quota_voice_exceeded',
+            isStreaming: false,
+          );
+          return;
+        } catch (e) {
+          debugPrint('[VoiceQuota] Error: $e');
         }
       }
     }

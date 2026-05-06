@@ -2,7 +2,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'chat_notifier.dart';
-import 'edge_tts_service.dart';
+import 'tts_emotion.dart';
 import 'emotion_parser.dart';
 import 'voice_service.dart';
 
@@ -136,7 +136,7 @@ class VoiceConversationNotifier
 
       try {
         final chatNotifier = ref.read(chatNotifierProvider(arg).notifier);
-        await chatNotifier.sendMessage(transcript);
+        await chatNotifier.sendMessage(transcript, isVoiceConversation: true);
       } catch (e) {
         debugPrint('[VoiceConversation] Erreur envoi chat : $e');
         state = VoiceConversationStatus(

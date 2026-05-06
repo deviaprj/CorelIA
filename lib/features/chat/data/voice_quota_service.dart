@@ -2,18 +2,19 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-class FileQuotaExceededException implements Exception {
-  const FileQuotaExceededException();
+class VoiceQuotaExceededException implements Exception {
+  const VoiceQuotaExceededException();
   @override
-  String toString() => 'Quota fichiers journalier atteint (10/jour). Passez en Pro !';
+  String toString() =>
+      'Quota vocal journalier atteint. Passez en Pro !';
 }
 
-/// Service de quota local pour les uploads de fichiers.
+/// Service de quota local pour les interactions vocales.
 /// 100% autonome — ne depend pas du backend.
-class FileQuotaService {
-  static const int freeUploadsPerDay = 10;
-  static const String _prefsKey = 'file_upload_count';
-  static const String _prefsDateKey = 'file_upload_date';
+class VoiceQuotaService {
+  static const int freeVoicePerDay = 10;
+  static const String _prefsKey = 'voice_count';
+  static const String _prefsDateKey = 'voice_date';
 
   Future<void> checkAndDecrement() async {
     final prefs = await SharedPreferences.getInstance();
@@ -22,36 +23,36 @@ class FileQuotaService {
 
     int count;
     if (storedDate != today) {
-      count = freeUploadsPerDay - 1;
+      count = freeVoicePerDay - 1;
       await prefs.setString(_prefsDateKey, today);
       await prefs.setInt(_prefsKey, count);
     } else {
-      count = prefs.getInt(_prefsKey) ?? freeUploadsPerDay;
+      count = prefs.getInt(_prefsKey) ?? freeVoicePerDay;
       if (count <= 0) {
-        throw const FileQuotaExceededException();
+        throw const VoiceQuotaExceededException();
       }
       await prefs.setInt(_prefsKey, count - 1);
     }
 
-    debugPrint('[FileQuota] Restants: ${count - 1}');
+    debugPrint('[VoiceQuota] Restants: ${count - 1}');
   }
 
-  /// Ajoute des uploads bonus (après avoir regardé une publicité récompensée).
-  Future<int> addBonus({int amount = 1}) async {
+  /// Ajoute des interactions vocales bonus (après publicité récompensée).
+  Future<int> addBonus({int amount = 5}) async {
     final prefs = await SharedPreferences.getInstance();
     final today = _todayString();
     final storedDate = prefs.getString(_prefsDateKey);
     int current;
     if (storedDate != today) {
-      current = freeUploadsPerDay;
+      current = freeVoicePerDay;
       await prefs.setString(_prefsDateKey, today);
       await prefs.setInt(_prefsKey, current);
     } else {
-      current = prefs.getInt(_prefsKey) ?? freeUploadsPerDay;
+      current = prefs.getInt(_prefsKey) ?? freeVoicePerDay;
     }
     final updated = current + amount;
     await prefs.setInt(_prefsKey, updated);
-    debugPrint('[FileQuota] Bonus +$amount → uploads restants : $updated');
+    debugPrint('[VoiceQuota] Bonus +$amount → voix restantes : $updated');
     return updated;
   }
 
@@ -59,8 +60,8 @@ class FileQuotaService {
     final prefs = await SharedPreferences.getInstance();
     final today = _todayString();
     final storedDate = prefs.getString(_prefsDateKey);
-    if (storedDate != today) return freeUploadsPerDay;
-    return prefs.getInt(_prefsKey) ?? freeUploadsPerDay;
+    if (storedDate != today) return freeVoicePerDay;
+    return prefs.getInt(_prefsKey) ?? freeVoicePerDay;
   }
 
   String _todayString() {
@@ -69,4 +70,5 @@ class FileQuotaService {
   }
 }
 
-final fileQuotaServiceProvider = Provider<FileQuotaService>((ref) => FileQuotaService());
+final voiceQuotaServiceProvider =
+    Provider<VoiceQuotaService>((ref) => VoiceQuotaService());

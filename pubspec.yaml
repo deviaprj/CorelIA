@@ -17,11 +17,11 @@ dependencies:
   go_router: ^13.0.0
 
   # Firebase
-  firebase_core: ^2.24.2
-  firebase_auth: ^4.16.0
-  cloud_firestore: ^4.14.0
-  cloud_functions: ^4.6.8
-  firebase_messaging: ^14.7.9
+  firebase_core: ^4.7.0
+  firebase_auth: ^6.4.0
+  cloud_firestore: ^6.3.0
+  cloud_functions: ^6.2.0
+  firebase_messaging: ^16.2.0
 
   # Authentication
   google_sign_in: ^6.2.1
@@ -51,7 +51,7 @@ dependencies:
   # Storage
   flutter_secure_storage: ^9.2.0
   shared_preferences: ^2.3.0
-  firebase_storage: ^11.6.5
+  firebase_storage: ^13.3.0
 
   # Images & Files
   image_picker: ^1.1.2
