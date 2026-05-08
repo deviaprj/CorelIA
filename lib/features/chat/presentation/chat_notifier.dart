@@ -9,6 +9,7 @@ import '../data/mock_chat_repository.dart';
 import '../data/quota_service.dart';
 import '../data/search_service.dart';
 import '../data/file_quota_service.dart';
+import '../data/file_upload_service.dart';
 import '../data/search_quota_service.dart';
 import '../data/voice_quota_service.dart';
 import '../data/ollama_vision_service.dart';
@@ -270,13 +271,26 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
 
     // Recherche web — uniquement si l'utilisateur l'a activée OU si l'intent le nécessite
     List<WebSearchResult>? searchResults;
+    InstantAnswer? instantAnswer;
     final shouldSearch = state.useSearch || _needsWebSearch(userMsg.content);
     if (shouldSearch) {
       try {
         state = state.copyWith(isSearching: true);
         final searchService = ref.read(searchServiceProvider);
         final searchQuery = _extractSearchQuery(userMsg.content);
-        searchResults = await searchService.searchWithFallback(searchQuery);
+
+        // Lancer la recherche principale et l'Instant Answer en parallèle
+        final results = await searchService.searchWithFallback(searchQuery);
+        searchResults = results;
+
+        // Chercher une réponse instantanée si on a des résultats
+        if (results.isNotEmpty) {
+          try {
+            instantAnswer = await searchService.getInstantAnswer(searchQuery);
+          } catch (_) {
+            // L'Instant Answer est optionnel, ne pas bloquer
+          }
+        }
       } catch (e) {
         debugPrint('[ChatNotifier] Recherche web echouee : $e');
       } finally {
@@ -293,6 +307,7 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
             userMsg,
             isPro,
             searchResults: searchResults,
+            instantAnswer: instantAnswer,
             fileContent: fileContent,
             fileName: fileName,
           );
@@ -397,6 +412,7 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
     Message userMsg,
     bool isPro, {
     List<WebSearchResult>? searchResults,
+    InstantAnswer? instantAnswer,
     String? fileContent,
     String? fileName,
   }) async {
@@ -424,10 +440,10 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
 
     // ── 2. Injecter le contexte fichier ────────────────────────────────
     if (fileContent != null && fileContent.isNotEmpty) {
-      const maxChars = 15000;
-      final truncated = fileContent.length > maxChars
-          ? '${fileContent.substring(0, maxChars)}... [tronque]'
-          : fileContent;
+      final truncated = FileUploadService.truncateForContext(
+        fileContent,
+        isPro: isPro,
+      );
       final fileLabel = fileName != null ? 'Fichier : $fileName' : 'Document';
       historyMessages.insert(0, Message(
         id: 'file_context_${DateTime.now().millisecondsSinceEpoch}',
@@ -444,6 +460,20 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
     }
 
     // ── 3. Injecter le contexte recherche web ────────────────────────────
+    if (instantAnswer != null) {
+      // Réponse instantanée en priorité (plus concise et directe)
+      final searchService = ref.read(searchServiceProvider);
+      final instantContext = searchService.formatInstantAnswerForAi(instantAnswer);
+
+      historyMessages.insert(0, Message(
+        id: 'instant_context_${DateTime.now().millisecondsSinceEpoch}',
+        conversationId: arg,
+        role: Role.system,
+        content: 'Réponse rapide issue d\'une encyclopédie. Utilise cette information si pertinente.\n\n$instantContext',
+        createdAt: DateTime.now(),
+      ));
+    }
+
     if (searchResults != null && searchResults.isNotEmpty) {
       final searchService = ref.read(searchServiceProvider);
       final searchContext = searchService.formatForAi(searchResults, userMsg.content);

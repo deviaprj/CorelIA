@@ -1,5 +1,4 @@
 import 'package:flutter/foundation.dart';
-import 'tts_emotion.dart';
 
 /// Stub EdgeTtsService pour web — Edge TTS n'est pas disponible sur web
 /// car il nécessite WebSocket + écriture de fichiers locaux.
@@ -17,6 +16,10 @@ class EdgeTtsService {
   void setPitch(double pitch) => _pitch = pitch;
 
   Future<String> synthesize(String text) async {
+    throw UnsupportedError('Edge TTS is not available on web');
+  }
+
+  Stream<String?> synthesizeStream(String text) async* {
     throw UnsupportedError('Edge TTS is not available on web');
   }
 

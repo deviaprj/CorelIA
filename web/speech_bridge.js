@@ -16,13 +16,13 @@
   let recognition = null;
 
   // Flutter → JS : démarrer l'écoute
-  window.addEventListener('aironbot_speech_start', (e) => {
+  window.addEventListener('corely_speech_start', (e) => {
     const lang = e.detail?.lang ?? 'fr-FR';
     startRecognition(lang);
   });
 
   // Flutter → JS : arrêter l'écoute
-  window.addEventListener('aironbot_speech_stop', () => {
+  window.addEventListener('corely_speech_stop', () => {
     if (recognition) recognition.stop();
   });
 
@@ -42,7 +42,7 @@
       const isFinal = last.isFinal;
 
       window.dispatchEvent(
-        new CustomEvent('aironbot_speech_result', {
+        new CustomEvent('corely_speech_result', {
           detail: { transcript, isFinal },
         })
       );
@@ -50,14 +50,14 @@
 
     recognition.onerror = (event) => {
       window.dispatchEvent(
-        new CustomEvent('aironbot_speech_error', {
+        new CustomEvent('corely_speech_error', {
           detail: { error: event.error },
         })
       );
     };
 
     recognition.onend = () => {
-      window.dispatchEvent(new CustomEvent('aironbot_speech_end'));
+      window.dispatchEvent(new CustomEvent('corely_speech_end'));
       recognition = null;
     };
 
@@ -97,7 +97,7 @@
   }
 
   // Flutter → JS : lire du texte avec émotion
-  window.addEventListener('aironbot_tts_speak', (e) => {
+  window.addEventListener('corely_tts_speak', (e) => {
     const text = e.detail?.text ?? '';
     const emotion = (e.detail?.emotion ?? 'neutral').toLowerCase();
     const config = emotionConfig[emotion] || emotionConfig.neutral;
@@ -115,12 +115,12 @@
     if (frVoice) utterance.voice = frVoice;
 
     utterance.onend = () => {
-      window.dispatchEvent(new CustomEvent('aironbot_tts_end'));
+      window.dispatchEvent(new CustomEvent('corely_tts_end'));
     };
 
     utterance.onerror = (event) => {
       window.dispatchEvent(
-        new CustomEvent('aironbot_tts_error', {
+        new CustomEvent('corely_tts_error', {
           detail: { error: event.error },
         })
       );
@@ -130,14 +130,14 @@
   });
 
   // Flutter → JS : arrêter la lecture TTS
-  window.addEventListener('aironbot_tts_stop', () => {
+  window.addEventListener('corely_tts_stop', () => {
     if (synth) synth.cancel();
   });
 
   // Flutter → JS : vérifier si TTS est en cours
-  window.addEventListener('aironbot_tts_status', () => {
+  window.addEventListener('corely_tts_status', () => {
     window.dispatchEvent(
-      new CustomEvent('aironbot_tts_status_response', {
+      new CustomEvent('corely_tts_status_response', {
         detail: { speaking: synth ? synth.speaking : false },
       })
     );

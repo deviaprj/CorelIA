@@ -7,16 +7,20 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'app/router.dart';
 import 'app/theme.dart';
 import 'core/platform/platform_service.dart';
+import 'core/platform/extension_bridge.dart';
 import 'core/providers/app_providers.dart';
 import 'features/monetization/ads/ad_service.dart';
 import 'features/monetization/ads/consent_service.dart';
 import 'features/monetization/subscription/subscription_service.dart';
+import 'features/auth/data/user_profile_sync.dart';
+import 'features/settings/data/preferences_sync_service.dart';
 import 'firebase_options.dart';
 import 'features/auth/data/mock_auth_repository.dart';
 import 'features/chat/data/search_cache_service.dart';
 
 // Global flag pour le mode demo local (sans Firebase)
 // true par defaut pour le developpement : auth mock + IA reelle (DeepSeek via .env)
+// Extension Chrome : toujours false (Firebase requis pour la persistence)
 // Forcer false avec : --dart-define=DEMO_MODE=false
 bool isDemoMode = const bool.fromEnvironment('DEMO_MODE', defaultValue: true);
 
@@ -34,6 +38,12 @@ Future<void> main() async {
     debugPrint('[dotenv] .env introuvable ou illisible : $e');
   }
 
+  // ── Extension Chrome : forcer Firebase (persistence requise) ─────────────
+  if (PlatformService.isExtension && isDemoMode) {
+    isDemoMode = false;
+    debugPrint('[Extension] DEMO_MODE force a false — Firebase requis');
+  }
+
   // ── Firebase : tenter, fallback DEMO si indisponible ────────────────────
   if (!isDemoMode) {
     try {
@@ -44,7 +54,6 @@ Future<void> main() async {
     } on FirebaseException catch (e) {
       if (e.code == 'duplicate-app') {
         try {
-          // Verifier que Firebase est vraiment fonctionnel
           FirebaseAuth.instance.currentUser;
           debugPrint('[Firebase] Deja initialise, fonctionnel');
         } catch (_) {
@@ -100,6 +109,16 @@ Future<void> main() async {
     }
   }
 
+  // Extension bridge (écoute les messages du SW Chrome)
+  if (PlatformService.isExtension) {
+    try {
+      ExtensionBridge().init();
+      debugPrint('[Extension] Bridge initialisé');
+    } catch (e) {
+      debugPrint('[Extension] Bridge échoué : $e');
+    }
+  }
+
   // RevenueCat (mobile uniquement)
   if (PlatformService.isMobile && !isDemoMode) {
     final auth = FirebaseAuth.instance;
@@ -122,6 +141,17 @@ class CorelyApp extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final themeMode = ref.watch(themeModeProvider);
     final router = ref.watch(routerProvider);
+
+    // ── Sync multi-appareils : écouter les préférences distantes ──────────
+    // Ce watch déclenche l'initialisation du stream Firestore et met à jour
+    // les SharedPreferences locales quand les préférences changent à distance.
+    if (!isDemoMode) {
+      ref.listen(syncedPreferencesProvider, (_, next) {
+        // Les mises à jour sont gérées dans PreferencesSyncService.mergeWithLocal()
+      });
+      // Écouter le profil utilisateur pour synchroniser le statut Pro
+      ref.listen(userProfileProvider, (_, next) {});
+    }
 
     // Afficher bandeau GDPR au premier lancement (attendre le 2e frame
     // pour que MaterialLocalizations soit disponible)

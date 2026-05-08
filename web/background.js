@@ -5,23 +5,18 @@
 chrome.runtime.onInstalled.addListener(() => {
   // Menu contextuel "Demander à Corely"
   chrome.contextMenus.create({
-    id: 'ask_aironbot',
+    id: 'ask_corely',
     title: 'Demander à Corely : "%s"',
     contexts: ['selection'],
   });
 
-  // Activer le side panel sur clic sur l'icône
+  // Ouvrir le side panel au clic sur l'icône d'action
   chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
-});
-
-// ── Clic sur l'icône action ───────────────────────────────────────────────────
-chrome.action.onClicked.addListener((tab) => {
-  chrome.sidePanel.open({ tabId: tab.id });
 });
 
 // ── Menu contextuel ───────────────────────────────────────────────────────────
 chrome.contextMenus.onClicked.addListener((info, tab) => {
-  if (info.menuItemId !== 'ask_aironbot') return;
+  if (info.menuItemId !== 'ask_corely') return;
 
   const selectedText = info.selectionText ?? '';
   if (!selectedText) return;
@@ -33,7 +28,7 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
       chrome.runtime.sendMessage({
         type: 'SELECTED_TEXT',
         text: selectedText,
-      });
+      }).catch(() => {});
     }, 800);
   });
 });
@@ -42,7 +37,24 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === 'PING') {
     sendResponse({ status: 'ok' });
+    return false;
   }
-  // Laisser les autres messages passer (async)
+
+  // Relayer les messages vers le side panel via chrome.storage.local
+  // Le bridge Flutter dans le side panel lit ces événements
+  if (message.type === 'SELECTED_TEXT' || message.type === 'PAGE_CONTENT') {
+    chrome.storage.local.set({
+      pendingExtensionEvent: {
+        type: message.type,
+        detail: message.type === 'SELECTED_TEXT'
+            ? { text: message.text }
+            : { title: message.title, url: message.url, content: message.content },
+        timestamp: Date.now(),
+      },
+    });
+    // Notifier le side panel qu'un événement est en attente
+    chrome.runtime.sendMessage({ type: 'EXTENSION_EVENT_PENDING' }).catch(() => {});
+  }
+
   return false;
 });

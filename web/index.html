@@ -55,13 +55,14 @@
   <!-- Web Speech API bridge (avant Flutter) -->
   <script src="speech_bridge.js"></script>
 
+  <!-- Extension bridge (chrome.runtime → CustomEvents) -->
+  <script src="extension_bridge.js"></script>
+
+  <!-- Corely init : dispatchCustomEvent, flutter-first-frame, diagnostics -->
+  <!-- Externalisé pour respecter CSP Manifest V3 (pas de scripts inline) -->
+  <script src="corely_init.js"></script>
+
   <!-- Bootstrap Flutter -->
-  <script>
-    window.addEventListener('flutter-first-frame', () => {
-      const loading = document.getElementById('loading');
-      if (loading) loading.style.display = 'none';
-    });
-  </script>
   <script src="flutter_bootstrap.js" async></script>
 </body>
 </html>

@@ -12,6 +12,7 @@ import '../data/file_quota_service.dart';
 import '../data/search_quota_service.dart';
 import '../data/voice_quota_service.dart';
 import '../../../core/platform/platform_service.dart';
+import '../../../core/platform/extension_providers.dart';
 import '../../monetization/ads/ad_banner_widget.dart';
 import '../../monetization/ads/quota_exceeded_dialog.dart';
 import '../../monetization/subscription/subscription_service.dart';
@@ -30,10 +31,12 @@ class ChatScreen extends ConsumerStatefulWidget {
 class _ChatScreenState extends ConsumerState<ChatScreen> {
   final _scrollController = ScrollController();
   AttachmentData? _pendingAttachment;
+  final _inputBarController = TextEditingController();
 
   @override
   void dispose() {
     _scrollController.dispose();
+    _inputBarController.dispose();
     super.dispose();
   }
 
@@ -103,6 +106,17 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
           SnackBar(content: Text(next.error!)),
         );
         notifier.clearError();
+      }
+    });
+
+    // Écouter le texte sélectionné depuis l'extension Chrome
+    ref.listen(extensionSelectedTextProvider, (_, next) {
+      final selectedText = next.valueOrNull;
+      if (selectedText != null && selectedText.isNotEmpty) {
+        _inputBarController.text = selectedText;
+        _inputBarController.selection = TextSelection.fromPosition(
+          TextPosition(offset: _inputBarController.text.length),
+        );
       }
     });
 

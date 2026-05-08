@@ -14,8 +14,9 @@
 #   2. Copie les fichiers d'extension dans build/extension/
 #   3. Supprime le ServiceWorker Flutter (incompatible avec Manifest V3)
 #   4. Patch index.html : base href + SW registration
-#   5. Patch manifest.json : remove "type": "module", fix CSP, fix web_accessible_resources
-#   6. Crée aironbot-extension.zip prêt à uploader sur le Chrome Web Store
+#   5. Patch flutter_bootstrap.js : SW retiré + CanvasKit local (pas CDN)
+#   6. Patch manifest.json : remove "type": "module", fix CSP, fix web_accessible_resources
+#   7. Crée corely-extension.zip prêt à uploader sur le Chrome Web Store
 # =============================================================================
 
 set -euo pipefail
@@ -61,6 +62,8 @@ cp "$WEB_SRC/manifest.json"     "$BUILD_EXT/manifest.json"
 cp "$WEB_SRC/background.js"     "$BUILD_EXT/background.js"
 cp "$WEB_SRC/content_script.js" "$BUILD_EXT/content_script.js"
 cp "$WEB_SRC/speech_bridge.js"  "$BUILD_EXT/speech_bridge.js"
+cp "$WEB_SRC/extension_bridge.js" "$BUILD_EXT/extension_bridge.js"
+cp "$WEB_SRC/corely_init.js"    "$BUILD_EXT/corely_init.js"
 
 # Créer le dossier icons si absent
 mkdir -p "$BUILD_EXT/icons"
@@ -95,19 +98,46 @@ fi
 # ── 6. Patch flutter_bootstrap.js ─────────────────────────────────────────────
 BOOTSTRAP="$BUILD_EXT/flutter_bootstrap.js"
 if [[ -f "$BOOTSTRAP" ]]; then
-  # Remplacer l'enregistrement du SW par un no-op
-  # Chercher la fonction loadServiceWorker et la court-circuiter
-  # Alternative simple : remplacer flutter_service_worker.js par une chaîne vide
-  # pour que URL() resolution échoue gracieusement (déjà catchée par Flutter)
-  sed -i 's/flutter_service_worker\.js/flutter_service_worker_disabled.js/g' "$BOOTSTRAP"
-  echo "🩹  Référence SW neutralisée dans flutter_bootstrap.js."
+  python3 -c "
+import re, sys
+with open('$BOOTSTRAP', 'r') as f:
+    content = f.read()
+
+# 6a. Supprimer complètement serviceWorkerSettings du loader.load() call.
+# Dans une extension Chrome Manifest V3, l'enregistrement d'un SW Flutter
+# entre en conflit avec le background service worker de l'extension.
+content = re.sub(r'serviceWorkerSettings:\s*\{[^}]*\}\s*,?\s*', '', content)
+content = re.sub(r'\.load\(\{\s*\}\)', '.load()', content)
+
+# 6b. Forcer CanvasKit local (pas CDN).
+# La fonction b(s,t) dans le bootstrap vérifie t.useLocalCanvasKit (2e argument).
+# Or t = _flutter.buildConfig, PAS le paramètre config de load().
+# Il faut donc ajouter useLocalCanvasKit:true dans _flutter.buildConfig.
+content = re.sub(
+    r'(_flutter\.buildConfig\s*=\s*\{)',
+    r'\1"useLocalCanvasKit":true,',
+    content
+)
+print('useLocalCanvasKit:true ajouté à _flutter.buildConfig')
+
+# 6c. Neutraliser la fonction loadServiceWorker pour qu'elle skip toujours
+# (sécurité supplémentaire si loadEntrypoint est appelé depuis un autre path)
+content = re.sub(
+    r'loadServiceWorker\(t\)\{',
+    'loadServiceWorker(t){if(1)return Promise.resolve();',
+    content
+)
+
+with open('$BOOTSTRAP', 'w') as f:
+    f.write(content)
+print('flutter_bootstrap.js patché (SW retiré + CanvasKit local)')
+" 2>&1
+  echo "🩹  Bootstrap patché : SW retiré + CanvasKit local forcé."
 fi
 
 # ── 7. Patch manifest.json ───────────────────────────────────────────────────
 MANIFEST="$BUILD_EXT/manifest.json"
 if [[ -f "$MANIFEST" ]]; then
-  # 7a. Retirer "type": "module" du background (background.js n'est pas un ES module)
-  #     Utiliser python pour manipuler le JSON proprement
   python3 -c "
 import json, sys
 with open('$MANIFEST', 'r') as f:
@@ -115,16 +145,14 @@ with open('$MANIFEST', 'r') as f:
 if 'background' in m and 'type' in m['background']:
     del m['background']['type']
     print('Retiré type:module du background')
-# 7b. Corriger CSP : autoriser blob: URLs pour les workers Skwasm
-#     NOTE: blob: dans script-src est interdit par Manifest V3
-#     On l'ajoute uniquement dans worker-src
+# Corriger CSP : retirer blob: qui est interdit par Chrome Manifest V3
 if 'content_security_policy' in m and 'extension_pages' in m['content_security_policy']:
     csp = m['content_security_policy']['extension_pages']
-    if 'blob:' not in csp:
-        csp = csp.replace('worker-src \'self\'', 'worker-src \'self\' blob:')
-        m['content_security_policy']['extension_pages'] = csp
-        print('CSP mis à jour avec blob: dans worker-src')
-# 7c. Ajouter *.wasm aux web_accessible_resources
+    csp = csp.replace(' blob:', '')
+    csp = csp.replace(\"; worker-src 'self'\", '')
+    m['content_security_policy']['extension_pages'] = csp
+    print('CSP vérifié (blob: retiré)')
+# Ajouter *.wasm aux web_accessible_resources
 if 'web_accessible_resources' in m:
     for group in m['web_accessible_resources']:
         if 'canvaskit/**' in group.get('resources', []) or '*.js' in group.get('resources', []):
@@ -139,7 +167,7 @@ with open('$MANIFEST', 'w') as f:
 fi
 
 # ── 8. Créer le ZIP ───────────────────────────────────────────────────────────
-ZIP_PATH="$PROJECT_ROOT/aironbot-extension.zip"
+ZIP_PATH="$PROJECT_ROOT/corely-extension.zip"
 rm -f "$ZIP_PATH"
 cd "$BUILD_EXT"
 zip -r "$ZIP_PATH" . --exclude "*.DS_Store" --exclude "__MACOSX/*"
@@ -148,7 +176,7 @@ cd "$PROJECT_ROOT"
 echo ""
 echo "🎉 Extension prête !"
 echo "   → build/extension/     (dossier non compressé — idéal pour test)"
-echo "   → aironbot-extension.zip (prêt pour le Chrome Web Store)"
+echo "   → corely-extension.zip (prêt pour le Chrome Web Store)"
 echo ""
 echo "Pour tester :"
 echo "  1. Ouvrez chrome://extensions"

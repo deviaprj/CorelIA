@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 
 import '../../../core/platform/platform_service.dart';
+import '../data/tts_cache_service.dart';
 import 'audio_player_factory.dart';
 import 'emotion_parser.dart';
 import 'tts_emotion.dart';
@@ -34,6 +35,9 @@ class TtsNaturalService {
   final FlutterTts _flutterTts = FlutterTts();
   bool _flutterTtsReady = false;
 
+  // ── Cache TTS ────────────────────────────────────────────────────────────
+  final TtsCacheService _cache = TtsCacheService();
+
   // ── État commun ─────────────────────────────────────────────────────────
   bool _isSpeaking = false;
   TtsEngine _activeEngine = TtsEngine.flutterTts;
@@ -48,6 +52,7 @@ class TtsNaturalService {
 
   Future<void> init() async {
     await _initFlutterTts();
+    await _cache.init();
 
     if (PlatformService.isMobile) {
       await _checkEdgeTtsAvailability();
@@ -262,10 +267,42 @@ class TtsNaturalService {
 
     String? tempFilePath;
     try {
-      tempFilePath = await _edgeTts!.synthesize(text);
-      await AudioPlayerFactory.setFilePath(_audioPlayer!, tempFilePath);
-      await AudioPlayerFactory.play(_audioPlayer!);
-      await AudioPlayerFactory.waitForCompletion(_audioPlayer!);
+      // Vérifier le cache d'abord
+      final cachedPath = await _cache.get(
+        text,
+        voice: config.voice,
+        rate: config.rate,
+        pitch: config.pitch,
+      );
+
+      if (cachedPath != null) {
+        // Cache hit — lecture directe
+        tempFilePath = cachedPath;
+        await AudioPlayerFactory.setFilePath(_audioPlayer!, tempFilePath);
+        await AudioPlayerFactory.play(_audioPlayer!);
+        await AudioPlayerFactory.waitForCompletion(_audioPlayer!);
+      } else {
+        // Cache miss — essayer le streaming pour une lecture plus rapide
+        if (PlatformService.isMobile) {
+          await _speakWithEdgeTtsStream(text, config);
+        } else {
+          // Sur les plateformes sans streaming, synthesize classique
+          tempFilePath = await _edgeTts!.synthesize(text);
+          final cached = await _cache.put(
+            text,
+            tempFilePath,
+            voice: config.voice,
+            rate: config.rate,
+            pitch: config.pitch,
+          );
+          if (cached != null) {
+            tempFilePath = cached;
+          }
+          await AudioPlayerFactory.setFilePath(_audioPlayer!, tempFilePath);
+          await AudioPlayerFactory.play(_audioPlayer!);
+          await AudioPlayerFactory.waitForCompletion(_audioPlayer!);
+        }
+      }
     } catch (e) {
       debugPrint('[TtsNaturalService] Edge TTS playback error: $e');
       rethrow;
@@ -274,9 +311,74 @@ class TtsNaturalService {
     }
   }
 
+  /// Synthèse Edge TTS avec streaming — commence la lecture dès que
+  /// suffisamment de données audio sont disponibles (réduit la latence perçue).
+  Future<void> _speakWithEdgeTtsStream(String text, EmotionTtsConfig config) async {
+    if (_edgeTts == null || _audioPlayer == null) {
+      throw StateError('Edge TTS stream not available');
+    }
+
+    try {
+      final stream = _edgeTts!.synthesizeStream(text);
+      String? filePath;
+      bool startedPlaying = false;
+
+      await for (final path in stream) {
+        if (path != null && !startedPlaying) {
+          // Premier chunk significatif reçu — commencer la lecture
+          filePath = path;
+          startedPlaying = true;
+          await AudioPlayerFactory.setFilePath(_audioPlayer!, filePath);
+          await AudioPlayerFactory.play(_audioPlayer!);
+        }
+        // `null` signifie que la synthèse est terminée
+      }
+
+      if (startedPlaying) {
+        // Attendre que la lecture se termine
+        await AudioPlayerFactory.waitForCompletion(_audioPlayer!);
+
+        // Stocker en cache pour les prochaines utilisations
+        if (filePath != null) {
+          await _cache.put(
+            text,
+            filePath,
+            voice: config.voice,
+            rate: config.rate,
+            pitch: config.pitch,
+          );
+        }
+      }
+    } catch (e) {
+      debugPrint('[TtsNaturalService] Edge TTS stream error: $e');
+      // Fallback vers synthesize classique
+      final fallbackPath = await _edgeTts!.synthesize(text);
+      await AudioPlayerFactory.setFilePath(_audioPlayer!, fallbackPath);
+      await AudioPlayerFactory.play(_audioPlayer!);
+      await AudioPlayerFactory.waitForCompletion(_audioPlayer!);
+
+      await _cache.put(
+        text,
+        fallbackPath,
+        voice: config.voice,
+        rate: config.rate,
+        pitch: config.pitch,
+      );
+    }
+  }
+
   Future<void> _speakWithFlutterTts(String text) async {
     if (!_flutterTtsReady) {
       await _initFlutterTts();
+    }
+
+    // Appliquer les paramètres d'émotion au moteur flutter_tts
+    final config = emotionTtsConfigs[_currentEmotion] ?? emotionTtsConfigs[TtsEmotion.neutral]!;
+    try {
+      await _flutterTts.setSpeechRate(config.rate * _speechRate / 0.65);
+      await _flutterTts.setPitch(config.pitch * _pitch / 1.10);
+    } catch (e) {
+      debugPrint('[TtsNaturalService] flutter_tts emotion params failed: $e');
     }
 
     final completer = Completer<void>();
@@ -291,6 +393,11 @@ class TtsNaturalService {
       debugPrint('[TtsNaturalService] flutter_tts error: $e');
     } finally {
       _flutterTts.setCompletionHandler(() {});
+      // Restaurer les valeurs par défaut
+      try {
+        await _flutterTts.setSpeechRate(_speechRate);
+        await _flutterTts.setPitch(_pitch);
+      } catch (_) {}
     }
   }
 

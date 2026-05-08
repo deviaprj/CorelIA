@@ -20,30 +20,66 @@ class WebSearchResult {
   const WebSearchResult({required this.title, required this.url, required this.snippet});
 }
 
+/// Resultat instantané DuckDuckGo (réponse courte, pas de clic nécessaire).
+class InstantAnswer {
+  final String title;
+  final String abstractText;
+  final String source;
+  final String url;
+  const InstantAnswer({
+    required this.title,
+    required this.abstractText,
+    required this.source,
+    required this.url,
+  });
+}
+
 /// Service de recherche web — 100% autonome avec fallback multi-provider.
 ///
 /// Mode backend (primary) : utilise `/search` du backend FastAPI deploye.
 /// Mode direct (fallback) : parse DuckDuckGo HTML pour fonctionner sans backend.
 /// L'APK reste toujours autonome meme si le backend cloud est indisponible.
+///
+/// Améliorations :
+/// - Debounce : les recherches identiques en moins de 2s sont fusionnées
+/// - Instant Answer : DuckDuckGo Instant Answer API pour les définitions/facts rapides
+/// - Mode hors-ligne : retourne les résultats en cache si aucune connexion
 class SearchService {
   final Dio _dio;
+
+  // ── Debounce ──────────────────────────────────────────────────────────────
+  DateTime? _lastSearchTime;
+  String? _lastSearchQuery;
+  List<WebSearchResult>? _lastSearchResults;
+  static const _debounceWindow = Duration(seconds: 2);
 
   SearchService({Dio? dio}) : _dio = dio ?? DioClientFactory.create();
 
   /// Recherche web fiable avec fallback : backend cloud → DuckDuckGo direct.
   /// Utilise le cache si disponible et non expiré.
+  /// Inclut un debounce pour éviter les recherches dupliquées.
   Future<List<WebSearchResult>> searchWithFallback(String query, {String? lang}) async {
-    // 0. Vérifier le cache
+    // 0. Debounce — si la même recherche a été faite récemment, réutiliser
+    if (_lastSearchQuery == query &&
+        _lastSearchTime != null &&
+        DateTime.now().difference(_lastSearchTime!) < _debounceWindow &&
+        _lastSearchResults != null) {
+      debugPrint('[SearchService] Debounce HIT: "$query"');
+      return _lastSearchResults!;
+    }
+
+    // 1. Vérifier le cache
     final cached = searchCache.get(query, lang: lang);
     if (cached != null) return cached;
 
-    // 1. Essayer le backend cloud (si configure et disponible)
+    // 2. Essayer le backend cloud (si configure et disponible)
     final backendUrl = AppConstants.backendBaseUrl;
     if (backendUrl.isNotEmpty && !backendUrl.contains('localhost')) {
       try {
         final results = await _searchBackend(query, lang: lang);
         if (results.isNotEmpty) {
           searchCache.put(query, results, lang: lang);
+          _updateDebounce(query, results);
           return results;
         }
       } catch (e) {
@@ -51,12 +87,70 @@ class SearchService {
       }
     }
 
-    // 2. Fallback client-side : DuckDuckGo HTML scraping (autonome)
-    final results = await searchDirect(query);
-    if (results.isNotEmpty) {
-      searchCache.put(query, results, lang: lang);
+    // 3. Fallback client-side : DuckDuckGo HTML scraping (autonome)
+    try {
+      final results = await searchDirect(query);
+      if (results.isNotEmpty) {
+        searchCache.put(query, results, lang: lang);
+        _updateDebounce(query, results);
+        return results;
+      }
+    } catch (e) {
+      debugPrint('[SearchService] DuckDuckGo direct échoué : $e');
     }
-    return results;
+
+    // 4. Dernier recours : résultats en cache expirés (mode hors-ligne)
+    final expiredResults = searchCache.get(query, lang: lang);
+    if (expiredResults != null) {
+      debugPrint('[SearchService] Mode hors-ligne : cache expiré pour "$query"');
+      return expiredResults;
+    }
+
+    return [];
+  }
+
+  void _updateDebounce(String query, List<WebSearchResult> results) {
+    _lastSearchQuery = query;
+    _lastSearchResults = results;
+    _lastSearchTime = DateTime.now();
+  }
+
+  /// Recherche DuckDuckGo Instant Answer — définitions, faits rapides.
+  /// Retourne une réponse courte si disponible, null sinon.
+  Future<InstantAnswer?> getInstantAnswer(String query) async {
+    try {
+      final dio = Dio(BaseOptions(
+        connectTimeout: const Duration(seconds: 5),
+        receiveTimeout: const Duration(seconds: 5),
+        headers: {'Accept': 'application/json'},
+      ));
+
+      final response = await dio.get<Map<String, dynamic>>(
+        'https://api.duckduckgo.com/',
+        queryParameters: {
+          'q': query,
+          'format': 'json',
+          'no_html': '1',
+          'skip_disambig': '1',
+        },
+      );
+
+      if (response.statusCode == 200 && response.data != null) {
+        final data = response.data!;
+        final abstractText = data['AbstractText'] as String? ?? '';
+        if (abstractText.isNotEmpty) {
+          return InstantAnswer(
+            title: data['Heading'] as String? ?? query,
+            abstractText: abstractText,
+            source: data['AbstractSource'] as String? ?? 'DuckDuckGo',
+            url: data['AbstractURL'] as String? ?? '',
+          );
+        }
+      }
+    } catch (e) {
+      debugPrint('[SearchService] Instant Answer non disponible : $e');
+    }
+    return null;
   }
 
   /// Recherche web via le backend cloud.
@@ -223,6 +317,12 @@ class SearchService {
       return '${context.substring(0, maxChars)}\n\n[Resultats tronques]';
     }
     return context;
+  }
+
+  /// Formate une réponse instantanée (DuckDuckGo Instant Answer) pour l'IA.
+  /// Si une réponse instantanée est disponible, l'injecte en contexte système.
+  String formatInstantAnswerForAi(InstantAnswer answer) {
+    return 'Réponse rapide : ${answer.title}\n\n${answer.abstractText}\nSource: ${answer.source} (${answer.url})';
   }
 
   /// Formate les sources pour affichage utilisateur dans le chat (markdown inline).

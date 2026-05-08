@@ -15,6 +15,7 @@ build/
 google-services.json
 GoogleService-Info.plist
 lib/core/firebase_options.dart
+lib/firebase_options.dart
 
 # IDE
 .idea/
@@ -64,3 +65,6 @@ backend/*.pyc
 
 # macOS
 .DS_Store
+
+# Playwright MCP
+.playwright-mcp/

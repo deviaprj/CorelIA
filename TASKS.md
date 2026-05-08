@@ -1,6 +1,6 @@
 # TASKS.md — Suivi Corely
 
-Dernière mise à jour : 2026-05-06 — Session V2 : Extension fixes + Renommage + Refacto comportement + Settings
+Dernière mise à jour : 2026-05-08 — Session V4 : Améliorations voix, fichiers, recherche, sync
 
 ## Terminé (sessions précédentes)
 
@@ -21,7 +21,24 @@ Dernière mise à jour : 2026-05-06 — Session V2 : Extension fixes + Renommage
 - [x] **Ollama vision** — `OllamaVisionService` + fallback cloud (P1)
 - [x] **Cache recherche web** — `SearchCacheService` LRU + SHA-256 + TTL 15 min (P1)
 
-## Terminé — Session V2 (2026-05-06)
+## Terminé — Session V3 (2026-05-08)
+
+### Tâche 1 : Audit et correction extension Chrome ✅
+- [x] **isDemoMode forcé à false sur extension** — Firebase initialisé, conversations persistées
+- [x] **isProProvider web** — Lecture du plan depuis Firestore (pas toujours false)
+- [x] **WebSpeechBridge** — Bridge interop STT/TTS entre Flutter et speech_bridge.js via dart:js
+- [x] **VoiceServiceNotifier** — Branchement conditionnel : web → WebSpeechBridge, mobile → speech_to_text
+- [x] **TTS émotions sur flutter_tts** — _speakWithFlutterTts applique rate/pitch selon émotion
+- [x] **image_upload_service_web** — Implémentation réelle via FilePicker (gallery seulement, pas camera)
+- [x] **Paywall web** — Bouton Stripe checkout + liste features Pro au lieu d'un simple message
+- [x] **ExtensionBridge** — Pont Dart ↔ chrome.runtime via CustomEvents + extension_bridge.js
+- [x] **ChatScreen** — Écoute du texte sélectionné depuis l'extension, pré-remplit l'input
+- [x] **content_script.js** — Extraction contenu page (article/main/body) + GET_PAGE_CONTENT
+- [x] **background.js** — Menu contextuel renommé ask_corely, suppression code mort, relais chrome.storage
+- [x] **manifest.json** — Suppression permissions tts/offscreen inutilisées
+- [x] **speech_bridge.js** — Événements renommés aironbot_* → corely_*
+- [x] **build_extension.sh** — Zip renommé corely-extension.zip
+- [x] **0 erreurs de compilation** vérifiées avec flutter analyze
 
 ### Tâche 0 : Analyse complète du projet ✅
 - [x] Identifier les bugs de démarrage extension Chrome
@@ -69,38 +86,60 @@ Dernière mise à jour : 2026-05-06 — Session V2 : Extension fixes + Renommage
 - [x] `systemPromptProvider` (StateNotifier + SharedPreferences)
 - [x] Prompt injecté au début de chaque conversation via `ref.read(systemPromptProvider)`
 
+## Terminé — Session V4 (2026-05-08)
+
+### 1. Amélioration du dialogue vocal ✅
+- [x] **Cache TTS** — `TtsCacheService` SHA-256(text+voice+rate+pitch) → fichier MP3 local, LRU 50, TTL 24h
+- [x] **Streaming Edge TTS** — `synthesizeStream()` incrémental, lecture dès 4KB, fallback synthesize classique
+- [x] **Mode barge-in** — Micro activé pendant TTS (500ms anti-echo), interruption si ≥2 mots détectés
+- [x] **Whisper STT fallback** — `WhisperSttService` via DeepSeek Whisper API, mobile uniquement, stub web
+
+### 2. Analyse fichiers dans la conversation ✅
+- [x] **Support PPTX** — Extraction des diapositives (shapes `<a:t>`, tri par numéro)
+- [x] **Amélioration DOCX** — Extraction par paragraphes (`w:p`) au lieu de texte brut
+- [x] **Amélioration PDF** — Regroupement en paragraphes cohérents (ponctuation de fin)
+- [x] **Troncature intelligente** — Respect des paragraphes et phrases, caractères restants indiqués
+- [x] **Limite contexte Pro** — 15 000 (Free) → 30 000 (Pro) caractères pour les fichiers
+
+### 3. Recherche internet optimisée ✅
+- [x] **Debouncer** — Fusion des requêtes identiques dans les 2 secondes
+- [x] **DuckDuckGo Instant Answer** — `getInstantAnswer()` pour définitions/facts rapides
+- [x] **Mode hors-ligne** — Cache expiré retourné en dernier recours si réseau indisponible
+
+### 4. Sync multi-appareils ✅
+- [x] **Conversations temps réel** — Déjà en place via Firestore snapshots
+- [x] **Préférences sync** — `PreferencesSyncService` (Firestore ↔ SharedPreferences), `syncedPreferencesProvider`
+- [x] **Profil utilisateur temps réel** — `userProfileProvider` + `isProSyncProvider` via Firestore snapshots
+- [x] **isPro web temps réel** — `isProProvider` web utilise `isProSyncProvider` en priorité
+
+### 5. Corrections critiques pour beta ✅
+- [x] **TTS cache web** — Pattern d'export conditionnel (io/web stub), pas de `dart:io` sur web
+- [x] **Whisper STT** — Export conditionnel io/web, `http` package pour multipart au lieu de HttpClient manuel
+- [x] **PreferencesSyncService** — Branché dans `main.dart`, watcher Firestore actif
+- [x] **0 erreurs de compilation** vérifiées avec flutter analyze
+
 ---
 ## Backlog (sessions futures)
 
-### 1. AMÉLIORATION DU DIALOGUE VOCAL
-- [ ] Streaming audio Edge TTS (HTTP chunked)
-- [ ] Cache TTS : hash du texte → fichier audio local
-- [ ] Mode barge-in : interrompre le TTS en parlant
-- [ ] STT Whisper comme fallback
-
-### 2. ANALYSE DE DOCUMENTS ET D'IMAGES
-- [ ] PDF scannés : OCR
-- [ ] Support PPTX, amélioration DOCX/XLSX
-- [ ] Limite contexte 15000 → 30000 avec résumé auto
-
-### 3. RECHERCHE INTERNET OPTIMISÉE
-- [ ] Debouncer de recherche (500ms)
-- [ ] DuckDuckGo Instant Answer API
-- [ ] Mode hors-ligne : cache uniquement
-
-### 4. EXTENSION GOOGLE CHROME (enrichissement)
-- [ ] Vérifier démarrage extension après fixes
-- [ ] Sync conversations via Firestore
+### 1. EXTENSION GOOGLE CHROME (enrichissement)
+- [ ] Vérifier démarrage extension après tous les fixes
 - [ ] Résumé de page via Readability.js
 - [ ] Autofill formulaires
 - [ ] Extraction/téléchargement médias
 
-### 5. SPLASH ANIMÉ PAR LA VOIX ✅
-- [x] Forme réactive au volume
-- [x] Gradient animé et émotions
-- [x] Réduction du jitter visuel
+### 2. ANALYSE DE DOCUMENTS ET D'IMAGES
+- [ ] PDF scannés : OCR (nécessite API cloud ou Tesseract)
 
-### 6. SYNCHRONISATION MULTI-APPAREILS
-- [ ] Conversations temps réel via Firestore
-- [ ] Préférences sync (chrome.storage.sync + Firestore)
-- [ ] Authentification partagée mobile/extension
+### 3. VOCAL
+- [ ] Mode barge-in : test UX et ajustement anti-echo
+- [ ] Streaming audio : test sur connexions lentes
+- [ ] Cache TTS : vérifier la persistance sur Android low-storage
+
+### 4. QUALITÉ BETA
+- [ ] Tests unitaires pour les nouveaux services (TtsCache, Whisper, PreferencesSync)
+- [ ] Tests d'intégration extension Chrome (build + load + test)
+- [ ] Vérification de la build release Android (APK)
+- [ ] Vérification de la build extension Chrome (ZIP)
+- [ ] Audit sécurité : clés API non exposées, Firestore rules
+- [ ] Performance : profiler le temps de démarrage cold/warm
+- [ ] Accessibilité : vérifier contrastes, tailles de texte, labels
