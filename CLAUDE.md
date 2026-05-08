@@ -268,17 +268,27 @@ flutter build web --dart-define=DEEPSEEK_API_KEY=sk-xxx --dart-define=OPENROUTER
 
 **Build Process** (`scripts/build_extension.sh`):
 1. Flutter Web build with `--pwa-strategy=none`
-2. Copies manifest.json, background.js, content_script.js, speech_bridge.js, icons
+2. Copies manifest.json, background.js, content_script.js, speech_bridge.js, extension_bridge.js, corely_init.js, icons
 3. Patches `<base href="/">` → `./` in output HTML
-4. Removes Flutter service worker (conflicts with Manifest V3)
-5. Strips SW registration from index.html and flutter_bootstrap.js
-6. Python3 script patches manifest.json: removes `"type": "module"`, fixes CSP, adds `*.wasm`
-7. Creates ZIP for Chrome Web Store
+4. Removes Flutter service worker JS file
+5. Strips SW references from index.html
+6. Patches flutter_bootstrap.js (Python3):
+   - Removes `serviceWorkerSettings` from `_flutter.loader.load()`
+   - Neutralizes `loadServiceWorker()` with `if(1)return Promise.resolve()`
+   - Adds `"useLocalCanvasKit":true` to `_flutter.buildConfig` (forces local canvaskit/ instead of CDN)
+7. Patches manifest.json: removes `"type": "module"`, strips `blob:` from CSP, adds `*.wasm`
+8. Creates ZIP for Chrome Web Store
+
+**CRITICAL — Manifest V3 CSP constraints**:
+- No inline `<script>` tags in HTML (blocked by `script-src 'self'`) → all JS must be external files
+- No CDN scripts (blocked by `script-src 'self'`) → CanvasKit must be local (`useLocalCanvasKit:true` in buildConfig)
+- No Service Worker registration (conflicts with extension's background SW) → neutralized in bootstrap
+- `corely_init.js` contains all inline JS (dispatchCustomEvent, flutter-first-frame listener, diagnostics)
 
 **Manifest V3** (`web/manifest.json`):
 - No `"type": "module"` (required for content scripts)
-- CSP: `script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:;`
-- `web_accessible_resources` includes `*.wasm` files
+- CSP: `script-src 'self' 'wasm-unsafe-eval'; object-src 'self';` (no `blob:`, no `worker-src`)
+- `web_accessible_resources` includes `*.wasm`, `*.js`, `*.dart.js`, `assets/**`, `canvaskit/**`
 - Side panel + popup UI
 - Background service worker
 - Content scripts for all URLs
@@ -286,8 +296,8 @@ flutter build web --dart-define=DEEPSEEK_API_KEY=sk-xxx --dart-define=OPENROUTER
 - Permissions : storage, sidePanel, contextMenus, scripting, activeTab
 
 **Limitations actuelles de l'extension** :
-- Pas de pont TTS (speech_bridge.js gère uniquement STT)
-- Pas de document offscreen pour audio en Manifest V3
+- Pas de pont TTS audio (speech_bridge.js gère STT + TTS basique via Web Speech API)
+- Pas de document offscreen pour audio playback en Manifest V3
 - `content_script.js` ne fait que capturer la sélection de texte
 - Pas de résumé de page, pas d'extraction média, pas d'autofill
 
@@ -323,6 +333,7 @@ flutter build web --dart-define=DEEPSEEK_API_KEY=sk-xxx --dart-define=OPENROUTER
 ## Known Limitations / TODO
 
 - [x] Extension Chrome : démarrage cassé (13 bugs corrigés, conditional imports, CSP, base href, SW)
+- [x] Extension Chrome : 3 bugs CSP critiques (inline scripts → corely_init.js, CanvasKit CDN → useLocalCanvasKit:true, SW registration neutralisée)
 - [x] Logos/icons : remplacés par logo Corely "C" (toutes tailles)
 - [x] Comportement conversationnel : recherche web seulement sur questions factuelles/temporelles
 - [x] Settings : prompt système personnalisable avec sauvegarde
@@ -333,6 +344,6 @@ flutter build web --dart-define=DEEPSEEK_API_KEY=sk-xxx --dart-define=OPENROUTER
 - [ ] Pas de upload Firebase Storage pour les images (base64 consommé directement)
 - [ ] PDF scannés/image : extraction texte uniquement, pas d'OCR
 - [ ] Pas de support HEIC/HEIF pour les images
-- [ ] Extension Chrome : pas de TTS, pas de résumé de page, pas d'extraction média
-- [ ] Pas d'interruption vocale (barge-in) pendant le TTS
+- [ ] Extension Chrome : pas de TTS audio, pas de résumé de page, pas d'extraction média
+- [x] Interruption vocale (barge-in) pendant le TTS (500ms anti-echo)
 - [ ] Pas de synchronisation temps réel des préférences entre mobile et extension

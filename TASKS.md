@@ -1,6 +1,6 @@
 # TASKS.md — Suivi Corely
 
-Dernière mise à jour : 2026-05-08 — Session V4 : Améliorations voix, fichiers, recherche, sync
+Dernière mise à jour : 2026-05-08 — Session V5 : Extension Chrome — 3 bugs CSP critiques corrigés
 
 ## Terminé (sessions précédentes)
 
@@ -45,7 +45,7 @@ Dernière mise à jour : 2026-05-08 — Session V4 : Améliorations voix, fichie
 - [x] Bugs documentés dans `memory/extension-startup-bugs.md`
 
 ### Tâche 1 : Fix extension démarrage ✅
-- [x] Créer stubs web pour mobile-only services (dio_client, image_upload, ollama_vision, ad_service, ad_banner, subscription, paywall, deep_link)
+- [x] Créer stubs web pour mobile-only services
 - [x] Ajouter imports conditionnels `export 'mobile.dart' if (dart.library.html) 'web.dart'`
 - [x] Fix `build_extension.sh` : patcher `<base href="/">` → `./`
 - [x] Fix `build_extension.sh` : neutraliser refs SW dans flutter_bootstrap.js
@@ -55,91 +55,82 @@ Dernière mise à jour : 2026-05-08 — Session V4 : Améliorations voix, fichie
 - [x] `AppConstants._env()` : `String.fromEnvironment` prioritaire avant dotenv
 - [x] `quota_exceeded_dialog.dart` : supprimé import direct `google_mobile_ads`
 
-### Tâche 2 : Remplacer tous les logos/icons ✅
-- [x] Logo "C" Corely généré (fond #6C63FF, lettre blanche)
-- [x] Tailles extension : 16x16, 48x48, 128x128
-- [x] Tailles PWA : 192x192, 512x512, maskable
-- [x] Tailles Android : mipmap mdpi → xxxhdpi (ic_launcher + ic_launcher_round)
-- [x] Tailles iOS : AppIcon 20x20 → 1024x1024
-- [x] Favicon 32x32 mis à jour
-
-### Tâche 3 : Renommer AironBot → Corely ✅
-- [x] `AppConstants.appName` → 'Corely'
-- [x] Titres UI, messages, manifest.json, index.html, background.js
-- [x] iOS Info.plist, AndroidManifest.xml
-- [x] Test mis à jour (constants_test.dart)
-- [x] Firebase project IDs et noms d'événements JS conservés (infrastructure)
-
-### Tâche 4 : Refacto comportement conversationnel ✅
-- [x] Recherche web désactivée par défaut (`useSearch: false`)
-- [x] Classification d'intent `_needsWebSearch()` : factuel/temporel vs créatif/code
-- [x] Extraction de requête `_extractSearchQuery()` : supprime salutations
-- [x] Prompt système Corely injecté en tête de chaque conversation
-- [x] `enableSearch: false` dans l'appel DeepSeek
-- [x] Prompt de recherche web simplifié (plus "assistant avec accès internet")
-
-### Tâche 5 : Refacto écran settings ✅
-- [x] Supprimé slider vitesse TTS
-- [x] Supprimé champ clé API DeepSeek
-- [x] Ajouté textarea system prompt (6-8 lignes)
-- [x] Ajouté boutons Fichier / Réinitialiser / Sauvegarder
-- [x] `systemPromptProvider` (StateNotifier + SharedPreferences)
-- [x] Prompt injecté au début de chaque conversation via `ref.read(systemPromptProvider)`
+### Tâches 2-5 : Logos, renommage, refacto conversationnel, settings ✅
+- [x] (Voir session V3 pour détails)
 
 ## Terminé — Session V4 (2026-05-08)
 
 ### 1. Amélioration du dialogue vocal ✅
-- [x] **Cache TTS** — `TtsCacheService` SHA-256(text+voice+rate+pitch) → fichier MP3 local, LRU 50, TTL 24h
-- [x] **Streaming Edge TTS** — `synthesizeStream()` incrémental, lecture dès 4KB, fallback synthesize classique
-- [x] **Mode barge-in** — Micro activé pendant TTS (500ms anti-echo), interruption si ≥2 mots détectés
-- [x] **Whisper STT fallback** — `WhisperSttService` via DeepSeek Whisper API, mobile uniquement, stub web
+- [x] **Cache TTS** — SHA-256(text+voice+rate+pitch) → MP3, LRU 50, TTL 24h
+- [x] **Streaming Edge TTS** — `synthesizeStream()` incrémental, lecture dès 4KB
+- [x] **Mode barge-in** — Micro activé pendant TTS (500ms anti-echo), interruption si ≥2 mots
+- [x] **Whisper STT fallback** — `WhisperSttService` via DeepSeek Whisper API, stub web
 
 ### 2. Analyse fichiers dans la conversation ✅
-- [x] **Support PPTX** — Extraction des diapositives (shapes `<a:t>`, tri par numéro)
-- [x] **Amélioration DOCX** — Extraction par paragraphes (`w:p`) au lieu de texte brut
-- [x] **Amélioration PDF** — Regroupement en paragraphes cohérents (ponctuation de fin)
-- [x] **Troncature intelligente** — Respect des paragraphes et phrases, caractères restants indiqués
-- [x] **Limite contexte Pro** — 15 000 (Free) → 30 000 (Pro) caractères pour les fichiers
+- [x] PPTX, DOCX amélioré, PDF paragraphes, troncature intelligente, limite Pro 30K
 
 ### 3. Recherche internet optimisée ✅
-- [x] **Debouncer** — Fusion des requêtes identiques dans les 2 secondes
-- [x] **DuckDuckGo Instant Answer** — `getInstantAnswer()` pour définitions/facts rapides
-- [x] **Mode hors-ligne** — Cache expiré retourné en dernier recours si réseau indisponible
+- [x] Debouncer 2s, DuckDuckGo Instant Answer, mode hors-ligne
 
 ### 4. Sync multi-appareils ✅
-- [x] **Conversations temps réel** — Déjà en place via Firestore snapshots
-- [x] **Préférences sync** — `PreferencesSyncService` (Firestore ↔ SharedPreferences), `syncedPreferencesProvider`
-- [x] **Profil utilisateur temps réel** — `userProfileProvider` + `isProSyncProvider` via Firestore snapshots
-- [x] **isPro web temps réel** — `isProProvider` web utilise `isProSyncProvider` en priorité
+- [x] PreferencesSyncService, userProfileProvider, isProSyncProvider temps réel
 
 ### 5. Corrections critiques pour beta ✅
-- [x] **TTS cache web** — Pattern d'export conditionnel (io/web stub), pas de `dart:io` sur web
-- [x] **Whisper STT** — Export conditionnel io/web, `http` package pour multipart au lieu de HttpClient manuel
-- [x] **PreferencesSyncService** — Branché dans `main.dart`, watcher Firestore actif
-- [x] **0 erreurs de compilation** vérifiées avec flutter analyze
+- [x] Conditional exports TTS cache, Whisper, 0 erreurs flutter analyze
+
+## Terminé — Session V5 (2026-05-08)
+
+### Extension Chrome : 3 bugs CSP critiques corrigés ✅
+
+L'extension moulinait indéfiniment sans charger Flutter. 3 bugs identifiés via console :
+
+**Bug #1 : Scripts inline bloqués par CSP**
+- Erreur : `Executing inline script violates CSP 'script-src self'`
+- Cause : `<script>function dispatchCustomEvent(...)` et `<script>window.addEventListener('flutter-first-frame'...)` inline dans `index.html`
+- Fix : Scripts déplacés vers `web/corely_init.js` (fichier externe chargé via `<script src>`)
+
+**Bug #2 : Service Worker Flutter en conflit avec Manifest V3**
+- Erreur : `Failed to register a ServiceWorker... flutter_service_worker_disabled.js`
+- Cause : `serviceWorkerSettings` passé à `_flutter.loader.load()`, tentative d'enregistrement SW
+- Fix : `serviceWorkerSettings` retiré de l'appel `load()`, fonction `loadServiceWorker()` neutralisée (`if(1)return Promise.resolve()`)
+
+**Bug #3 : CanvasKit chargé depuis CDN Google**
+- Erreur : `Loading the script 'https://www.gstatic.com/flutter-canvaskit/...' violates CSP`
+- Cause : La fonction `b(s,t)` vérifie `t.useLocalCanvasKit` (2e argument = `_flutter.buildConfig`), pas le paramètre `config`
+- Fix : `"useLocalCanvasKit":true` ajouté à `_flutter.buildConfig` dans `flutter_bootstrap.js`
+
+**Autres corrections :**
+- [x] CSP : `blob:` retiré de `worker-src` (rejeté par Chrome V3)
+- [x] Diagnostics : timeout 30s + `window.onerror` pour afficher message d'erreur
+- [x] `build_extension.sh` entièrement réécrit (patch CanvasKit local, SW neutralisé, corely_init.js copié)
+- [x] Firestore rules déployées (`firestore.rules`)
+- [x] 4 fichiers de tests unitaires ajoutés
 
 ---
 ## Backlog (sessions futures)
 
-### 1. EXTENSION GOOGLE CHROME (enrichissement)
-- [ ] Vérifier démarrage extension après tous les fixes
+### 1. EXTENSION CHROME — Chargement et validation
+- [ ] **Valider le chargement complet** : l'extension doit charger Flutter, afficher le chat, répondre à l'IA
+- [ ] Tester le side panel et le popup (les deux modes d'affichage)
+- [ ] Tester la sélection de texte → menu contextuel → envoi dans Corely
 - [ ] Résumé de page via Readability.js
 - [ ] Autofill formulaires
 - [ ] Extraction/téléchargement médias
 
 ### 2. ANALYSE DE DOCUMENTS ET D'IMAGES
 - [ ] PDF scannés : OCR (nécessite API cloud ou Tesseract)
+- [ ] Tester injection fichiers TXT/MD comme contexte conversationnel
 
 ### 3. VOCAL
 - [ ] Mode barge-in : test UX et ajustement anti-echo
 - [ ] Streaming audio : test sur connexions lentes
 - [ ] Cache TTS : vérifier la persistance sur Android low-storage
+- [ ] Extension : créer offscreen document pour TTS audio (Manifest V3)
 
 ### 4. QUALITÉ BETA
-- [ ] Tests unitaires pour les nouveaux services (TtsCache, Whisper, PreferencesSync)
-- [ ] Tests d'intégration extension Chrome (build + load + test)
-- [ ] Vérification de la build release Android (APK)
-- [ ] Vérification de la build extension Chrome (ZIP)
-- [ ] Audit sécurité : clés API non exposées, Firestore rules
-- [ ] Performance : profiler le temps de démarrage cold/warm
+- [ ] Exécuter les tests unitaires (`bash scripts/run_tests.sh all`)
+- [ ] Tests d'intégration extension Chrome (build + load + test flux complet)
+- [ ] Build release Android APK + vérifier flux principal (chat, voix, fichiers)
+- [ ] Audit sécurité : clés API non exposées dans l'APK/extension, Firestore rules en production
+- [ ] Performance : profiler le temps de démarrage cold/warm (mobile + extension)
 - [ ] Accessibilité : vérifier contrastes, tailles de texte, labels
