@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:js' as js;
 import 'package:flutter/foundation.dart';
+import 'browser_action.dart';
+import 'platform_service.dart';
 
 /// Bridge extension Chrome — reçoit les CustomEvents du extension_bridge.js.
 /// Utilise dart:js pour l'accès dynamique aux propriétés JS
@@ -8,6 +10,8 @@ import 'package:flutter/foundation.dart';
 class ExtensionBridge {
   final _selectedTextController = StreamController<String>.broadcast();
   final _pageContentController = StreamController<Map<String, String>>.broadcast();
+  final _actionResultController = StreamController<BrowserActionResult>.broadcast();
+  final _pendingActions = <String, Completer<BrowserActionResult>>{};
 
   bool _isExtension = false;
   bool _initialized = false;
@@ -15,25 +19,19 @@ class ExtensionBridge {
   bool get isExtension => _isExtension;
   Stream<String> get onSelectedText => _selectedTextController.stream;
   Stream<Map<String, String>> get onPageContent => _pageContentController.stream;
+  Stream<BrowserActionResult> get onActionResult => _actionResultController.stream;
 
   void init() {
     if (_initialized) return;
     _initialized = true;
 
-    _isExtension = _detectChromeExtension();
+    // Utiliser PlatformService (Uri.base.scheme) au lieu de js.context
+    // car js.context['window']['location'] échoue en mode minifié.
+    _isExtension = PlatformService.isExtension;
     debugPrint('[ExtensionBridge] isExtension: $_isExtension');
 
     if (!_isExtension) return;
     _setupListeners();
-  }
-
-  bool _detectChromeExtension() {
-    try {
-      final protocol = (js.context['window'] as js.JsObject)['location']['protocol'];
-      return protocol == 'chrome-extension:';
-    } catch (_) {
-      return false;
-    }
   }
 
   void _setupListeners() {
@@ -57,6 +55,28 @@ class ExtensionBridge {
         _pageContentController.add({'title': title, 'url': url, 'content': content});
       }
     });
+
+    _addWindowListener('corely_browser_action_result', (js.JsObject event) {
+      final detail = event['detail'] as js.JsObject?;
+      if (detail == null) return;
+
+      final result = BrowserActionResult.fromJson({
+        'actionId': _getString(detail, 'actionId'),
+        'action': _getString(detail, 'action'),
+        'success': _getBool(detail, 'success') ?? false,
+        'data': detail['data'],
+        'error': _getString(detail, 'error'),
+      });
+
+      // Complete pending future
+      final completer = _pendingActions.remove(result.actionId);
+      if (completer != null && !completer.isCompleted) {
+        completer.complete(result);
+      }
+
+      // Broadcast to stream
+      _actionResultController.add(result);
+    });
   }
 
   /// Demander au content script d'extraire le contenu de la page.
@@ -69,12 +89,62 @@ class ExtensionBridge {
     }
   }
 
+  /// Exécuter une action navigateur (ouvrir un URL, cliquer, remplir, etc.).
+  /// Retourne le résultat de l'action via un Future avec timeout de 10 secondes.
+  Future<BrowserActionResult> executeAction(BrowserAction action) async {
+    if (!_isExtension) {
+      return BrowserActionResult(
+        actionId: action.actionId,
+        action: action.action,
+        success: false,
+        error: 'Extension not available',
+      );
+    }
+
+    final completer = Completer<BrowserActionResult>();
+    _pendingActions[action.actionId] = completer;
+
+    try {
+      final jsDetail = js.JsObject.jsify(action.toJson());
+      js.context.callMethod('dispatchCustomEvent', ['corely_browser_action', jsDetail]);
+    } catch (e) {
+      _pendingActions.remove(action.actionId);
+      return BrowserActionResult(
+        actionId: action.actionId,
+        action: action.action,
+        success: false,
+        error: e.toString(),
+      );
+    }
+
+    // Timeout 10 secondes
+    return completer.future.timeout(
+      const Duration(seconds: 10),
+      onTimeout: () {
+        _pendingActions.remove(action.actionId);
+        return BrowserActionResult(
+          actionId: action.actionId,
+          action: action.action,
+          success: false,
+          error: 'Action timed out',
+        );
+      },
+    );
+  }
+
   // ── JS helpers ──────────────────────────────────────────────────────────
 
+  /// Ajoute un event listener via dart:js en utilisant allowInterop
+  /// pour éviter les erreurs de type en mode minifié.
   void _addWindowListener(String type, void Function(js.JsObject) callback) {
     try {
-      final window = js.context['window'] as js.JsObject;
-      window.callMethod('addEventListener', [type, callback]);
+      // js.context est le contexte global (window en navigateur)
+      js.context.callMethod('addEventListener', [
+        type,
+        js.allowInterop((event) {
+          callback(event as js.JsObject);
+        }),
+      ]);
     } catch (e) {
       debugPrint('[ExtensionBridge] Error adding listener for $type: $e');
     }
@@ -90,8 +160,23 @@ class ExtensionBridge {
     }
   }
 
+  bool? _getBool(js.JsObject obj, String key) {
+    try {
+      final value = obj[key];
+      if (value is bool) return value;
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
   void dispose() {
     _selectedTextController.close();
     _pageContentController.close();
+    _actionResultController.close();
+    for (final c in _pendingActions.values) {
+      if (!c.isCompleted) c.completeError('Bridge disposed');
+    }
+    _pendingActions.clear();
   }
 }

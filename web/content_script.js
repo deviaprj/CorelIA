@@ -25,6 +25,30 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       title: document.title,
       url: window.location.href,
       content: pageContent,
+      success: true,
+    });
+  }
+
+  if (message.type === 'SUMMARIZE_PAGE') {
+    // Same extraction as GET_PAGE_CONTENT — summarization is done by the AI
+    const pageContent = extractPageContent();
+    sendResponse({
+      title: document.title,
+      url: window.location.href,
+      content: pageContent,
+      success: true,
+    });
+  }
+
+  if (message.type === 'EXTRACT_STRUCTURED') {
+    sendResponse({
+      title: document.title,
+      url: window.location.href,
+      content: extractPageContent(),
+      links: extractLinks(),
+      tables: extractTables(),
+      forms: extractForms(),
+      success: true,
     });
   }
   return false; // Synchrone
@@ -62,4 +86,43 @@ function cleanText(text) {
     .replace(/\s+/g, ' ')
     .replace(/\n\s*\n/g, '\n\n')
     .trim();
+}
+
+/// Extrait les liens de la page.
+function extractLinks() {
+  return Array.from(document.querySelectorAll('a'))
+    .slice(0, 100)
+    .map(a => ({
+      text: (a.textContent || '').trim().substring(0, 200),
+      href: a.href || '',
+    }))
+    .filter(l => l.href && !l.href.startsWith('javascript:'));
+}
+
+/// Extrait les tableaux de la page.
+function extractTables() {
+  return Array.from(document.querySelectorAll('table'))
+    .slice(0, 10)
+    .map(table => {
+      var rows = Array.from(table.querySelectorAll('tr'));
+      return rows.map(row =>
+        Array.from(row.querySelectorAll('td, th')).map(cell => cell.textContent.trim())
+      );
+    });
+}
+
+/// Extrait les formulaires de la page.
+function extractForms() {
+  return Array.from(document.querySelectorAll('form'))
+    .slice(0, 10)
+    .map(form => ({
+      action: form.action || '',
+      method: form.method || 'GET',
+      inputs: Array.from(form.querySelectorAll('input, textarea, select')).map(el => ({
+        name: el.name || '',
+        type: el.type || el.tagName.toLowerCase(),
+        placeholder: el.placeholder || '',
+        value: el.type === 'password' ? '***' : (el.value || ''),
+      })),
+    }));
 }

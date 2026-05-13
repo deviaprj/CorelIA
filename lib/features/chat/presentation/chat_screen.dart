@@ -1,9 +1,11 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'chat_notifier.dart';
 import 'chat_bubble.dart';
 import 'input_bar.dart';
+import 'slash_commands.dart';
 import 'voice_conversation_service.dart';
 import 'aurora_splash.dart';
 import '../data/image_upload_service.dart';
@@ -13,6 +15,7 @@ import '../data/search_quota_service.dart';
 import '../data/voice_quota_service.dart';
 import '../../../core/platform/platform_service.dart';
 import '../../../core/platform/extension_providers.dart';
+import '../../../core/platform/extension_bridge.dart';
 import '../../monetization/ads/ad_banner_widget.dart';
 import '../../monetization/ads/quota_exceeded_dialog.dart';
 import '../../monetization/subscription/subscription_service.dart';
@@ -32,11 +35,15 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   final _scrollController = ScrollController();
   AttachmentData? _pendingAttachment;
   final _inputBarController = TextEditingController();
+  final _inputBarKey = GlobalKey<InputBarState>();
+  String _slashFilter = '';
+  StreamSubscription<BrowserActionResult>? _actionResultSub;
 
   @override
   void dispose() {
     _scrollController.dispose();
     _inputBarController.dispose();
+    _actionResultSub?.cancel();
     super.dispose();
   }
 
@@ -120,7 +127,31 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       }
     });
 
+    // Écouter les résultats d'actions navigateur (extension Chrome)
     final isExtension = PlatformService.isExtension;
+    if (isExtension) {
+      final bridge = ref.read(extensionBridgeProvider);
+      _actionResultSub = bridge.onActionResult.listen((result) {
+        if (!mounted) return;
+        final actionName = result.action.value;
+        if (result.success) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Action "$actionName" exécutée'),
+              duration: const Duration(seconds: 2),
+            ),
+          );
+        } else if (result.error != null) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Action "$actionName" échouée : ${result.error}'),
+              duration: const Duration(seconds: 3),
+            ),
+          );
+        }
+      });
+    }
+
     final isVoiceActive = voiceConv.state != VoiceConversationState.idle;
 
     return Scaffold(
@@ -230,10 +261,26 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                   }
                 },
               ),
+              // Slash command palette (extension only)
+              if (isExtension && _slashFilter.isNotEmpty)
+                SlashCommandPalette(
+                  filter: _slashFilter,
+                  onSelected: (cmd) {
+                    final inputBar = _inputBarKey.currentState;
+                    if (inputBar != null) {
+                      inputBar.setCommandText('/${cmd.name} ');
+                    }
+                    setState(() => _slashFilter = '');
+                  },
+                ),
               InputBar(
+                key: _inputBarKey,
                 isLoading: state.isStreaming,
                 attachment: _pendingAttachment,
                 onCancelAttachment: () => setState(() => _pendingAttachment = null),
+                onSlashTextChanged: isExtension ? (filter) {
+                  setState(() => _slashFilter = filter);
+                } : null,
                 onSend: (text, {imageBase64, imageMimeType, fileName, fileContent}) {
                   notifier.sendMessage(
                     text,

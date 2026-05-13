@@ -8,6 +8,7 @@ import 'app/router.dart';
 import 'app/theme.dart';
 import 'core/platform/platform_service.dart';
 import 'core/platform/extension_bridge.dart';
+import 'core/platform/extension_providers.dart';
 import 'core/providers/app_providers.dart';
 import 'features/monetization/ads/ad_service.dart';
 import 'features/monetization/ads/consent_service.dart';
@@ -20,12 +21,19 @@ import 'features/chat/data/search_cache_service.dart';
 
 // Global flag pour le mode demo local (sans Firebase)
 // true par defaut pour le developpement : auth mock + IA reelle (DeepSeek via .env)
-// Extension Chrome : toujours false (Firebase requis pour la persistence)
+// Extension Chrome : toujours true (CSP bloque Google Sign-In, Firebase indisponible)
 // Forcer false avec : --dart-define=DEMO_MODE=false
 bool isDemoMode = const bool.fromEnvironment('DEMO_MODE', defaultValue: true);
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Capturer les erreurs Flutter et Dart pour le debug
+  FlutterError.onError = (details) {
+    debugPrint('[Flutter Error] ${details.exceptionAsString()}');
+    debugPrint('[Flutter Error Stack] ${details.stack}');
+    // Ne pas crasher l'app pour les erreurs de rendu
+  };
 
   // Charger le cache de recherche depuis SharedPreferences
   await searchCache.loadFromPrefs();
@@ -38,10 +46,12 @@ Future<void> main() async {
     debugPrint('[dotenv] .env introuvable ou illisible : $e');
   }
 
-  // ── Extension Chrome : forcer Firebase (persistence requise) ─────────────
-  if (PlatformService.isExtension && isDemoMode) {
-    isDemoMode = false;
-    debugPrint('[Extension] DEMO_MODE force a false — Firebase requis');
+  // ── Extension Chrome : mode DEMO obligatoire ──────────────────────────────
+  // Manifest V3 CSP bloque les scripts externes (Google Sign-In, Firebase Auth).
+  // En extension, on utilise le mode démo avec auth mock et API directe.
+  if (PlatformService.isExtension) {
+    isDemoMode = true;
+    debugPrint('[Extension] Mode DEMO — Firebase bloqué par CSP Manifest V3');
   }
 
   // ── Firebase : tenter, fallback DEMO si indisponible ────────────────────
@@ -109,15 +119,8 @@ Future<void> main() async {
     }
   }
 
-  // Extension bridge (écoute les messages du SW Chrome)
-  if (PlatformService.isExtension) {
-    try {
-      ExtensionBridge().init();
-      debugPrint('[Extension] Bridge initialisé');
-    } catch (e) {
-      debugPrint('[Extension] Bridge échoué : $e');
-    }
-  }
+  // Extension bridge sera initialisé via extensionBridgeProvider dans ProviderScope.
+  // Ne pas créer d'instance jetable ici — le provider gère le singleton.
 
   // RevenueCat (mobile uniquement)
   if (PlatformService.isMobile && !isDemoMode) {
@@ -129,7 +132,18 @@ Future<void> main() async {
     }
   }
 
-  runApp(ProviderScope(child: CorelyApp(isDemoMode: isDemoMode)));
+  // Zone protégée pour capturer les erreurs asynchrones sans crasher l'app
+  runZonedGuarded(
+    () => runApp(ProviderScope(child: CorelyApp(isDemoMode: isDemoMode))),
+    (error, stack) {
+      debugPrint('[App Error] $error');
+      try {
+        debugPrint('[App Error Stack] $stack');
+      } catch (e) {
+        debugPrint('[App Error Stack] (unprintable: $e)');
+      }
+    },
+  );
 }
 
 class CorelyApp extends ConsumerWidget {
@@ -142,6 +156,14 @@ class CorelyApp extends ConsumerWidget {
     final themeMode = ref.watch(themeModeProvider);
     final router = ref.watch(routerProvider);
 
+    // ── Extension bridge : initialiser via le provider (singleton) ─────────
+    if (PlatformService.isExtension) {
+      final bridge = ref.read(extensionBridgeProvider);
+      if (!bridge.isExtension) {
+        debugPrint('[Extension] Bridge non détecté — fallback');
+      }
+    }
+
     // ── Sync multi-appareils : écouter les préférences distantes ──────────
     // Ce watch déclenche l'initialisation du stream Firestore et met à jour
     // les SharedPreferences locales quand les préférences changent à distance.
@@ -153,11 +175,21 @@ class CorelyApp extends ConsumerWidget {
       ref.listen(userProfileProvider, (_, next) {});
     }
 
-    // Afficher bandeau GDPR au premier lancement (attendre le 2e frame
-    // pour que MaterialLocalizations soit disponible)
+    // Afficher bandeau GDPR au premier lancement.
+    // Attendre 2 frames pour que le Navigator soit monté dans l'arbre.
+    // Utiliser rootNavigatorKey.currentContext pour obtenir un contexte
+    // descendant du Navigator (le context de CorelyApp est au-dessus
+    // du MaterialApp et n'a pas de Navigator ancêtre).
     WidgetsBinding.instance.addPostFrameCallback((_) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        ConsentBanner.showIfNeeded(context, ref);
+        try {
+          final navContext = rootNavigatorKey.currentContext;
+          if (navContext != null && navContext.mounted) {
+            ConsentBanner.showIfNeeded(navContext, ref);
+          }
+        } catch (e) {
+          debugPrint('[ConsentBanner] Impossible d\'afficher le bandeau : $e');
+        }
       });
     });
 

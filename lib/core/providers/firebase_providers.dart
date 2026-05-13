@@ -8,16 +8,40 @@ import '../../features/auth/data/mock_auth_repository.dart';
 import '../../main.dart' show isDemoMode;
 
 // ── Firebase instances ────────────────────────────────────────────────────────
+// En mode DEMO (extension Chrome ou fallback), Firebase n'est pas initialisé.
+// On retourne quand même les singletons mais les consumers doivent vérifier isDemoMode.
 final firebaseAuthProvider = Provider<FirebaseAuth>(
-  (ref) => FirebaseAuth.instance,
+  (ref) {
+    // FirebaseAuth.instance est un singleton qui peut être accédé même si
+    // Firebase n'est pas initialisé, mais les méthodes d'auth déclencheront
+    // des erreurs. Les consumers vérifient isDemoMode avant d'utiliser.
+    try {
+      return FirebaseAuth.instance;
+    } catch (e) {
+      // Ne devrait jamais arriver, mais au cas où Firebase SDK crasherait
+      throw StateError('FirebaseAuth indisponible : $e');
+    }
+  },
 );
 
 final firestoreProvider = Provider<FirebaseFirestore>(
-  (ref) => FirebaseFirestore.instance,
+  (ref) {
+    try {
+      return FirebaseFirestore.instance;
+    } catch (e) {
+      throw StateError('FirebaseFirestore indisponible : $e');
+    }
+  },
 );
 
 final firebaseMessagingProvider = Provider<FirebaseMessaging>(
-  (ref) => FirebaseMessaging.instance,
+  (ref) {
+    try {
+      return FirebaseMessaging.instance;
+    } catch (e) {
+      throw StateError('FirebaseMessaging indisponible : $e');
+    }
+  },
 );
 
 // ── Auth state ────────────────────────────────────────────────────────────────
@@ -27,7 +51,12 @@ final authStateProvider = StreamProvider<dynamic>(
     if (isDemoMode) {
       return mockAuthRepository.authStateChanges;
     }
-    return ref.watch(firebaseAuthProvider).authStateChanges();
+    try {
+      return ref.watch(firebaseAuthProvider).authStateChanges();
+    } catch (e) {
+      // Firebase indisponible — fallback vers mock
+      return mockAuthRepository.authStateChanges;
+    }
   },
 );
 
@@ -45,13 +74,24 @@ final currentUserProvider = Provider<AppUserLike?>(
         email: user.email,
       );
     }
-    final firebaseUser = ref.watch(authStateProvider).valueOrNull;
-    if (firebaseUser == null) return null;
-    return AppUserLike(
-      uid: (firebaseUser as dynamic).uid as String,
-      displayName: (firebaseUser as dynamic).displayName as String?,
-      email: (firebaseUser as dynamic).email as String?,
-    );
+    try {
+      final firebaseUser = ref.watch(authStateProvider).valueOrNull;
+      if (firebaseUser == null) return null;
+      return AppUserLike(
+        uid: (firebaseUser as dynamic).uid as String,
+        displayName: (firebaseUser as dynamic).displayName as String?,
+        email: (firebaseUser as dynamic).email as String?,
+      );
+    } catch (e) {
+      // Firebase indisponible — fallback mock
+      final user = mockAuthRepository.currentUser;
+      if (user == null) return null;
+      return AppUserLike(
+        uid: user.uid,
+        displayName: user.displayName,
+        email: user.email,
+      );
+    }
   },
 );
 

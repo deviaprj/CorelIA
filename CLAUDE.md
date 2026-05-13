@@ -90,7 +90,7 @@ web/
 - `systemPromptProvider` in `settings_screen.dart` (StateNotifier + SharedPreferences)
 
 **Key Flows**:
-1. App start → Firebase init → check onboarding → check auth → route to appropriate screen
+1. App start → Firebase init (or DEMO mode on extension) → check onboarding → check auth → route to appropriate screen
 2. Chat → Firestore repository → AI client (DeepSeek/OpenRouter) → quota check → response
 3. Chat → system prompt injected as first system message → Corely personality
 4. Chat → intent classification (`_needsWebSearch()`) → web search only for factual/temporal queries
@@ -300,6 +300,12 @@ flutter build web --dart-define=DEEPSEEK_API_KEY=sk-xxx --dart-define=OPENROUTER
 - Pas de document offscreen pour audio playback en Manifest V3
 - `content_script.js` ne fait que capturer la sélection de texte
 - Pas de résumé de page, pas d'extraction média, pas d'autofill
+- Les commandes slash (/download, /pdf, /links, /summarize, /extract, /scroll, /open, /click, /fill, /screenshot, /back, /forward) ne fonctionnent PAS sur l'extension — l'ExtensionBridge.executeAction() envoie l'action au background.js mais le résultat ne revient pas au chat. Le système de BrowserActions côté JS ne retourne pas de réponse au callback Dart.
+
+**Riverpod pitfalls (important)**:
+- **Ne PAS modifier `state` dans un `Notifier.build()`** — Riverpod interdit la modification de `state` pendant la construction. Retourner directement l'état initial au lieu de `state = state.copyWith(...)`.
+- **ConsentBanner.showIfNeeded()** — Nécessite un `BuildContext` descendant du `Navigator`. Utiliser `rootNavigatorKey.currentContext` du GoRouter, PAS le context de `CorelyApp.build()`.
+- **AsyncValue.value!** — Toujours utiliser `valueOrNull` avec un null check au lieu de `.value!`. Les transitions d'état Riverpod peuvent temporairement rendre `value` null même quand `hasValue` est true.
 
 ## Firebase Structure
 
@@ -334,6 +340,9 @@ flutter build web --dart-define=DEEPSEEK_API_KEY=sk-xxx --dart-define=OPENROUTER
 
 - [x] Extension Chrome : démarrage cassé (13 bugs corrigés, conditional imports, CSP, base href, SW)
 - [x] Extension Chrome : 3 bugs CSP critiques (inline scripts → corely_init.js, CanvasKit CDN → useLocalCanvasKit:true, SW registration neutralisée)
+- [x] Extension Chrome : crash ConsentBanner (Navigator.of sur context hors MaterialApp) → rootNavigatorKey
+- [x] Extension Chrome : crash VoiceServiceNotifier (state=copyWith dans build() → réentrance Riverpod)
+- [x] Extension Chrome : crash AsyncValue.value! null → remplacé par valueOrNull + null check
 - [x] Logos/icons : remplacés par logo Corely "C" (toutes tailles)
 - [x] Comportement conversationnel : recherche web seulement sur questions factuelles/temporelles
 - [x] Settings : prompt système personnalisable avec sauvegarde
@@ -346,4 +355,5 @@ flutter build web --dart-define=DEEPSEEK_API_KEY=sk-xxx --dart-define=OPENROUTER
 - [ ] Pas de support HEIC/HEIF pour les images
 - [ ] Extension Chrome : pas de TTS audio, pas de résumé de page, pas d'extraction média
 - [x] Interruption vocale (barge-in) pendant le TTS (500ms anti-echo)
+- [ ] Extension Chrome : commandes slash (/download, /links, etc.) ne fonctionnent pas — BrowserActions ne retourne pas de résultat au callback Dart
 - [ ] Pas de synchronisation temps réel des préférences entre mobile et extension

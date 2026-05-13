@@ -91,7 +91,8 @@ class VoiceConversationNotifier
 
     ref.listen(messagesStreamProvider(conversationId), (prev, next) {
       if (!_isActive || !next.hasValue) return;
-      final messages = next.value!;
+      final messages = next.valueOrNull;
+      if (messages == null) return;
       if (messages.isEmpty) return;
 
       final lastMsg = messages.last;

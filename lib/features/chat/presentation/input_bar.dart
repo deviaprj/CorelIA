@@ -39,30 +39,54 @@ class InputBar extends ConsumerStatefulWidget {
     this.isLoading = false,
     this.attachment,
     this.onCancelAttachment,
+    this.onSlashTextChanged,
   });
 
   final SendCallback onSend;
   final bool isLoading;
   final AttachmentData? attachment;
   final VoidCallback? onCancelAttachment;
+  final ValueChanged<String>? onSlashTextChanged;
 
   @override
-  ConsumerState<InputBar> createState() => _InputBarState();
+  ConsumerState<InputBar> createState() => InputBarState();
 }
 
-class _InputBarState extends ConsumerState<InputBar> {
+class InputBarState extends ConsumerState<InputBar> {
   final _controller = TextEditingController();
   final _focusNode = FocusNode();
   bool _hasText = false;
   DateTime? _lastSentAt;
 
+  TextEditingController get controller => _controller;
+
   @override
   void initState() {
     super.initState();
-    _controller.addListener(() {
-      final val = _controller.text.isNotEmpty;
-      if (val != _hasText) setState(() => _hasText = val);
-    });
+    _controller.addListener(_onTextChanged);
+  }
+
+  void _onTextChanged() {
+    final text = _controller.text;
+    final val = text.isNotEmpty;
+    if (val != _hasText) setState(() => _hasText = val);
+    // Notify parent when typing a slash command
+    if (widget.onSlashTextChanged != null) {
+      if (text.startsWith('/')) {
+        widget.onSlashTextChanged!(text.substring(1));
+      } else {
+        widget.onSlashTextChanged!('');
+      }
+    }
+  }
+
+  /// Replace current text with a slash command (e.g. "/download ").
+  void setCommandText(String commandWithSpace) {
+    _controller.text = commandWithSpace;
+    _controller.selection = TextSelection.fromPosition(
+      TextPosition(offset: _controller.text.length),
+    );
+    _focusNode.requestFocus();
   }
 
   @override
@@ -86,6 +110,8 @@ class _InputBarState extends ConsumerState<InputBar> {
 
     final att = widget.attachment;
     _controller.clear();
+    // Clear slash command filter after sending
+    widget.onSlashTextChanged?.call('');
     widget.onSend(
       text,
       imageBase64: att?.imageBase64,

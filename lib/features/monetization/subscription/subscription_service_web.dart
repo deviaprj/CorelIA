@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/constants.dart';
 import '../../../core/providers/firebase_providers.dart';
 import '../../auth/data/user_profile_sync.dart';
+import '../../../main.dart' show isDemoMode;
 
 /// SubscriptionService — stub web (pas de RevenueCat sur web).
 class SubscriptionService {
@@ -15,10 +16,11 @@ class SubscriptionService {
 final subscriptionServiceProvider = Provider((_) => SubscriptionService());
 
 /// Sur web/extension, le statut Pro est lu depuis Firestore en temps réel.
-/// L'utilisateur doit avoir un document users/{uid} avec plan = "pro".
-/// Utilise isProSyncProvider (écoute Firestore snapshots) quand disponible,
-/// avec fallback en lecture unique.
+/// En mode DEMO (extension Chrome ou Firebase indisponible), retourne false.
 final isProProvider = FutureProvider<bool>((ref) async {
+  // Mode DEMO : pas de Firestore, pas de Pro
+  if (isDemoMode) return false;
+
   // Mode debug : forcer Pro si DEBUG_FORCE_PRO
   const debugForcePro = bool.fromEnvironment('DEBUG_FORCE_PRO', defaultValue: false);
   if (!kReleaseMode && debugForcePro) {

@@ -37,7 +37,9 @@
     "sidePanel",
     "contextMenus",
     "scripting",
-    "activeTab"
+    "activeTab",
+    "tabs",
+    "downloads"
   ],
 
   "host_permissions": [
@@ -48,12 +50,12 @@
   ],
 
   "content_security_policy": {
-    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self';"
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'; img-src 'self' data: https:;"
   },
 
   "web_accessible_resources": [
     {
-      "resources": ["*.js", "*.dart.js", "*.wasm", "assets/**", "canvaskit/**"],
+      "resources": ["*.js", "*.dart.js", "*.wasm", "assets/**", "canvaskit/**", "dom_actions.js"],
       "matches": ["<all_urls>"]
     }
   ]

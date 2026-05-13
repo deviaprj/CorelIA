@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -16,12 +17,16 @@ import '../data/ollama_vision_service.dart';
 import '../domain/conversation.dart';
 import '../domain/message.dart';
 import '../../../core/constants.dart';
+import '../../../core/platform/platform_service.dart';
+import '../../../core/platform/extension_providers.dart';
+import '../../../core/platform/extension_bridge.dart';
 import '../../../core/providers/firebase_providers.dart';
 import '../../monetization/subscription/subscription_service.dart';
 import '../../settings/presentation/settings_screen.dart' show systemPromptProvider;
 import '../../monetization/credits/credit_providers.dart';
 import '../../monetization/credits/credit_service.dart';
 import '../../../main.dart' show isDemoMode;
+import 'slash_commands.dart';
 
 // ── Conversations stream ───────────────────────────────────────────────────
 final conversationsStreamProvider =
@@ -101,11 +106,301 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
       // Hors streaming uniquement : sync depuis le repo Firestore/mock.
       // Pendant le streaming, on gère tout localement pour éviter les
       // conflits entre placeholders locaux et sync repo.
-      if (next.hasValue && !state.isStreaming) {
-        state = state.copyWith(messages: next.value!);
+      try {
+        final messages = next.valueOrNull;
+        if (messages != null && !state.isStreaming) {
+          state = state.copyWith(messages: messages);
+        }
+      } catch (e, st) {
+        debugPrint('[ChatNotifier.listen] Error: $e\n$st');
       }
     });
     return const ChatState();
+  }
+
+  /// Traite une commande slash (/download, /pdf, /links, etc.)
+  /// Retourne true si la commande a été traitée (ne pas envoyer à l'IA).
+  Future<bool> handleSlashCommand(String text) async {
+    final parsed = SlashCommands.parse(text);
+    if (parsed == null) return false;
+
+    final bridge = ref.read(extensionBridgeProvider);
+    if (!bridge.isExtension) {
+      // Les commandes slash ne fonctionnent que dans l'extension
+      state = state.copyWith(
+        error: 'Commande /${parsed.command.name} disponible uniquement dans l\'extension Chrome.',
+        isStreaming: false,
+      );
+      return true;
+    }
+
+    switch (parsed.command.name) {
+      case 'download':
+        return await _handleSlashDownload(parsed, bridge);
+      case 'pdf':
+        return await _handleSlashPdf(parsed, bridge);
+      case 'links':
+        return await _handleSlashLinks(parsed, bridge);
+      case 'summarize':
+        return await _handleSlashSummarize(parsed, bridge);
+      case 'extract':
+        return await _handleSlashExtract(parsed, bridge);
+      case 'scroll':
+        return await _handleSlashScroll(parsed, bridge);
+      case 'open':
+        return await _handleSlashOpen(parsed, bridge);
+      case 'click':
+        return await _handleSlashClick(parsed, bridge);
+      case 'fill':
+        return await _handleSlashFill(parsed, bridge);
+      case 'screenshot':
+        return await _handleSlashScreenshot(parsed, bridge);
+      case 'back':
+        return await _handleSlashBack(parsed, bridge);
+      case 'forward':
+        return await _handleSlashForward(parsed, bridge);
+      default:
+        return false;
+    }
+  }
+
+  Future<bool> _handleSlashDownload(ParsedSlashCommand cmd, ExtensionBridge bridge) async {
+    if (cmd.args.isEmpty) {
+      state = state.copyWith(error: 'Usage : /download <url> [filename]', isStreaming: false);
+      return true;
+    }
+    final url = cmd.args[0];
+    final filename = cmd.args.length > 1 ? cmd.args[1] : null;
+
+    final action = BrowserAction(
+      action: BrowserActionType.download,
+      params: {
+        'url': url,
+        if (filename != null) 'filename': filename,
+      },
+    );
+    final result = await bridge.executeAction(action);
+    if (result.success) {
+      final downloaded = result.data?['downloaded'] as List? ?? [];
+      final count = downloaded.where((d) => (d as Map?)?['success'] == true).length;
+      state = state.copyWith(error: null, isStreaming: false);
+      _addAssistantMessage('Téléchargement lancé pour $count fichier(s).');
+    } else {
+      state = state.copyWith(error: 'Erreur téléchargement : ${result.error}', isStreaming: false);
+    }
+    return true;
+  }
+
+  Future<bool> _handleSlashPdf(ParsedSlashCommand cmd, ExtensionBridge bridge) async {
+    // /pdf [url] [filename] — PDF de la page courante ou d'une URL
+    final url = cmd.args.isNotEmpty ? cmd.args[0] : null;
+    final filename = cmd.args.length > 1 ? cmd.args[1] : null;
+
+    // Si une URL est fournie, l'ouvrir d'abord
+    if (url != null && url.startsWith('http')) {
+      final openAction = BrowserAction(
+        action: BrowserActionType.openUrl,
+        params: {'url': url},
+      );
+      await bridge.executeAction(openAction);
+    }
+
+    final action = BrowserAction(
+      action: BrowserActionType.saveAsPdf,
+      params: {
+        if (filename != null) 'filename': filename,
+      },
+    );
+    final result = await bridge.executeAction(action);
+    if (result.success) {
+      state = state.copyWith(error: null, isStreaming: false);
+      _addAssistantMessage('Fenêtre d\'impression ouverte. Choisissez "Enregistrer au format PDF".');
+    } else {
+      state = state.copyWith(error: 'Erreur PDF : ${result.error}', isStreaming: false);
+    }
+    return true;
+  }
+
+  Future<bool> _handleSlashLinks(ParsedSlashCommand cmd, ExtensionBridge bridge) async {
+    final filter = cmd.args.isNotEmpty ? cmd.args[0] : 'all';
+    final action = BrowserAction(
+      action: BrowserActionType.extractLinks,
+      params: {'filter': filter},
+    );
+    final result = await bridge.executeAction(action);
+    if (result.success && result.data != null) {
+      final links = result.data!['links'] as List? ?? [];
+      final count = result.data!['count'] as int? ?? links.length;
+      final appliedFilter = result.data!['filter'] as String? ?? 'all';
+      final linksText = links.take(20).map((l) {
+        final m = l as Map;
+        return '- [${m['text'] ?? 'Lien'}](${m['href']})';
+      }).join('\n');
+      final more = count > 20 ? '\n... et ${count - 20} autres' : '';
+      _addAssistantMessage('Liens trouvés ($appliedFilter, $count au total) :\n$linksText$more');
+    } else {
+      state = state.copyWith(error: 'Erreur extraction liens : ${result.error}', isStreaming: false);
+    }
+    return true;
+  }
+
+  Future<bool> _handleSlashSummarize(ParsedSlashCommand cmd, ExtensionBridge bridge) async {
+    final action = BrowserAction(
+      action: BrowserActionType.summarizePage,
+      params: {},
+    );
+    final result = await bridge.executeAction(action);
+    if (result.success && result.data != null) {
+      final content = result.data!['content'] as String? ?? '';
+      final title = result.data!['title'] as String? ?? '';
+      // Injecter le contenu dans le message et laisser l'IA résumer
+      final summarizePrompt = 'Résume le contenu suivant de la page "$title" '
+          '(${content.length} caractères extraits) :\n\n${content.substring(0, content.length > 3000 ? 3000 : content.length)}';
+      await sendMessage(summarizePrompt);
+      return true;
+    } else {
+      state = state.copyWith(error: 'Erreur résumé : ${result.error}', isStreaming: false);
+    }
+    return true;
+  }
+
+  Future<bool> _handleSlashExtract(ParsedSlashCommand cmd, ExtensionBridge bridge) async {
+    final selector = cmd.args.isNotEmpty ? cmd.args[0] : 'body';
+    final action = BrowserAction(
+      action: BrowserActionType.extractText,
+      params: {'selector': selector},
+    );
+    final result = await bridge.executeAction(action);
+    if (result.success && result.data != null) {
+      final text = result.data!['text'] as String? ?? '';
+      _addAssistantMessage('Texte extrait de "$selector" (${text.length} caractères) :\n\n${text.substring(0, text.length > 3000 ? 3000 : text.length)}');
+    } else {
+      state = state.copyWith(error: 'Erreur extraction : ${result.error}', isStreaming: false);
+    }
+    return true;
+  }
+
+  Future<bool> _handleSlashScroll(ParsedSlashCommand cmd, ExtensionBridge bridge) async {
+    final direction = cmd.args.isNotEmpty ? cmd.args[0] : 'down';
+    final amount = cmd.args.length > 1 ? int.tryParse(cmd.args[1]) ?? 500 : 500;
+    final action = BrowserAction(
+      action: BrowserActionType.scroll,
+      params: {'direction': direction, 'amount': amount},
+    );
+    final result = await bridge.executeAction(action);
+    if (result.success) {
+      state = state.copyWith(error: null, isStreaming: false);
+      _addAssistantMessage('Défilé ${direction == 'up' ? 'vers le haut' : 'vers le bas'} de $amount px.');
+    } else {
+      state = state.copyWith(error: 'Erreur scroll : ${result.error}', isStreaming: false);
+    }
+    return true;
+  }
+
+  Future<bool> _handleSlashOpen(ParsedSlashCommand cmd, ExtensionBridge bridge) async {
+    if (cmd.args.isEmpty) {
+      state = state.copyWith(error: 'Usage : /open <url>', isStreaming: false);
+      return true;
+    }
+    final action = BrowserAction(
+      action: BrowserActionType.openUrl,
+      params: {'url': cmd.args[0]},
+    );
+    final result = await bridge.executeAction(action);
+    if (result.success) {
+      state = state.copyWith(error: null, isStreaming: false);
+      _addAssistantMessage('Onglet ouvert : ${cmd.args[0]}');
+    } else {
+      state = state.copyWith(error: 'Erreur ouverture : ${result.error}', isStreaming: false);
+    }
+    return true;
+  }
+
+  Future<bool> _handleSlashClick(ParsedSlashCommand cmd, ExtensionBridge bridge) async {
+    if (cmd.args.isEmpty) {
+      state = state.copyWith(error: 'Usage : /click <sélecteur CSS>', isStreaming: false);
+      return true;
+    }
+    final action = BrowserAction(
+      action: BrowserActionType.clickElement,
+      params: {'selector': cmd.args[0]},
+    );
+    final result = await bridge.executeAction(action);
+    if (result.success) {
+      state = state.copyWith(error: null, isStreaming: false);
+      _addAssistantMessage('Cliqué sur "${cmd.args[0]}".');
+    } else {
+      state = state.copyWith(error: 'Erreur clic : ${result.error}', isStreaming: false);
+    }
+    return true;
+  }
+
+  Future<bool> _handleSlashFill(ParsedSlashCommand cmd, ExtensionBridge bridge) async {
+    if (cmd.args.length < 2) {
+      state = state.copyWith(error: 'Usage : /fill <sélecteur CSS> <valeur>', isStreaming: false);
+      return true;
+    }
+    final action = BrowserAction(
+      action: BrowserActionType.fillForm,
+      params: {'selector': cmd.args[0], 'value': cmd.args.sublist(1).join(' ')},
+    );
+    final result = await bridge.executeAction(action);
+    if (result.success) {
+      state = state.copyWith(error: null, isStreaming: false);
+      _addAssistantMessage('Champ "${cmd.args[0]}" rempli.');
+    } else {
+      state = state.copyWith(error: 'Erreur remplissage : ${result.error}', isStreaming: false);
+    }
+    return true;
+  }
+
+  Future<bool> _handleSlashScreenshot(ParsedSlashCommand cmd, ExtensionBridge bridge) async {
+    final action = BrowserAction(action: BrowserActionType.screenshot, params: {});
+    final result = await bridge.executeAction(action);
+    if (result.success) {
+      state = state.copyWith(error: null, isStreaming: false);
+      _addAssistantMessage('Capture d\'écran effectuée.');
+    } else {
+      state = state.copyWith(error: 'Erreur capture : ${result.error}', isStreaming: false);
+    }
+    return true;
+  }
+
+  Future<bool> _handleSlashBack(ParsedSlashCommand cmd, ExtensionBridge bridge) async {
+    final action = BrowserAction(action: BrowserActionType.navigateBack, params: {});
+    final result = await bridge.executeAction(action);
+    if (result.success) {
+      state = state.copyWith(error: null, isStreaming: false);
+      _addAssistantMessage('Retour à la page précédente.');
+    } else {
+      state = state.copyWith(error: 'Erreur navigation : ${result.error}', isStreaming: false);
+    }
+    return true;
+  }
+
+  Future<bool> _handleSlashForward(ParsedSlashCommand cmd, ExtensionBridge bridge) async {
+    final action = BrowserAction(action: BrowserActionType.navigateForward, params: {});
+    final result = await bridge.executeAction(action);
+    if (result.success) {
+      state = state.copyWith(error: null, isStreaming: false);
+      _addAssistantMessage('Page suivante.');
+    } else {
+      state = state.copyWith(error: 'Erreur navigation : ${result.error}', isStreaming: false);
+    }
+    return true;
+  }
+
+  /// Ajoute un message assistant au state (pour les résultats de commandes slash).
+  void _addAssistantMessage(String text) {
+    final msg = Message(
+      id: 'slash_${DateTime.now().millisecondsSinceEpoch}',
+      conversationId: arg,
+      role: Role.assistant,
+      content: text,
+      isStreaming: false,
+      createdAt: DateTime.now(),
+    );
+    state = state.copyWith(messages: [...state.messages, msg]);
   }
 
   Future<void> sendMessage(
@@ -119,6 +414,12 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
     final trimmed = text.trim();
     if (trimmed.isEmpty && imageBase64 == null) return;
     if (trimmed.length > 10000 || state.isStreaming) return;
+
+    // Slash commands: intercept before AI processing (extension only)
+    if (trimmed.startsWith('/') && PlatformService.isExtension) {
+      final handled = await handleSlashCommand(trimmed);
+      if (handled) return;
+    }
 
     final user = ref.read(currentUserProvider);
     if (user == null) return;
@@ -343,6 +644,10 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
       var finalContent = buffer.toString();
       final model = isPro ? AppConstants.mistralModel : AppConstants.deepSeekModel;
 
+      // Parser et exécuter les actions navigateur (extension Chrome uniquement)
+      // puis supprimer les balises [CORELY_ACTION] du texte affiché
+      finalContent = await _processBrowserActions(finalContent);
+
       // Stocker les sources separément pour affichage UI structuré
       List<String>? sourceList;
       if (searchResults != null && searchResults.isNotEmpty) {
@@ -419,6 +724,11 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
     // ── 0. Prompt système Corely ───────────────────────────────────────────
     final corelySystemPrompt = ref.read(systemPromptProvider);
 
+    // Ajouter le contexte des actions navigateur si on est en extension Chrome
+    final fullSystemPrompt = PlatformService.isExtension
+        ? '$corelySystemPrompt\n\n$_browserActionSystemContext'
+        : corelySystemPrompt;
+
     // ── 1. Construire l'historique ───────────────────────────────────────
     final historyMessages = state.messages
         .where((m) => m.role != Role.system && !m.isStreaming)
@@ -434,7 +744,7 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
       id: 'corely_system_${DateTime.now().millisecondsSinceEpoch}',
       conversationId: arg,
       role: Role.system,
-      content: corelySystemPrompt,
+      content: fullSystemPrompt,
       createdAt: DateTime.now(),
     ));
 
@@ -700,6 +1010,115 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
   void loadMoreHistory() {
     if (!state.canLoadMore) return;
     state = state.copyWith(displayCount: state.displayCount + 20);
+  }
+
+  // ── Browser actions (extension Chrome) ────────────────────────────────────
+
+  /// Contexte système injecté quand l'app tourne en extension Chrome.
+  /// Indique à l'IA les actions navigateur disponibles et leur format.
+  static const _browserActionSystemContext =
+      'You have browser interaction capabilities when running as a Chrome extension. '
+      'When the user asks you to open a URL, click something on the page, fill a form, '
+      'scroll, download a file, convert to PDF, or extract information from the current page, '
+      'output a structured action command using this exact format:\n'
+      '[CORELY_ACTION]\n'
+      '{"action": "ACTION_TYPE", "params": { ... }}\n'
+      '[/CORELY_ACTION]\n\n'
+      'Available actions:\n'
+      '- OPEN_URL: {"action": "OPEN_URL", "params": {"url": "https://..."}}\n'
+      '- GET_PAGE_CONTENT: {"action": "GET_PAGE_CONTENT", "params": {}}\n'
+      '- SUMMARIZE_PAGE: {"action": "SUMMARIZE_PAGE", "params": {}}\n'
+      '- EXTRACT_TEXT: {"action": "EXTRACT_TEXT", "params": {"selector": "CSS selector"}}\n'
+      '- EXTRACT_LINKS: {"action": "EXTRACT_LINKS", "params": {"filter": "all|video|image|audio|document"}}\n'
+      '- CLICK_ELEMENT: {"action": "CLICK_ELEMENT", "params": {"selector": "CSS selector"}}\n'
+      '- FILL_FORM: {"action": "FILL_FORM", "params": {"selector": "CSS selector", "value": "text"}}\n'
+      '- SCROLL: {"action": "SCROLL", "params": {"direction": "down", "amount": 500}}\n'
+      '- NAVIGATE_BACK: {"action": "NAVIGATE_BACK", "params": {}}\n'
+      '- NAVIGATE_FORWARD: {"action": "NAVIGATE_FORWARD", "params": {}}\n'
+      '- DOWNLOAD: {"action": "DOWNLOAD", "params": {"url": "https://...", "filename": "optional_name.mp4"}}\n'
+      '  Multiple URLs: {"action": "DOWNLOAD", "params": {"urls": ["url1", "url2"], "filename": "optional_prefix"}}\n'
+      '- SAVE_AS_PDF: {"action": "SAVE_AS_PDF", "params": {"filename": "optional_name"}}\n'
+      '- SCREENSHOT: {"action": "SCREENSHOT", "params": {}}\n\n'
+      'You can include one or more actions in your response alongside regular text. '
+      'The actions will be executed after your response is displayed. '
+      'Always explain what you are doing before outputting an action. '
+      'For SUMMARIZE_PAGE, extract the content first then provide your summary in your response. '
+      'For DOWNLOAD, you can pass a single url or an array of urls. '
+      'For EXTRACT_LINKS, use filter "video" for video URLs, "image" for image URLs, '
+      '"audio" for audio URLs, "document" for document URLs, or "all" for all links.';
+
+  /// Parse et exécute les actions navigateur dans la réponse de l'IA.
+  /// Retourne le texte nettoyé (sans les balises [CORELY_ACTION]).
+  Future<String> _processBrowserActions(String content) async {
+    if (!PlatformService.isExtension) return content;
+
+    final stripped = _stripActionCommands(content);
+    await _parseAndExecuteBrowserActions(content);
+    return stripped;
+  }
+
+  /// Extrait et exécute les actions navigateur d'une réponse IA.
+  Future<void> _parseAndExecuteBrowserActions(String content) async {
+    final actionRegex = RegExp(
+      r'\[CORELY_ACTION\]\s*(\{[\s\S]*?\})\s*\[/CORELY_ACTION\]',
+      multiLine: true,
+    );
+
+    final matches = actionRegex.allMatches(content);
+    if (matches.isEmpty) return;
+
+    final bridge = ref.read(extensionBridgeProvider);
+    for (final match in matches) {
+      try {
+        final jsonStr = match.group(1)?.trim();
+        if (jsonStr == null) continue;
+
+        // Parse the JSON action
+        final decoded = _parseJsonLoose(jsonStr);
+        if (decoded == null) continue;
+
+        final action = BrowserAction(
+          action: BrowserActionType.fromString(decoded['action'] as String? ?? ''),
+          params: Map<String, dynamic>.from(decoded['params'] as Map? ?? {}),
+        );
+
+        final result = await bridge.executeAction(action);
+        debugPrint('[ChatNotifier] Browser action ${action.action.value}: '
+            'success=${result.success}${result.error != null ? ' error=${result.error}' : ''}');
+
+        // Si l'action a retourné du contenu de page, on pourrait l'injecter
+        // dans un futur message système, mais pour l'instant on loggue simplement
+        if (result.success &&
+            (result.action == BrowserActionType.getPageContent ||
+                result.action == BrowserActionType.summarizePage) &&
+            result.data != null) {
+          final contentStr = result.data!['content'] as String? ?? '';
+          debugPrint('[ChatNotifier] Page content received: '
+              '${contentStr.substring(0, contentStr.length > 200 ? 200 : contentStr.length)}...');
+        }
+      } catch (e) {
+        debugPrint('[ChatNotifier] Browser action parse error: $e');
+      }
+    }
+  }
+
+  /// Parse JSON de manière tolérante (accepte les sauts de ligne dans les strings).
+  static Map<String, dynamic>? _parseJsonLoose(String jsonStr) {
+    try {
+      return jsonDecode(jsonStr) as Map<String, dynamic>;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Supprime les balises [CORELY_ACTION]...[/CORELY_ACTION] du texte affiché.
+  static String _stripActionCommands(String text) {
+    return text
+        .replaceAll(
+          RegExp(r'\[CORELY_ACTION\][\s\S]*?\[/CORELY_ACTION\]', multiLine: true),
+          '',
+        )
+        .trim();
   }
 }
 

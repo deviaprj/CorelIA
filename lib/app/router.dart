@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
 import 'package:go_router/go_router.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core/providers/firebase_providers.dart';
@@ -13,6 +14,9 @@ import '../features/settings/presentation/settings_screen.dart';
 import '../features/monetization/subscription/paywall_screen.dart';
 import '../../main.dart' show isDemoMode;
 
+/// Clé globale du Navigator pour accéder au contexte depuis les callbacks.
+final rootNavigatorKey = GlobalKey<NavigatorState>();
+
 final routerProvider = Provider<GoRouter>((ref) {
   final notifier = ValueNotifier<int>(0);
   ref.listen(authStateProvider, (_, __) => notifier.value++);
@@ -20,6 +24,7 @@ final routerProvider = Provider<GoRouter>((ref) {
   ref.onDispose(() => notifier.dispose());
 
   return GoRouter(
+    navigatorKey: rootNavigatorKey,
     initialLocation: '/',
     refreshListenable: notifier,
     redirect: (context, state) {

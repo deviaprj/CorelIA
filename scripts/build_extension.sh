@@ -63,6 +63,8 @@ cp "$WEB_SRC/background.js"     "$BUILD_EXT/background.js"
 cp "$WEB_SRC/content_script.js" "$BUILD_EXT/content_script.js"
 cp "$WEB_SRC/speech_bridge.js"  "$BUILD_EXT/speech_bridge.js"
 cp "$WEB_SRC/extension_bridge.js" "$BUILD_EXT/extension_bridge.js"
+cp "$WEB_SRC/browser_actions.js" "$BUILD_EXT/browser_actions.js"
+cp "$WEB_SRC/dom_actions.js"    "$BUILD_EXT/dom_actions.js"
 cp "$WEB_SRC/corely_init.js"    "$BUILD_EXT/corely_init.js"
 
 # Créer le dossier icons si absent
@@ -84,8 +86,6 @@ fi
 INDEX="$BUILD_EXT/index.html"
 if [[ -f "$INDEX" ]]; then
   # 5a. Corriger <base href="/"> → <base href="./">
-  #     Dans chrome-extension://, "/" résout contre la racine de l'extension,
-  #     mais "./" résout relativement au répertoire de index.html (plus sûr).
   sed -i 's|<base href="/">|<base href="./">|g' "$INDEX"
   echo "🩹  base href corrigé : / → ./"
 
@@ -93,6 +93,10 @@ if [[ -f "$INDEX" ]]; then
   sed -i '/serviceWorker/d' "$INDEX"
   sed -i '/flutter_service_worker/d' "$INDEX"
   echo "🩹  ServiceWorker Flutter retiré de index.html."
+
+  # 5c. Pas de nonce dans index.html — Manifest V3 ne supporte pas les nonces.
+  #     Les scripts inline de Flutter sont interceptés par corely_init.js
+  #     et exécutés via new Function() au lieu d'être injectés dans le DOM.
 fi
 
 # ── 6. Patch flutter_bootstrap.js ─────────────────────────────────────────────
@@ -104,24 +108,18 @@ with open('$BOOTSTRAP', 'r') as f:
     content = f.read()
 
 # 6a. Supprimer complètement serviceWorkerSettings du loader.load() call.
-# Dans une extension Chrome Manifest V3, l'enregistrement d'un SW Flutter
-# entre en conflit avec le background service worker de l'extension.
 content = re.sub(r'serviceWorkerSettings:\s*\{[^}]*\}\s*,?\s*', '', content)
 content = re.sub(r'\.load\(\{\s*\}\)', '.load()', content)
 
 # 6b. Forcer CanvasKit local (pas CDN).
-# La fonction b(s,t) dans le bootstrap vérifie t.useLocalCanvasKit (2e argument).
-# Or t = _flutter.buildConfig, PAS le paramètre config de load().
-# Il faut donc ajouter useLocalCanvasKit:true dans _flutter.buildConfig.
 content = re.sub(
     r'(_flutter\.buildConfig\s*=\s*\{)',
-    r'\1"useLocalCanvasKit":true,',
+    r'\1\"useLocalCanvasKit\":true,',
     content
 )
 print('useLocalCanvasKit:true ajouté à _flutter.buildConfig')
 
-# 6c. Neutraliser la fonction loadServiceWorker pour qu'elle skip toujours
-# (sécurité supplémentaire si loadEntrypoint est appelé depuis un autre path)
+# 6c. Neutraliser la fonction loadServiceWorker
 content = re.sub(
     r'loadServiceWorker\(t\)\{',
     'loadServiceWorker(t){if(1)return Promise.resolve();',
@@ -139,19 +137,23 @@ fi
 MANIFEST="$BUILD_EXT/manifest.json"
 if [[ -f "$MANIFEST" ]]; then
   python3 -c "
-import json, sys
+import json, re, sys
 with open('$MANIFEST', 'r') as f:
     m = json.load(f)
 if 'background' in m and 'type' in m['background']:
     del m['background']['type']
     print('Retiré type:module du background')
-# Corriger CSP : retirer blob: qui est interdit par Chrome Manifest V3
+# Corriger CSP : retirer blob: et worker-src (Manifest V3 interdit)
+# Manifest V3 n'accepte PAS les nonces dans script-src.
+# Les scripts inline Flutter sont interceptés par corely_init.js.
 if 'content_security_policy' in m and 'extension_pages' in m['content_security_policy']:
     csp = m['content_security_policy']['extension_pages']
     csp = csp.replace(' blob:', '')
     csp = csp.replace(\"; worker-src 'self'\", '')
+    # Retirer tout nonce eventuel (Manifest V3 ne les supporte pas)
+    csp = re.sub(r\"\\s*'nonce-[^']+'\", '', csp)
     m['content_security_policy']['extension_pages'] = csp
-    print('CSP vérifié (blob: retiré)')
+    print('CSP vérifié (blob: retiré, nonce retiré si présent)')
 # Ajouter *.wasm aux web_accessible_resources
 if 'web_accessible_resources' in m:
     for group in m['web_accessible_resources']:

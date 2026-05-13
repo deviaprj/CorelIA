@@ -118,12 +118,15 @@ class WebSpeechBridge {
     }
   }
 
+  /// Ajoute un event listener via dart:js en utilisant allowInterop
+  /// pour éviter les erreurs de type en mode minifié.
   void _addWindowListener(String type, void Function(js.JsObject) callback) {
     try {
-      final window = js.context['window'] as js.JsObject;
-      window.callMethod('addEventListener', [
+      js.context.callMethod('addEventListener', [
         type,
-        callback,
+        js.allowInterop((event) {
+          callback(event as js.JsObject);
+        }),
       ]);
     } catch (e) {
       debugPrint('[WebSpeechBridge] Error adding listener for $type: $e');

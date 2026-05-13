@@ -32,6 +32,9 @@ class ConsentBanner {
     final consent = ref.read(gdprConsentProvider);
     if (consent != null) return; // deja repondu
 
+    // Vérifier que le contexte a un Navigator (sinon showModalBottomSheet crash)
+    if (!context.mounted) return;
+
     await showModalBottomSheet<void>(
       context: context,
       isDismissible: false,

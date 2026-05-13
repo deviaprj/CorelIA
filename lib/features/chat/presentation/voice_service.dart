@@ -67,16 +67,15 @@ class VoiceServiceNotifier extends Notifier<VoiceState> {
       _webBridge?.dispose();
     });
     _initTts();
-    // Sur web/extension, utiliser le bridge JS ; sur mobile, utiliser speech_to_text
+    // Sur web/extension, utiliser le bridge JS ; sur mobile, speech_to_text
+    // Ne PAS modifier state dans build() — retourner directement l'état initial.
     if (kIsWeb) {
       _webBridge = WebSpeechBridge();
-      if (_webBridge!.isAvailable) {
-        state = state.copyWith(isAvailable: true);
-      }
+      return VoiceState(isAvailable: _webBridge!.isAvailable);
     } else {
       _initSttOnce();
+      return const VoiceState();
     }
-    return const VoiceState();
   }
 
   Future<void> _initTts() async {

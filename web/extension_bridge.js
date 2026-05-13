@@ -59,6 +59,15 @@
           });
         }
         break;
+
+      case 'BROWSER_ACTION_RESULT':
+        // Résultat d'une action navigateur relayé par le background SW
+        // Forward au CustomEvent pour que browser_actions.js le capte
+        // (browser_actions.js écoute aussi chrome.runtime.onMessage directement)
+        window.dispatchEvent(new CustomEvent('corely_browser_action_result', {
+          detail: message.detail || message,
+        }));
+        break;
     }
 
     sendResponse({ received: true });
