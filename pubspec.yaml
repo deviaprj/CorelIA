@@ -80,6 +80,9 @@ dependencies:
   # Environment
   flutter_dotenv: ^5.2.1
 
+  # Location
+  geolocator: ^13.0.0
+
   # Platform detection
   web: ^1.0.0
 
