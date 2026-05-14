@@ -9,6 +9,9 @@ import '../data/firestore_chat_repository.dart';
 import '../data/mock_chat_repository.dart';
 import '../data/quota_service.dart';
 import '../data/search_service.dart';
+import '../data/enhanced_search_service.dart';
+import '../data/weather_service.dart';
+import '../data/location_service.dart';
 import '../data/file_quota_service.dart';
 import '../data/file_upload_service.dart';
 import '../data/search_quota_service.dart';
@@ -52,6 +55,10 @@ final messagesStreamProvider = StreamProvider.family<List<Message>, String>(
 // ── Services providers ─────────────────────────────────────────────────────
 final chatApiServiceProvider = Provider((ref) => ChatApiService());
 final searchServiceProvider = Provider((ref) => SearchService());
+final enhancedSearchServiceProvider =
+    Provider((ref) => EnhancedSearchService());
+final weatherServiceProvider = Provider((ref) => WeatherService());
+final locationServiceProvider = Provider((ref) => LocationService());
 
 // ── Chat state ─────────────────────────────────────────────────────────────
 class ChatState {
@@ -119,7 +126,7 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
   }
 
   /// Traite une commande slash (/download, /pdf, /links, etc.)
-  /// Retourne true si la commande a été traitée (ne pas envoyer à l'IA).
+  /// Retourne true si la commande a ete traitee (ne pas envoyer a l'IA).
   Future<bool> handleSlashCommand(String text) async {
     final parsed = SlashCommands.parse(text);
     if (parsed == null) return false;
@@ -132,6 +139,35 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
         isStreaming: false,
       );
       return true;
+    }
+
+    // Add natural language user message to conversation
+    final naturalText = parsed.toNaturalLanguage();
+    final userMsg = Message(
+      id: 'slash_user_${DateTime.now().millisecondsSinceEpoch}',
+      conversationId: arg,
+      role: Role.user,
+      content: naturalText,
+      createdAt: DateTime.now(),
+    );
+    state = state.copyWith(messages: [...state.messages, userMsg]);
+    // Persist in repo (best effort, fire-and-forget)
+    try {
+      if (isDemoMode) {
+        await mockChatRepository.addMessage(
+          conversationId: arg,
+          role: Role.user,
+          content: naturalText,
+        );
+      } else {
+        await ref.read(chatRepositoryProvider).addMessage(
+          conversationId: arg,
+          role: Role.user,
+          content: naturalText,
+        );
+      }
+    } catch (_) {
+      // Non-bloquant : le message est deja dans le state local
     }
 
     switch (parsed.command.name) {
@@ -159,6 +195,30 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
         return await _handleSlashBack(parsed, bridge);
       case 'forward':
         return await _handleSlashForward(parsed, bridge);
+      case 'forms':
+        return await _handleSlashForms(parsed, bridge);
+      case 'tables':
+        return await _handleSlashTables(parsed, bridge);
+      case 'media':
+        return await _handleSlashMedia(parsed, bridge);
+      case 'metadata':
+        return await _handleSlashMetadata(parsed, bridge);
+      case 'autofill':
+        return await _handleSlashAutofill(parsed, bridge);
+      case 'inspect':
+        return await _handleSlashInspect(parsed, bridge);
+      case 'highlight':
+        return await _handleSlashHighlight(parsed, bridge);
+      case 'waitfor':
+        return await _handleSlashWaitFor(parsed, bridge);
+      case 'export':
+        return await _handleSlashExport(parsed, bridge);
+      case 'monitor':
+        return await _handleSlashMonitor(parsed, bridge);
+      case 'translate':
+        return await _handleSlashTranslate(parsed, bridge);
+      case 'searchpage':
+        return await _handleSlashSearchPage(parsed, bridge);
       default:
         return false;
     }
@@ -390,6 +450,450 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
     return true;
   }
 
+  // ── Nouvelles commandes slash (Session V7) ──────────────────────────────────
+
+  Future<bool> _handleSlashForms(ParsedSlashCommand cmd, ExtensionBridge bridge) async {
+    final action = BrowserAction(action: BrowserActionType.extractForms, params: {});
+    final result = await bridge.executeAction(action);
+    if (result.success && result.data != null) {
+      final forms = result.data!['forms'] as List? ?? [];
+      final count = result.data!['count'] as int? ?? forms.length;
+      if (forms.isEmpty) {
+        _addAssistantMessage('Aucun formulaire trouvé sur cette page.');
+      } else {
+        final buffer = StringBuffer();
+        buffer.writeln('**$count formulaire(s) trouvé(s) :**\n');
+        for (var i = 0; i < forms.length; i++) {
+          final f = forms[i] as Map;
+          final inputs = (f['inputs'] as List? ?? []).cast<Map>();
+          buffer.writeln('### Formulaire ${i + 1}');
+          buffer.writeln('- Action : ${f['action'] ?? 'page courante'}');
+          buffer.writeln('- Méthode : ${f['method'] ?? 'GET'}');
+          buffer.writeln('- ${inputs.length} champ(s) :');
+          for (final input in inputs.take(15)) {
+            final required = input['required'] == true ? ' *' : '';
+            buffer.writeln('  - `${input['name']}` (${input['type']})$required');
+          }
+          if (inputs.length > 15) buffer.writeln('  - ... et ${inputs.length - 15} autres');
+          buffer.writeln();
+        }
+        if (cmd.args.isNotEmpty) {
+          final idx = int.tryParse(cmd.args[0]) ?? 0;
+          buffer.writeln('💡 Utilisez `/autofill` pour remplir automatiquement le formulaire ${idx}.');
+        } else {
+          buffer.writeln('💡 `/forms 0` pour voir le 1er formulaire. `/autofill` pour remplissage automatique.');
+        }
+        _addAssistantMessage(buffer.toString());
+      }
+    } else {
+      state = state.copyWith(error: 'Erreur extraction formulaires : ${result.error}', isStreaming: false);
+    }
+    return true;
+  }
+
+  Future<bool> _handleSlashTables(ParsedSlashCommand cmd, ExtensionBridge bridge) async {
+    final action = BrowserAction(action: BrowserActionType.extractTables, params: {});
+    final result = await bridge.executeAction(action);
+    if (result.success && result.data != null) {
+      final tables = result.data!['tables'] as List? ?? [];
+      if (tables.isEmpty) {
+        _addAssistantMessage('Aucun tableau trouvé sur cette page.');
+      } else {
+        final buffer = StringBuffer();
+        buffer.writeln('**${tables.length} tableau(x) trouvé(s)** | ${result.data!['totalRows'] ?? 0} lignes au total\n');
+        for (var i = 0; i < tables.length; i++) {
+          final t = tables[i] as Map;
+          buffer.writeln('### Tableau ${i + 1} : ${t['rowCount']} lignes × ${t['colCount']} colonnes');
+          if (t['caption'] != null) buffer.writeln('*${t['caption']}*');
+          final headers = t['headers'] as List?;
+          if (headers != null && headers.isNotEmpty) {
+            buffer.writeln('En-têtes : ${headers.join(' | ')}');
+          }
+          final rows = t['rows'] as List? ?? [];
+          for (var j = 0; j < rows.length && j < 10; j++) {
+            final row = rows[j] as List;
+            buffer.writeln('  ${row.join(' | ')}');
+          }
+          if ((t['rowCount'] as int?)! > 10) buffer.writeln('  ... et ${t['rowCount']! - 10} autres lignes');
+          buffer.writeln();
+        }
+        buffer.writeln('💡 Utilisez `/export csv` pour exporter les tableaux en CSV.');
+        _addAssistantMessage(buffer.toString());
+      }
+    } else {
+      state = state.copyWith(error: 'Erreur extraction tableaux : ${result.error}', isStreaming: false);
+    }
+    return true;
+  }
+
+  Future<bool> _handleSlashMedia(ParsedSlashCommand cmd, ExtensionBridge bridge) async {
+    final type = cmd.args.isNotEmpty ? cmd.args[0] : 'all';
+    final action = BrowserAction(action: BrowserActionType.extractMedia, params: {});
+    final result = await bridge.executeAction(action);
+    if (result.success && result.data != null) {
+      final images = (result.data!['images'] as List? ?? []).cast<Map>();
+      final videos = (result.data!['videos'] as List? ?? []).cast<Map>();
+      final audios = (result.data!['audios'] as List? ?? []).cast<Map>();
+      final buffer = StringBuffer();
+
+      void showImages() {
+        buffer.writeln('**${images.length} image(s) :**');
+        for (final img in images.take(15)) {
+          buffer.writeln('- ![](${img['src']}) [${img['width']}×${img['height']}]');
+        }
+        if (images.length > 15) buffer.writeln('- ... et ${images.length - 15} autres');
+      }
+
+      void showVideos() {
+        buffer.writeln('**${videos.length} vidéo(s) :**');
+        for (final vid in videos.take(10)) {
+          buffer.writeln('- ${vid['src'] ?? 'N/A'}');
+        }
+      }
+
+      void showAudios() {
+        buffer.writeln('**${audios.length} piste(s) audio :**');
+        for (final a in audios.take(10)) {
+          buffer.writeln('- ${a['src'] ?? 'N/A'}');
+        }
+      }
+
+      switch (type) {
+        case 'images':
+          showImages();
+          break;
+        case 'videos':
+          showVideos();
+          break;
+        case 'audio':
+          showAudios();
+          break;
+        default:
+          buffer.writeln('**Médias extraits de la page :**\n');
+          if (images.isNotEmpty) showImages();
+          if (videos.isNotEmpty) showVideos();
+          if (audios.isNotEmpty) showAudios();
+          if (images.isEmpty && videos.isEmpty && audios.isEmpty) {
+            buffer.writeln('Aucun média trouvé.');
+          }
+      }
+      buffer.writeln('\n💡 `/download <url>` pour télécharger un média. Combo : `/media images` puis `/download <url>`.');
+      _addAssistantMessage(buffer.toString());
+    } else {
+      state = state.copyWith(error: 'Erreur extraction médias : ${result.error}', isStreaming: false);
+    }
+    return true;
+  }
+
+  Future<bool> _handleSlashMetadata(ParsedSlashCommand cmd, ExtensionBridge bridge) async {
+    final action = BrowserAction(action: BrowserActionType.pageMetadata, params: {});
+    final result = await bridge.executeAction(action);
+    if (result.success && result.data != null) {
+      final d = result.data!;
+      final buffer = StringBuffer();
+      buffer.writeln('**Métadonnées de la page**\n');
+      buffer.writeln('| Propriété | Valeur |');
+      buffer.writeln('|-----------|--------|');
+      void row(String k, dynamic v) {
+        final val = v?.toString().replaceAll('\n', ' ').trim() ?? 'N/A';
+        buffer.writeln('| $k | ${val.length > 100 ? '${val.substring(0, 100)}...' : val} |');
+      }
+      row('Titre', d['title']);
+      row('URL', d['url']);
+      row('Description', d['description']);
+      row('Auteur', d['author']);
+      row('Date publication', d['publishDate']);
+      row('Langue', d['language']);
+      row('Mots', d['wordCount']);
+      row('OpenGraph Title', d['ogTitle']);
+      row('OpenGraph Image', d['ogImage']);
+      buffer.writeln('\n**Titres principaux :**');
+      final headings = (d['headings'] as List? ?? []).cast<Map>();
+      for (final h in headings.take(15)) {
+        buffer.writeln('- ${h['level']} : ${h['text']}');
+      }
+      buffer.writeln('\n💡 `/summarize` pour résumer. `/export json` pour exporter. `/links` pour les liens.');
+      _addAssistantMessage(buffer.toString());
+    } else {
+      state = state.copyWith(error: 'Erreur métadonnées : ${result.error}', isStreaming: false);
+    }
+    return true;
+  }
+
+  Future<bool> _handleSlashAutofill(ParsedSlashCommand cmd, ExtensionBridge bridge) async {
+    final action = BrowserAction(action: BrowserActionType.autoFillPage, params: {});
+    final result = await bridge.executeAction(action);
+    if (result.success && result.data != null) {
+      final filled = result.data!['filledCount'] as int? ?? 0;
+      final total = result.data!['totalInputs'] as int? ?? 0;
+      _addAssistantMessage('Formulaire rempli automatiquement : **$filled / $total** champ(s).\n\n'
+          '⚠️ Données de test utilisées (Jean Dupont). Modifiez les champs si nécessaire.\n'
+          '💡 `/fill <sélecteur> <valeur>` pour modifier un champ spécifique. `/forms` pour voir les formulaires.');
+    } else {
+      state = state.copyWith(error: 'Erreur autofill : ${result.error}', isStreaming: false);
+    }
+    return true;
+  }
+
+  Future<bool> _handleSlashInspect(ParsedSlashCommand cmd, ExtensionBridge bridge) async {
+    if (cmd.args.isEmpty) {
+      state = state.copyWith(error: 'Usage : /inspect <sélecteur CSS>', isStreaming: false);
+      return true;
+    }
+    final action = BrowserAction(
+      action: BrowserActionType.getElementInfo,
+      params: {'selector': cmd.args[0]},
+    );
+    final result = await bridge.executeAction(action);
+    if (result.success && result.data != null) {
+      final d = result.data!;
+      final buffer = StringBuffer();
+      buffer.writeln('**Inspection : `${cmd.args[0]}`**\n');
+      buffer.writeln('- Tag : `<${d['tagName']}>`');
+      buffer.writeln('- ID : ${d['id'] ?? 'N/A'}');
+      buffer.writeln('- Classes : ${d['className'] ?? 'N/A'}');
+      buffer.writeln('- Visible : ${d['visible'] == true ? '✅' : '❌'}');
+      final pos = d['position'] as Map?;
+      if (pos != null) {
+        buffer.writeln('- Position : x=${pos['x']}, y=${pos['y']}, ${pos['width']}×${pos['height']}');
+      }
+      buffer.writeln('- Contenu texte : "${d['text'] ?? ''}"');
+      buffer.writeln('\n**Attributs :**');
+      final attrs = (d['attributes'] as List? ?? []).cast<Map>();
+      for (final a in attrs.take(20)) {
+        buffer.writeln('- ${a['name']}="${a['value']}"');
+      }
+      buffer.writeln('\nHTML (début) : ```html\n${d['html'] ?? ''}\n```');
+      buffer.writeln('\n💡 `/click ${cmd.args[0]}` pour cliquer. `/highlight ${cmd.args[0]}` pour surligner.');
+      _addAssistantMessage(buffer.toString());
+    } else {
+      state = state.copyWith(error: 'Erreur inspection : ${result.error}', isStreaming: false);
+    }
+    return true;
+  }
+
+  Future<bool> _handleSlashHighlight(ParsedSlashCommand cmd, ExtensionBridge bridge) async {
+    if (cmd.args.isEmpty) {
+      state = state.copyWith(error: 'Usage : /highlight <sélecteur CSS>', isStreaming: false);
+      return true;
+    }
+    final action = BrowserAction(
+      action: BrowserActionType.highlightElement,
+      params: {'selector': cmd.args[0]},
+    );
+    final result = await bridge.executeAction(action);
+    if (result.success) {
+      _addAssistantMessage('Élément `${cmd.args[0]}` surligné pendant 3 secondes.');
+    } else {
+      state = state.copyWith(error: 'Erreur surbrillance : ${result.error}', isStreaming: false);
+    }
+    return true;
+  }
+
+  Future<bool> _handleSlashWaitFor(ParsedSlashCommand cmd, ExtensionBridge bridge) async {
+    if (cmd.args.isEmpty) {
+      state = state.copyWith(error: 'Usage : /waitfor <sélecteur CSS> [timeout_ms]', isStreaming: false);
+      return true;
+    }
+    final timeout = cmd.args.length > 1 ? int.tryParse(cmd.args[1]) ?? 10000 : 10000;
+    final action = BrowserAction(
+      action: BrowserActionType.waitForSelector,
+      params: {'selector': cmd.args[0], 'timeout': timeout},
+    );
+    final result = await bridge.executeAction(action);
+    if (result.success) {
+      final waited = result.data!['waited'] as int? ?? 0;
+      _addAssistantMessage('Élément `${cmd.args[0]}` apparu après ${waited}ms.\n'
+          '💡 `/inspect ${cmd.args[0]}` pour l\'analyser. `/click ${cmd.args[0]}` pour cliquer dessus.');
+    } else {
+      state = state.copyWith(error: 'Timeout : ${result.error}', isStreaming: false);
+    }
+    return true;
+  }
+
+  Future<bool> _handleSlashExport(ParsedSlashCommand cmd, ExtensionBridge bridge) async {
+    final format = cmd.args.isNotEmpty ? cmd.args[0] : 'json';
+
+    // Récupérer d'abord le contenu de la page
+    final contentAction = BrowserAction(
+      action: BrowserActionType.getPageContent,
+      params: {},
+    );
+    final contentResult = await bridge.executeAction(contentAction);
+
+    if (!contentResult.success) {
+      state = state.copyWith(error: 'Erreur export : ${contentResult.error}', isStreaming: false);
+      return true;
+    }
+
+    final title = contentResult.data!['title'] as String? ?? 'page';
+    final content = contentResult.data!['content'] as String? ?? '';
+    final url = contentResult.data!['url'] as String? ?? '';
+
+    final safeTitle = title.replaceAll(RegExp(r'[^a-zA-Z0-9À-ɏ\s-]'), '_').trim();
+
+    switch (format) {
+      case 'json':
+        final json = '{\n  "title": ${_jsonStr(title)},\n  "url": ${_jsonStr(url)},\n'
+            '  "content": ${_jsonStr(content.substring(0, content.length > 10000 ? 10000 : content.length))}\n}';
+        _addAssistantMessage('**Export JSON :**\n```json\n$json\n```\n\n'
+            '💡 Copiez ce contenu ou utilisez `/download <url>` pour des fichiers distants.');
+        break;
+      case 'md':
+      case 'markdown':
+        final md = '# $title\n\n> Source : $url\n\n$content';
+        _addAssistantMessage('**Export Markdown :**\n```markdown\n${md.substring(0, md.length > 3000 ? 3000 : md.length)}\n```\n\n'
+            '${md.length > 3000 ? '(tronqué à 3000 caractères)\n\n' : ''}'
+            '💡 `/pdf` pour imprimer la page. `/download` pour fichiers distants.');
+        break;
+      case 'csv':
+        // Exporter les tableaux comme CSV
+        final tableAction = BrowserAction(action: BrowserActionType.extractTables, params: {});
+        final tableResult = await bridge.executeAction(tableAction);
+        if (tableResult.success && tableResult.data != null) {
+          final tables = tableResult.data!['tables'] as List? ?? [];
+          final csvBuffer = StringBuffer();
+          for (final t in tables.cast<Map>()) {
+            final rows = t['rows'] as List? ?? [];
+            for (final row in rows.cast<List>()) {
+              csvBuffer.writeln(row.map((c) => '"${c.toString().replaceAll('"', '""')}"').join(','));
+            }
+            csvBuffer.writeln();
+          }
+          _addAssistantMessage('**Export CSV (tableaux) :**\n```csv\n${csvBuffer.toString().substring(0, 3000)}\n```\n\n'
+              '💡 Les données CSV peuvent être ouvertes dans Excel / Google Sheets.');
+        } else {
+          _addAssistantMessage('Aucun tableau trouvé pour l\'export CSV. Utilisez `/export json` ou `/export md`.');
+        }
+        break;
+      default:
+        state = state.copyWith(error: 'Format inconnu : $format. Utilisez json, csv, ou md.', isStreaming: false);
+    }
+    return true;
+  }
+
+  Future<bool> _handleSlashMonitor(ParsedSlashCommand cmd, ExtensionBridge bridge) async {
+    if (cmd.args.isEmpty) {
+      state = state.copyWith(error: 'Usage : /monitor <sélecteur CSS> [interval_sec]', isStreaming: false);
+      return true;
+    }
+    final selector = cmd.args[0];
+    final interval = cmd.args.length > 1 ? int.tryParse(cmd.args[1]) ?? 30 : 30;
+    final clampedInterval = interval.clamp(5, 300);
+
+    // Première capture
+    final action = BrowserAction(
+      action: BrowserActionType.extractText,
+      params: {'selector': selector},
+    );
+    final result = await bridge.executeAction(action);
+    if (result.success) {
+      final text = result.data!['text'] as String? ?? '';
+      _addAssistantMessage('**Surveillance activée** : `${selector}` toutes les $clampedInterval secondes.\n\n'
+          'Valeur actuelle : "${text.substring(0, text.length > 200 ? 200 : text.length)}"\n\n'
+          '⚠️ La surveillance en continu nécessite l\'extension active. '
+          'Relancez `/monitor $selector $clampedInterval` pour vérifier à nouveau.\n'
+          '💡 Idéal pour : prix, disponibilité, score, statut. Combo : `/waitfor "${selector}:contains(\'Disponible\')"`');
+    } else {
+      state = state.copyWith(error: 'Erreur surveillance : ${result.error}', isStreaming: false);
+    }
+    return true;
+  }
+
+  Future<bool> _handleSlashTranslate(ParsedSlashCommand cmd, ExtensionBridge bridge) async {
+    final targetLang = cmd.args.isNotEmpty ? cmd.args[0] : 'fr';
+    const supportedLangs = ['fr', 'en', 'es', 'de', 'it', 'pt', 'ja', 'zh', 'ar', 'ru', 'ko', 'nl'];
+    if (!supportedLangs.contains(targetLang)) {
+      state = state.copyWith(
+        error: 'Langue non supportée : $targetLang. Supportées : ${supportedLangs.join(', ')}',
+        isStreaming: false,
+      );
+      return true;
+    }
+
+    final contentAction = BrowserAction(
+      action: BrowserActionType.getPageContent,
+      params: {},
+    );
+    final contentResult = await bridge.executeAction(contentAction);
+    if (!contentResult.success) {
+      state = state.copyWith(error: 'Erreur extraction contenu : ${contentResult.error}', isStreaming: false);
+      return true;
+    }
+
+    final content = contentResult.data!['content'] as String? ?? '';
+    final title = contentResult.data!['title'] as String? ?? '';
+    final truncated = content.length > 2000 ? '${content.substring(0, 2000)}...' : content;
+
+    // Utiliser l'IA pour traduire (injecter comme prompt)
+    final langNames = {
+      'fr': 'français', 'en': 'anglais', 'es': 'espagnol', 'de': 'allemand',
+      'it': 'italien', 'pt': 'portugais', 'ja': 'japonais', 'zh': 'chinois',
+      'ar': 'arabe', 'ru': 'russe', 'ko': 'coréen', 'nl': 'néerlandais',
+    };
+    final langName = langNames[targetLang] ?? targetLang;
+
+    final translatePrompt = 'Traduis le contenu suivant en **$langName**. '
+        'Conserve la structure (titres, paragraphes, listes). '
+        'Titre original : "$title"\n\n'
+        'Contenu à traduire :\n\n$truncated';
+
+    await sendMessage(translatePrompt);
+    return true;
+  }
+
+  Future<bool> _handleSlashSearchPage(ParsedSlashCommand cmd, ExtensionBridge bridge) async {
+    if (cmd.args.isEmpty) {
+      state = state.copyWith(error: 'Usage : /searchpage <terme>', isStreaming: false);
+      return true;
+    }
+    final searchTerm = cmd.args.join(' ');
+
+    final action = BrowserAction(
+      action: BrowserActionType.getPageContent,
+      params: {},
+    );
+    final result = await bridge.executeAction(action);
+    if (!result.success) {
+      state = state.copyWith(error: 'Erreur extraction page : ${result.error}', isStreaming: false);
+      return true;
+    }
+
+    final content = result.data!['content'] as String? ?? '';
+    final lowerContent = content.toLowerCase();
+    final lowerTerm = searchTerm.toLowerCase();
+
+    final occurrences = <int>[];
+    var idx = lowerContent.indexOf(lowerTerm);
+    while (idx != -1 && occurrences.length < 20) {
+      occurrences.add(idx);
+      idx = lowerContent.indexOf(lowerTerm, idx + 1);
+    }
+
+    if (occurrences.isEmpty) {
+      _addAssistantMessage('Terme **"$searchTerm"** non trouvé dans la page.\n'
+          '💡 Essayez `/summarize` pour un résumé, ou `/metadata` pour les mots-clés de la page.');
+    } else {
+      final buffer = StringBuffer();
+      buffer.writeln('**"$searchTerm"** trouvé **${occurrences.length} fois** dans la page :\n');
+      for (var i = 0; i < occurrences.length && i < 10; i++) {
+        final pos = occurrences[i];
+        final start = pos > 80 ? pos - 80 : 0;
+        final end = pos + searchTerm.length + 80 < content.length ? pos + searchTerm.length + 80 : content.length;
+        final context = content.substring(start, end).replaceAll('\n', ' ');
+        final prefix = start > 0 ? '...' : '';
+        final suffix = end < content.length ? '...' : '';
+        buffer.writeln('${i + 1}. $prefix${context}${suffix}');
+      }
+      if (occurrences.length > 10) buffer.writeln('\net ${occurrences.length - 10} autres occurrences...');
+      buffer.writeln('\n💡 `/extract` pour extraire une section spécifique. `/summarize` pour un résumé complet.');
+      _addAssistantMessage(buffer.toString());
+    }
+    return true;
+  }
+
+  String _jsonStr(String s) => '"${s.replaceAll('\\', '\\\\').replaceAll('"', '\\"').replaceAll('\n', '\\n')}"';
+
   /// Ajoute un message assistant au state (pour les résultats de commandes slash).
   void _addAssistantMessage(String text) {
     final msg = Message(
@@ -573,12 +1077,20 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
     // Recherche web — uniquement si l'utilisateur l'a activée OU si l'intent le nécessite
     List<WebSearchResult>? searchResults;
     InstantAnswer? instantAnswer;
+    String? enhancedResultMarkdown;
     final shouldSearch = state.useSearch || _needsWebSearch(userMsg.content);
     if (shouldSearch) {
       try {
         state = state.copyWith(isSearching: true);
         final searchService = ref.read(searchServiceProvider);
         final searchQuery = _extractSearchQuery(userMsg.content);
+
+        // Déterminer le type de recherche enrichie
+        final intent = classifySearchIntent(userMsg.content);
+        if (intent != 'general') {
+          enhancedResultMarkdown = await _performEnhancedSearch(
+              userMsg.content, intent, searchQuery);
+        }
 
         // Lancer la recherche principale et l'Instant Answer en parallèle
         final results = await searchService.searchWithFallback(searchQuery);
@@ -642,6 +1154,12 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
 
       // 4. Stream terminé : transformer le placeholder en vrai message final
       var finalContent = buffer.toString();
+
+      // Prepend enhanced search results (products, flights, hotels, weather)
+      if (enhancedResultMarkdown != null && enhancedResultMarkdown.isNotEmpty) {
+        finalContent = '$enhancedResultMarkdown\n\n$finalContent';
+      }
+
       final model = isPro ? AppConstants.mistralModel : AppConstants.deepSeekModel;
 
       // Parser et exécuter les actions navigateur (extension Chrome uniquement)
@@ -963,6 +1481,14 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
       'score de', 'résultat de', 'classement de',
       'est-ce que', 'est-il vrai', 'vrai ou faux',
       'comment aller', 'itinéraire', 'distance entre',
+      // Enhanced search triggers
+      'le moins cher', 'meilleur prix', 'pas cher', 'acheter', 'comparer',
+      'billet d\'avion', 'vol direct', 'vols pas', 'vol pour',
+      'hotel', 'hôtel', 'logement', 'airbnb', 'réservation',
+      'pleuvoir', 'température', 'quel temps', 'pluie',
+      'site pour', 'où acheter', 'trouve le', 'trouve moi',
+      'cherche le', 'cherche moi', 'recherche le',
+      'xiaomi', 'iphone', 'samsung', 'téléphone', 'smartphone',
     ];
     // Mots-clés exclus : créativité, code, opinion, conversation
     final excludeWords = [
@@ -1004,6 +1530,256 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
       query = '${query.substring(0, 200)}...';
     }
     return query;
+  }
+
+  // ── Enhanced search ────────────────────────────────────────────────────────
+
+  /// Classify search intent from user message.
+  /// Returns 'products', 'flights', 'hotels', 'weather', or 'general'.
+  static String classifySearchIntent(String message) {
+    final lower = message.toLowerCase();
+
+    // Weather patterns
+    if (lower.contains('météo') || lower.contains('meteo') ||
+        lower.contains('pleuvoir') || lower.contains('température') ||
+        lower.contains('temperature') || lower.contains('quel temps') ||
+        lower.contains('pluie') || lower.contains('temps fait') ||
+        lower.contains('prévisions') || lower.contains('previsions')) {
+      return 'weather';
+    }
+
+    // Flight patterns
+    if (lower.contains('billet') || lower.contains('vol ') ||
+        lower.contains('vols ') || lower.contains('avion') ||
+        lower.contains('aller-retour') || lower.contains('aller retour') ||
+        (lower.contains('direct') &&
+            (lower.contains('paris') || lower.contains('vol')))) {
+      return 'flights';
+    }
+
+    // Hotel patterns
+    if (lower.contains('hotel') || lower.contains('hôtel') ||
+        lower.contains('airbnb') || lower.contains('logement') ||
+        lower.contains('booking') || lower.contains('nuit ') ||
+        lower.contains('nuits ') || lower.contains('séjour') ||
+        lower.contains('sejour') || lower.contains('réservation') ||
+        lower.contains('reservation') || lower.contains('hebergement') ||
+        lower.contains('hébergement')) {
+      return 'hotels';
+    }
+
+    // Product patterns
+    if (lower.contains('moins cher') || lower.contains('meilleur prix') ||
+        lower.contains('acheter') || lower.contains('trouve le') ||
+        lower.contains('trouve moi') || lower.contains('cherche le') ||
+        lower.contains('cherche moi') || lower.contains('prix le plus bas') ||
+        lower.contains('comparer') || lower.contains('le moins cher')) {
+      return 'products';
+    }
+
+    return 'general';
+  }
+
+  /// Execute enhanced search and return formatted markdown.
+  Future<String?> _performEnhancedSearch(
+      String message, String intent, String searchQuery) async {
+    switch (intent) {
+      case 'products':
+        final service = ref.read(enhancedSearchServiceProvider);
+        var products = await service.searchProducts(searchQuery);
+        if (products.isEmpty) {
+          products = await service.searchGoogleShopping(searchQuery);
+        }
+        if (products.isNotEmpty) {
+          return EnhancedSearchService.formatProducts(products, searchQuery);
+        }
+        return null;
+
+      case 'flights':
+        final parsed = parseFlightParams(message);
+        if (parsed == null) return null;
+        final service = ref.read(enhancedSearchServiceProvider);
+        final flights = await service.searchFlights(
+          from: parsed['from']!,
+          to: parsed['to']!,
+          departDate: parsed['departDate']!,
+          returnDate: parsed['returnDate'],
+        );
+        if (flights.isNotEmpty) {
+          return EnhancedSearchService.formatFlights(flights);
+        }
+        return null;
+
+      case 'hotels':
+        final service = ref.read(enhancedSearchServiceProvider);
+        final hotels = await service.searchHotels(searchQuery);
+        if (hotels.isNotEmpty) {
+          return EnhancedSearchService.formatHotels(hotels, searchQuery);
+        }
+        return null;
+
+      case 'weather':
+        final weatherService = ref.read(weatherServiceProvider);
+        WeatherData? weather;
+        final city = extractCity(message);
+        final zip = extractZipCode(message);
+
+        if (city != null) {
+          weather = await weatherService.getCurrentWeather(city: city);
+        } else if (zip != null) {
+          weather = await weatherService.getCurrentWeather(postalCode: zip);
+        } else {
+          final locationService = ref.read(locationServiceProvider);
+          final location = await locationService.getCurrentLocation();
+          if (location != null) {
+            weather = await weatherService.getCurrentWeather(
+              lat: location.latitude,
+              lon: location.longitude,
+            );
+          }
+        }
+
+        if (weather != null) {
+          return WeatherService.formatMarkdown(weather);
+        }
+        return '_Données météo indisponibles. Essayez avec un nom de ville._';
+
+      default:
+        return null;
+    }
+  }
+
+  // ── Flight/Weather parameter parsers ──────────────────────────────────────
+
+  /// Parse flight search parameters from natural language.
+  static Map<String, String>? parseFlightParams(String message) {
+    // Case-sensitive city pattern (must start with uppercase)
+    const cityName = r'[A-ZÀ-Ÿ][a-zà-ÿ]+(?:\s[A-ZÀ-Ÿ][a-zà-ÿ]+)?';
+    const numericDate = r'\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4}';
+    // Longer month names first, handle case via character classes
+    const months =
+        r'[Jj]anvier|[Ff]évrier|[Ff]evrier|[Mm]ars|[Aa]vril|[Mm]ai|'
+        r'[Jj]uillet|[Jj]uin|[Aa]oût|[Aa]out|[Ss]eptembre|[Oo]ctobre|'
+        r'[Nn]ovembre|[Dd]écembre|[Dd]ecembre|'
+        r'[Jj]anuary|[Ff]ebruary|[Mm]arch|[Aa]pril|[Mm]ay|'
+        r'[Jj]uly|[Jj]une|[Aa]ugust|[Ss]eptember|[Oo]ctober|'
+        r'[Nn]ovember|[Dd]ecember';
+
+    // Pattern 1: "City1-City2 du date1 au date2"
+    final routeDate = RegExp(
+      '($cityName)\\s*[-àa]\\s*($cityName)\\s+'
+      '(?:d[ue]|le|pour le)\\s+($numericDate)'
+      '(?:\\s+(?:au|au retour le)\\s+($numericDate))?',
+    );
+    final match1 = routeDate.firstMatch(message);
+    if (match1 != null) {
+      return {
+        'from': match1.group(1)!.trim(),
+        'to': match1.group(2)!.trim(),
+        'departDate': normalizeDate(match1.group(3)!),
+        if (match1.group(4) != null)
+          'returnDate': normalizeDate(match1.group(4)!),
+      };
+    }
+
+    // Pattern 2: "vol direct City1 City2 day month year"
+    final directVol = RegExp(
+      '(?:[Vv]ol|[Bb]illet)\\s+(?:\\w+\\s+)*(?:de\\s+)?'
+      '($cityName)\\s+'
+      '(?:à|vers|pour|-)?\\s*($cityName)\\s+'
+      '(?:le\\s+)?(\\d{1,2})\\s+'
+      '($months)'
+      '(?:\\s+(\\d{4}))?',
+    );
+    final match2 = directVol.firstMatch(message);
+    if (match2 != null) {
+      final day = match2.group(3)!;
+      final monthName = match2.group(4)!;
+      final year = match2.group(5) ?? DateTime.now().year.toString();
+      final month = parseMonth(monthName);
+      final dateStr =
+          '$year-${month.toString().padLeft(2, '0')}-${int.parse(day).toString().padLeft(2, '0')}';
+      return {
+        'from': match2.group(1)!.trim(),
+        'to': match2.group(2)!.trim(),
+        'departDate': dateStr,
+      };
+    }
+
+    // Pattern 3: Compact "City1 City2 YYYY-MM-DD"
+    final compact = RegExp(
+      '(?:de\\s+)?($cityName)\\s+'
+      '(?:à|vers|pour|-)?\\s*($cityName)',
+    );
+    final match3 = compact.firstMatch(message);
+    final dateFinder = RegExp('($numericDate)');
+    final dateMatch = dateFinder.firstMatch(message);
+    if (match3 != null && dateMatch != null) {
+      return {
+        'from': match3.group(1)!.trim(),
+        'to': match3.group(2)!.trim(),
+        'departDate': normalizeDate(dateMatch.group(1)!),
+      };
+    }
+
+    return null;
+  }
+
+  /// Extract city name from weather-related message.
+  static String? extractCity(String message) {
+    // Pattern: "météo Paris", "temps à Lyon", "pleuvoir à Marseille"
+    final patterns = [
+      RegExp(r'(?:météo|meteo|temps|pleuvoir|température|temperature)\s+(?:à|de|pour|sur)\s+'
+          r'([A-ZÀ-Ÿ][a-zà-ÿ]+(?:\s[A-ZÀ-Ÿ][a-zà-ÿ]+)?)'),
+      RegExp(r'(?:météo|meteo|temps|pleuvoir|température|temperature)\s+'
+          r'([A-ZÀ-Ÿ][a-zà-ÿ]+)'),
+      RegExp(r'(?:fait-il|fera-t-il)\s+(?:à|de|pour|sur)\s+'
+          r'([A-ZÀ-Ÿ][a-zà-ÿ]+(?:\s[A-ZÀ-Ÿ][a-zà-ÿ]+)?)'),
+      RegExp(r"(?:est-ce qu'il|va-t-il)\s+\w+\s+(?:à|de|pour|sur)\s+"
+          r'([A-ZÀ-Ÿ][a-zà-ÿ]+(?:\s[A-ZÀ-Ÿ][a-zà-ÿ]+)?)'),
+    ];
+
+    for (final pattern in patterns) {
+      final match = pattern.firstMatch(message);
+      if (match != null) return match.group(1)!.trim();
+    }
+    return null;
+  }
+
+  /// Extract postal code from weather-related message.
+  static String? extractZipCode(String message) {
+    final match = RegExp(r'\b(\d{5})\b').firstMatch(message);
+    if (match != null) return match.group(1);
+    return null;
+  }
+
+  static String normalizeDate(String raw) {
+    // Accept dd/mm/yyyy, dd-mm-yyyy, dd.mm.yyyy → yyyy-mm-dd
+    final parts = raw.trim().split(RegExp(r'[/.-]'));
+    if (parts.length == 3) {
+      try {
+        final d = int.parse(parts[0]);
+        final m = int.parse(parts[1]);
+        var y = int.parse(parts[2]);
+        if (y < 100) y += 2000;
+        return '$y-${m.toString().padLeft(2, '0')}-${d.toString().padLeft(2, '0')}';
+      } catch (_) {
+        return raw;
+      }
+    }
+    return raw;
+  }
+
+  static int parseMonth(String name) {
+    const months = {
+      'janvier': 1, 'février': 2, 'fevrier': 2, 'mars': 3, 'avril': 4,
+      'mai': 5, 'may': 5, 'juin': 6, 'june': 6, 'juillet': 7, 'july': 7,
+      'août': 8, 'aout': 8, 'august': 8, 'septembre': 9, 'september': 9,
+      'octobre': 10, 'october': 10, 'novembre': 11, 'november': 11,
+      'décembre': 12, 'decembre': 12, 'december': 12,
+      'january': 1, 'february': 2, 'march': 3, 'april': 4,
+    };
+    return months[name.toLowerCase()] ?? 1;
   }
 
   /// Charge plus de messages dans l'historique (UI pagination).

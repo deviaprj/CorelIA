@@ -61,9 +61,7 @@
         break;
 
       case 'BROWSER_ACTION_RESULT':
-        // Résultat d'une action navigateur relayé par le background SW
-        // Forward au CustomEvent pour que browser_actions.js le capte
-        // (browser_actions.js écoute aussi chrome.runtime.onMessage directement)
+        // Relay result from background SW to Flutter via CustomEvent
         window.dispatchEvent(new CustomEvent('corely_browser_action_result', {
           detail: message.detail || message,
         }));
@@ -72,6 +70,52 @@
 
     sendResponse({ received: true });
     return false;
+  });
+
+  // ── Écouter les actions navigateur du code Flutter ──────────────────────
+  window.addEventListener('corely_browser_action', (event) => {
+    const detail = event.detail;
+    if (!detail || !detail.action) return;
+
+    console.info('[ExtensionBridge] Browser action reçue:', detail.action, detail.actionId);
+
+    // Récupérer le tabId actif pour les actions qui en ont besoin
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      const tabId = (tabs && tabs[0] && tabs[0].id) ? tabs[0].id : null;
+
+      const message = {
+        type: 'BROWSER_ACTION',
+        actionId: detail.actionId,
+        action: detail.action,
+        params: detail.params || {},
+        tabId: tabId,
+      };
+
+      chrome.runtime.sendMessage(message).then((response) => {
+        // Réponse du background SW — forwarder au Dart via CustomEvent
+        console.info('[ExtensionBridge] Réponse action:', detail.actionId, 'success:', response?.success);
+        window.dispatchEvent(new CustomEvent('corely_browser_action_result', {
+          detail: {
+            actionId: detail.actionId,
+            action: detail.action,
+            success: response?.success ?? false,
+            data: response?.data ?? null,
+            error: response?.error ?? null,
+          },
+        }));
+      }).catch((err) => {
+        console.error('[ExtensionBridge] Erreur action:', detail.actionId, err.message || String(err));
+        window.dispatchEvent(new CustomEvent('corely_browser_action_result', {
+          detail: {
+            actionId: detail.actionId,
+            action: detail.action,
+            success: false,
+            data: null,
+            error: err.message || String(err),
+          },
+        }));
+      });
+    });
   });
 
   // Écouter les demandes du code Flutter (ex: extraire le contenu de la page)

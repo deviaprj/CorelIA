@@ -36,7 +36,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   AttachmentData? _pendingAttachment;
   final _inputBarController = TextEditingController();
   final _inputBarKey = GlobalKey<InputBarState>();
-  String _slashFilter = '';
+  String? _slashFilter;
   StreamSubscription<BrowserActionResult>? _actionResultSub;
 
   @override
@@ -262,15 +262,15 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                 },
               ),
               // Slash command palette (extension only)
-              if (isExtension && _slashFilter.isNotEmpty)
+              if (isExtension && _slashFilter != null)
                 SlashCommandPalette(
-                  filter: _slashFilter,
+                  filter: _slashFilter!,
                   onSelected: (cmd) {
                     final inputBar = _inputBarKey.currentState;
                     if (inputBar != null) {
                       inputBar.setCommandText('/${cmd.name} ');
                     }
-                    setState(() => _slashFilter = '');
+                    setState(() => _slashFilter = null);
                   },
                 ),
               InputBar(

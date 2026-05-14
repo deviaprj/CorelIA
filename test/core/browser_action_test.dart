@@ -6,8 +6,8 @@ void main() {
   // ── BrowserActionType ───────────────────────────────────────────────────────
 
   group('BrowserActionType', () {
-    test('has all 13 action types', () {
-      expect(BrowserActionType.values.length, equals(13));
+    test('has all 21 action types', () {
+      expect(BrowserActionType.values.length, equals(21));
     });
 
     test('each type has correct string value', () {
@@ -18,10 +18,18 @@ void main() {
       expect(BrowserActionType.summarizePage.value, equals('SUMMARIZE_PAGE'));
       expect(BrowserActionType.extractText.value, equals('EXTRACT_TEXT'));
       expect(BrowserActionType.extractLinks.value, equals('EXTRACT_LINKS'));
+      expect(BrowserActionType.extractTables.value, equals('EXTRACT_TABLES'));
+      expect(BrowserActionType.extractForms.value, equals('EXTRACT_FORMS'));
+      expect(BrowserActionType.extractMedia.value, equals('EXTRACT_MEDIA'));
+      expect(BrowserActionType.pageMetadata.value, equals('PAGE_METADATA'));
       expect(BrowserActionType.clickElement.value, equals('CLICK_ELEMENT'));
       expect(BrowserActionType.fillForm.value, equals('FILL_FORM'));
+      expect(BrowserActionType.autoFillPage.value, equals('AUTOFILL_PAGE'));
       expect(BrowserActionType.scroll.value, equals('SCROLL'));
       expect(BrowserActionType.screenshot.value, equals('SCREENSHOT'));
+      expect(BrowserActionType.highlightElement.value, equals('HIGHLIGHT_ELEMENT'));
+      expect(BrowserActionType.waitForSelector.value, equals('WAIT_FOR_SELECTOR'));
+      expect(BrowserActionType.getElementInfo.value, equals('GET_ELEMENT_INFO'));
       expect(BrowserActionType.download.value, equals('DOWNLOAD'));
       expect(BrowserActionType.saveAsPdf.value, equals('SAVE_AS_PDF'));
     });

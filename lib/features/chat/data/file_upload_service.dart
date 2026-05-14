@@ -94,7 +94,7 @@ class FileUploadService {
     }
 
     // 2. Essayer de couper à la dernière phrase complète
-    final sentenceEnd = _lastSentenceEnd(text, maxChars);
+    final sentenceEnd = lastSentenceEnd(text, maxChars);
     if (sentenceEnd > maxChars * 0.5) {
       return '${text.substring(0, sentenceEnd)}\n\n[... contenu tronque — ${text.length - sentenceEnd} caracteres restants]';
     }
@@ -104,11 +104,13 @@ class FileUploadService {
   }
 
   /// Trouve la position de la fin de la dernière phrase complète avant [limit].
-  static int _lastSentenceEnd(String text, int limit) {
+  static int lastSentenceEnd(String text, int limit) {
     const sentenceEnders = ['. ', '.\n', '! ', '? ', '!\n', '?\n'];
+    final searchEnd = limit < text.length ? limit : text.length - 1;
+    if (searchEnd < 0) return 0;
     var lastPos = 0;
     for (final ender in sentenceEnders) {
-      final pos = text.lastIndexOf(ender, limit);
+      final pos = text.lastIndexOf(ender, searchEnd);
       if (pos > lastPos) lastPos = pos + ender.length;
     }
     return lastPos;

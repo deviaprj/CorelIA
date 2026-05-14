@@ -116,31 +116,66 @@ async function handleBrowserAction(message, _sender, sendResponse) {
       case 'FILL_FORM':
       case 'SCROLL':
       case 'EXTRACT_TEXT':
-      case 'EXTRACT_LINKS': {
+      case 'EXTRACT_LINKS':
+      case 'EXTRACT_TABLES':
+      case 'EXTRACT_FORMS':
+      case 'EXTRACT_MEDIA':
+      case 'PAGE_METADATA':
+      case 'HIGHLIGHT_ELEMENT':
+      case 'AUTOFILL_PAGE':
+      case 'WAIT_FOR_SELECTOR':
+      case 'GET_ELEMENT_INFO': {
         var domTabId = tabId || await getActiveTabId();
         if (!domTabId) {
           sendResponse({ success: false, error: 'No active tab' });
           break;
         }
-        // Inject dom_actions.js first (idempotent — re-injection is safe)
-        await chrome.scripting.executeScript({
-          target: { tabId: domTabId },
-          files: ['dom_actions.js'],
-        });
-        // Send DOM action to the injected script
-        var domResults = await new Promise(function (resolve) {
-          chrome.tabs.sendMessage(domTabId, {
-            type: 'DOM_ACTION',
-            action: action,
-            params: params,
-          }, function (response) {
-            if (chrome.runtime.lastError) {
-              resolve({ success: false, error: chrome.runtime.lastError.message });
-            } else {
-              resolve(response || { success: false, error: 'No response from DOM script' });
-            }
+
+        // Helper: send DOM_ACTION message with 8s timeout
+        var sendDomMessage = function (targetTabId) {
+          return new Promise(function (resolve, reject) {
+            var timer = setTimeout(function () {
+              resolve({ success: false, error: 'DOM action timed out (8s)' });
+            }, 8000);
+
+            chrome.tabs.sendMessage(targetTabId, {
+              type: 'DOM_ACTION',
+              action: action,
+              params: params,
+            }, function (response) {
+              clearTimeout(timer);
+              if (chrome.runtime.lastError) {
+                resolve({ success: false, error: chrome.runtime.lastError.message });
+              } else {
+                resolve(response || { success: false, error: 'No response from DOM script' });
+              }
+            });
           });
-        });
+        };
+
+        // Try sending message first (dom_actions.js may already be injected)
+        var domResults = await sendDomMessage(domTabId);
+
+        // If content script not ready, inject it and retry once
+        if (!domResults.success && domResults.error &&
+            (domResults.error.includes('Could not establish connection') ||
+             domResults.error.includes('Receiving end does not exist') ||
+             domResults.error.includes('The message port closed'))) {
+
+          console.info('[Background] Injecting dom_actions.js into tab', domTabId);
+          try {
+            await chrome.scripting.executeScript({
+              target: { tabId: domTabId },
+              files: ['dom_actions.js'],
+            });
+            // Small delay for script initialization
+            await new Promise(function (r) { setTimeout(r, 200); });
+            domResults = await sendDomMessage(domTabId);
+          } catch (injectErr) {
+            domResults = { success: false, error: 'Script injection failed: ' + (injectErr.message || String(injectErr)) };
+          }
+        }
+
         sendResponse(domResults);
         break;
       }

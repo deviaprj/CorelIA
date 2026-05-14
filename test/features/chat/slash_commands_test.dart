@@ -48,7 +48,7 @@ void main() {
     });
 
     test('filters by name prefix (case-insensitive)', () {
-      final results = SlashCommands.search('dow');
+      final results = SlashCommands.search('downlo');
       expect(results.length, equals(1));
       expect(results.first.name, equals('download'));
     });
@@ -234,6 +234,113 @@ void main() {
       expect(result!.command.name, equals('scroll'));
       expect(result.args, equals(['down', '500']));
     });
+
+    // ── Nouvelles commandes V7 ───────────────────────────────────────────
+
+    test('parses /forms with index', () {
+      final result = SlashCommands.parse('/forms 0');
+      expect(result, isNotNull);
+      expect(result!.command.name, equals('forms'));
+      expect(result.args, equals(['0']));
+    });
+
+    test('parses /forms without args', () {
+      final result = SlashCommands.parse('/forms');
+      expect(result, isNotNull);
+      expect(result!.command.name, equals('forms'));
+      expect(result.args, isEmpty);
+    });
+
+    test('parses /tables with index', () {
+      final result = SlashCommands.parse('/tables 2');
+      expect(result, isNotNull);
+      expect(result!.command.name, equals('tables'));
+      expect(result.args, equals(['2']));
+    });
+
+    test('parses /media with type', () {
+      final result = SlashCommands.parse('/media images');
+      expect(result, isNotNull);
+      expect(result!.command.name, equals('media'));
+      expect(result.args, equals(['images']));
+    });
+
+    test('parses /media with all', () {
+      final result = SlashCommands.parse('/media all');
+      expect(result, isNotNull);
+      expect(result!.command.name, equals('media'));
+      expect(result.args, equals(['all']));
+    });
+
+    test('parses /metadata', () {
+      final result = SlashCommands.parse('/metadata');
+      expect(result, isNotNull);
+      expect(result!.command.name, equals('metadata'));
+      expect(result.args, isEmpty);
+    });
+
+    test('parses /autofill', () {
+      final result = SlashCommands.parse('/autofill');
+      expect(result, isNotNull);
+      expect(result!.command.name, equals('autofill'));
+      expect(result.args, isEmpty);
+    });
+
+    test('parses /inspect with selector', () {
+      final result = SlashCommands.parse('/inspect .product-card');
+      expect(result, isNotNull);
+      expect(result!.command.name, equals('inspect'));
+      expect(result.args, equals(['.product-card']));
+    });
+
+    test('parses /highlight with selector', () {
+      final result = SlashCommands.parse('/highlight #main-title');
+      expect(result, isNotNull);
+      expect(result!.command.name, equals('highlight'));
+      expect(result.args, equals(['#main-title']));
+    });
+
+    test('parses /waitfor with selector and timeout', () {
+      final result = SlashCommands.parse('/waitfor .results 5000');
+      expect(result, isNotNull);
+      expect(result!.command.name, equals('waitfor'));
+      expect(result.args, equals(['.results', '5000']));
+    });
+
+    test('parses /export with format', () {
+      final result = SlashCommands.parse('/export csv');
+      expect(result, isNotNull);
+      expect(result!.command.name, equals('export'));
+      expect(result.args, equals(['csv']));
+    });
+
+    test('parses /export json default', () {
+      final result = SlashCommands.parse('/export');
+      expect(result, isNotNull);
+      expect(result!.command.name, equals('export'));
+      expect(result.args, isEmpty);
+    });
+
+    test('parses /monitor with selector and interval', () {
+      final result = SlashCommands.parse('/monitor .price 60');
+      expect(result, isNotNull);
+      expect(result!.command.name, equals('monitor'));
+      expect(result.args, equals(['.price', '60']));
+    });
+
+    test('parses /translate with language', () {
+      final result = SlashCommands.parse('/translate en');
+      expect(result, isNotNull);
+      expect(result!.command.name, equals('translate'));
+      expect(result.args, equals(['en']));
+    });
+
+    test('parses /searchpage with term', () {
+      final result = SlashCommands.parse('/searchpage GDPR compliance');
+      expect(result, isNotNull);
+      expect(result!.command.name, equals('searchpage'));
+      expect(result.args, equals(['GDPR', 'compliance']));
+    });
   });
 
   // ── ParsedSlashCommand ─────────────────────────────────────────────────────
@@ -266,11 +373,107 @@ void main() {
     });
   });
 
+  // ── ParsedSlashCommand.toNaturalLanguage ────────────────────────────────────
+
+  group('ParsedSlashCommand.toNaturalLanguage', () {
+    test('/links → natural language', () {
+      final result = SlashCommands.parse('/links')!;
+      expect(
+        result.toNaturalLanguage(),
+        equals('Extrais tous les liens de la page courante'),
+      );
+    });
+
+    test('/links video → natural language', () {
+      final result = SlashCommands.parse('/links video')!;
+      expect(
+        result.toNaturalLanguage(),
+        equals('Extrais tous les liens videos de la page courante'),
+      );
+    });
+
+    test('/download → natural language', () {
+      final result =
+          SlashCommands.parse('/download https://example.com/doc.pdf')!;
+      expect(
+        result.toNaturalLanguage(),
+        equals('Telecharge https://example.com/doc.pdf'),
+      );
+    });
+
+    test('/summarize → natural language', () {
+      final result = SlashCommands.parse('/summarize')!;
+      expect(result.toNaturalLanguage(), equals('Resume la page courante'));
+    });
+
+    test('/screenshot → natural language', () {
+      final result = SlashCommands.parse('/screenshot')!;
+      expect(
+        result.toNaturalLanguage(),
+        equals("Capture d'ecran de la page courante"),
+      );
+    });
+
+    test('/translate → natural language', () {
+      final result = SlashCommands.parse('/translate en')!;
+      expect(
+        result.toNaturalLanguage(),
+        equals('Traduis le contenu en anglais'),
+      );
+    });
+
+    test('/forms → natural language', () {
+      final result = SlashCommands.parse('/forms')!;
+      expect(
+        result.toNaturalLanguage(),
+        equals('Liste les formulaires de la page courante'),
+      );
+    });
+
+    test('/media → natural language', () {
+      final result = SlashCommands.parse('/media images')!;
+      expect(
+        result.toNaturalLanguage(),
+        equals('Liste les images de la page courante'),
+      );
+    });
+
+    test('/searchpage → natural language', () {
+      final result = SlashCommands.parse('/searchpage prix')!;
+      expect(
+        result.toNaturalLanguage(),
+        equals('Recherche "prix" dans la page'),
+      );
+    });
+
+    test('/fill → natural language', () {
+      final result =
+          SlashCommands.parse('/fill input[name="email"] test@test.com')!;
+      expect(
+        result.toNaturalLanguage(),
+        equals('Remplis input[name="email"] avec test@test.com'),
+      );
+    });
+
+    test('/export → natural language', () {
+      final result = SlashCommands.parse('/export csv')!;
+      expect(result.toNaturalLanguage(), equals('Exporte les donnees en CSV'));
+    });
+
+    test('/monitor → natural language', () {
+      final result = SlashCommands.parse('/monitor .price 1800')!;
+      expect(
+        result.toNaturalLanguage(),
+        equals('Surveille .price toutes les 1800s'),
+      );
+    });
+  });
+
   // ── SlashCommands.all completeness ─────────────────────────────────────────
 
   group('SlashCommands.all', () {
-    test('contains exactly 12 commands', () {
-      expect(SlashCommands.all.length, equals(12));
+    test('contains exactly 23 commands', () {
+      expect(SlashCommands.all.length, equals(24));
     });
 
     test('all commands have non-empty names', () {
@@ -308,6 +511,10 @@ void main() {
         'download', 'links', 'pdf', 'summarize', 'extract',
         'scroll', 'open', 'click', 'fill', 'screenshot',
         'back', 'forward',
+        // Nouvelles commandes V7
+        'forms', 'tables', 'media', 'metadata', 'autofill',
+        'inspect', 'highlight', 'waitfor', 'export', 'monitor',
+        'translate', 'searchpage',
       ]));
     });
   });
@@ -426,6 +633,232 @@ void main() {
       // Tap /download
       await tester.tap(find.text('/download'));
       expect(selected, contains('download'));
+    });
+  });
+
+  // ── Combos — Enchaînements de commandes slash ──────────────────────────
+
+  group('Combos Slash — Enchaînements', () {
+    test('Combo "links + download" parse correctement', () {
+      final cmd1 = SlashCommands.parse('/links document');
+      expect(cmd1, isNotNull);
+      expect(cmd1!.command.name, equals('links'));
+      expect(cmd1.args, equals(['document']));
+
+      final cmd2 = SlashCommands.parse('/download https://example.com/doc.pdf rapport.pdf');
+      expect(cmd2, isNotNull);
+      expect(cmd2!.command.name, equals('download'));
+      expect(cmd2.args, equals(['https://example.com/doc.pdf', 'rapport.pdf']));
+    });
+
+    test('Combo "extract + translate" parse correctement', () {
+      final cmd1 = SlashCommands.parse('/extract .recipe-ingredients');
+      expect(cmd1, isNotNull);
+      expect(cmd1!.command.name, equals('extract'));
+
+      final cmd2 = SlashCommands.parse('/translate en');
+      expect(cmd2, isNotNull);
+      expect(cmd2!.command.name, equals('translate'));
+      expect(cmd2!.args, equals(['en']));
+    });
+
+    test('Combo "forms + autofill + fill + click" parse correctement', () {
+      final cmds = [
+        SlashCommands.parse('/forms')!,
+        SlashCommands.parse('/autofill')!,
+        SlashCommands.parse('/fill input[name="email"] moi@email.com')!,
+        SlashCommands.parse('/click button[type="submit"]')!,
+      ];
+
+      expect(cmds[0].command.name, equals('forms'));
+      expect(cmds[1].command.name, equals('autofill'));
+      expect(cmds[2].command.name, equals('fill'));
+      expect(cmds[3].command.name, equals('click'));
+      expect(cmds[2].args, equals(['input[name="email"]', 'moi@email.com']));
+    });
+
+    test('Combo "summarize + pdf" parse correctement', () {
+      final cmd1 = SlashCommands.parse('/summarize');
+      expect(cmd1, isNotNull);
+      expect(cmd1!.command.name, equals('summarize'));
+
+      final cmd2 = SlashCommands.parse('/pdf "" mon_resume');
+      expect(cmd2, isNotNull);
+      expect(cmd2!.command.name, equals('pdf'));
+    });
+
+    test('Combo "tables + export csv" parse correctement', () {
+      final cmd1 = SlashCommands.parse('/tables');
+      expect(cmd1, isNotNull);
+      expect(cmd1!.command.name, equals('tables'));
+
+      final cmd2 = SlashCommands.parse('/export csv');
+      expect(cmd2, isNotNull);
+      expect(cmd2!.command.name, equals('export'));
+      expect(cmd2!.args, equals(['csv']));
+    });
+
+    test('Combo "media + download" parse correctement', () {
+      final cmd1 = SlashCommands.parse('/media images');
+      expect(cmd1, isNotNull);
+      expect(cmd1!.command.name, equals('media'));
+
+      final cmd2 = SlashCommands.parse('/download https://cdn.example.com/photo-hd.jpg');
+      expect(cmd2, isNotNull);
+      expect(cmd2!.command.name, equals('download'));
+    });
+
+    test('Combo "metadata + export json" parse correctement', () {
+      final cmd1 = SlashCommands.parse('/metadata');
+      expect(cmd1, isNotNull);
+      expect(cmd1!.command.name, equals('metadata'));
+
+      final cmd2 = SlashCommands.parse('/export json');
+      expect(cmd2, isNotNull);
+      expect(cmd2!.command.name, equals('export'));
+      expect(cmd2!.args, equals(['json']));
+    });
+
+    test('Combo "searchpage + extract" parse correctement', () {
+      final cmd1 = SlashCommands.parse('/searchpage "API key"');
+      expect(cmd1, isNotNull);
+      expect(cmd1!.command.name, equals('searchpage'));
+      expect(cmd1.args, equals(['"API', 'key"']));
+
+      final cmd2 = SlashCommands.parse('/extract .api-reference');
+      expect(cmd2, isNotNull);
+      expect(cmd2!.command.name, equals('extract'));
+    });
+
+    test('Combo "open + waitfor + extract" parse correctement', () {
+      final cmds = [
+        SlashCommands.parse('/open https://example.com/spa')!,
+        SlashCommands.parse('/waitfor .content-loaded 10000')!,
+        SlashCommands.parse('/extract .content-loaded')!,
+      ];
+
+      expect(cmds[0].command.name, equals('open'));
+      expect(cmds[1].command.name, equals('waitfor'));
+      expect(cmds[1].args, equals(['.content-loaded', '10000']));
+      expect(cmds[2].command.name, equals('extract'));
+    });
+
+    test('Workflow e-commerce complet parse correctement', () {
+      final workflow = [
+        SlashCommands.parse('/open https://ecommerce.fr/produit'),
+        SlashCommands.parse('/metadata'),
+        SlashCommands.parse('/searchpage €'),
+        SlashCommands.parse('/extract .product-description'),
+        SlashCommands.parse('/media images'),
+        SlashCommands.parse('/screenshot'),
+      ];
+
+      for (final cmd in workflow) {
+        expect(cmd, isNotNull);
+      }
+      expect(workflow[0]!.command.name, equals('open'));
+      expect(workflow[1]!.command.name, equals('metadata'));
+      expect(workflow[2]!.command.name, equals('searchpage'));
+      expect(workflow[3]!.command.name, equals('extract'));
+      expect(workflow[4]!.command.name, equals('media'));
+      expect(workflow[5]!.command.name, equals('screenshot'));
+    });
+
+    test('Combo "scroll + screenshot" parse correctement', () {
+      final cmd1 = SlashCommands.parse('/scroll down 800');
+      expect(cmd1, isNotNull);
+      expect(cmd1!.command.name, equals('scroll'));
+
+      final cmd2 = SlashCommands.parse('/screenshot');
+      expect(cmd2, isNotNull);
+      expect(cmd2!.command.name, equals('screenshot'));
+    });
+
+    test('Combo "click + waitfor + inspect + highlight" parse correctement', () {
+      final cmds = [
+        SlashCommands.parse('/click #show-more')!,
+        SlashCommands.parse('/waitfor .new-content 5000')!,
+        SlashCommands.parse('/inspect .new-content')!,
+        SlashCommands.parse('/highlight .new-content')!,
+      ];
+
+      expect(cmds[0].command.name, equals('click'));
+      expect(cmds[1].command.name, equals('waitfor'));
+      expect(cmds[2].command.name, equals('inspect'));
+      expect(cmds[3].command.name, equals('highlight'));
+    });
+  });
+
+  // ── Nouvelles commandes : validation sémantique ────────────────────────
+
+  group('SlashCommands.all — validation des nouvelles commandes', () {
+    test('toutes les commandes de navigation existent', () {
+      final names = SlashCommands.all.map((c) => c.name).toSet();
+      expect(names, containsAll(['open', 'back', 'forward', 'scroll']));
+    });
+
+    test('toutes les commandes d\'extraction existent', () {
+      final names = SlashCommands.all.map((c) => c.name).toSet();
+      expect(names, containsAll([
+        'extract', 'links', 'forms', 'tables', 'media',
+      ]));
+    });
+
+    test('toutes les commandes d\'analyse existent', () {
+      final names = SlashCommands.all.map((c) => c.name).toSet();
+      expect(names, containsAll([
+        'summarize', 'metadata', 'searchpage', 'inspect',
+      ]));
+    });
+
+    test('toutes les commandes d\'interaction existent', () {
+      final names = SlashCommands.all.map((c) => c.name).toSet();
+      expect(names, containsAll([
+        'click', 'fill', 'highlight', 'waitfor',
+      ]));
+    });
+
+    test('toutes les commandes d\'automatisation existent', () {
+      final names = SlashCommands.all.map((c) => c.name).toSet();
+      expect(names, containsAll([
+        'autofill', 'monitor',
+      ]));
+    });
+
+    test('toutes les commandes de sortie existent', () {
+      final names = SlashCommands.all.map((c) => c.name).toSet();
+      expect(names, containsAll([
+        'download', 'screenshot', 'pdf', 'export', 'translate',
+      ]));
+    });
+
+    test('les commandes de combo naturelles sont toutes disponibles', () {
+      // Vérifier que toutes les commandes nécessaires aux combos du guide existent
+      final names = SlashCommands.all.map((c) => c.name).toSet();
+      // Combo "links + download"
+      expect(names, containsAll(['links', 'download']));
+      // Combo "extract + translate"
+      expect(names, containsAll(['extract', 'translate']));
+      // Combo "forms + autofill + fill + click"
+      expect(names, containsAll(['forms', 'autofill', 'fill', 'click']));
+      // Combo "summarize + pdf"
+      expect(names, containsAll(['summarize', 'pdf']));
+      // Combo "tables + export csv"
+      expect(names, containsAll(['tables', 'export']));
+      // Combo "media + download"
+      expect(names, containsAll(['media', 'download']));
+      // Combo "metadata + export json"
+      expect(names, containsAll(['metadata', 'export']));
+      // Combo "searchpage + extract"
+      expect(names, containsAll(['searchpage', 'extract']));
+      // Combo "scroll + screenshot"
+      expect(names, containsAll(['scroll', 'screenshot']));
+      // Combo "click + waitfor + inspect + highlight"
+      expect(names, containsAll(['click', 'waitfor', 'inspect', 'highlight']));
+      // Combo "monitor"
+      expect(names, contains('monitor'));
+      // Combo "open"
+      expect(names, contains('open'));
     });
   });
 }

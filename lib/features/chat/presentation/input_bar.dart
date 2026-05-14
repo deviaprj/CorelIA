@@ -46,7 +46,7 @@ class InputBar extends ConsumerStatefulWidget {
   final bool isLoading;
   final AttachmentData? attachment;
   final VoidCallback? onCancelAttachment;
-  final ValueChanged<String>? onSlashTextChanged;
+  final ValueChanged<String?>? onSlashTextChanged;
 
   @override
   ConsumerState<InputBar> createState() => InputBarState();
@@ -75,7 +75,7 @@ class InputBarState extends ConsumerState<InputBar> {
       if (text.startsWith('/')) {
         widget.onSlashTextChanged!(text.substring(1));
       } else {
-        widget.onSlashTextChanged!('');
+        widget.onSlashTextChanged!(null);
       }
     }
   }
@@ -111,7 +111,7 @@ class InputBarState extends ConsumerState<InputBar> {
     final att = widget.attachment;
     _controller.clear();
     // Clear slash command filter after sending
-    widget.onSlashTextChanged?.call('');
+    widget.onSlashTextChanged?.call(null);
     widget.onSend(
       text,
       imageBase64: att?.imageBase64,

@@ -7,10 +7,18 @@ enum BrowserActionType {
   summarizePage('SUMMARIZE_PAGE'),
   extractText('EXTRACT_TEXT'),
   extractLinks('EXTRACT_LINKS'),
+  extractTables('EXTRACT_TABLES'),
+  extractForms('EXTRACT_FORMS'),
+  extractMedia('EXTRACT_MEDIA'),
+  pageMetadata('PAGE_METADATA'),
   clickElement('CLICK_ELEMENT'),
   fillForm('FILL_FORM'),
+  autoFillPage('AUTOFILL_PAGE'),
   scroll('SCROLL'),
   screenshot('SCREENSHOT'),
+  highlightElement('HIGHLIGHT_ELEMENT'),
+  waitForSelector('WAIT_FOR_SELECTOR'),
+  getElementInfo('GET_ELEMENT_INFO'),
   download('DOWNLOAD'),
   saveAsPdf('SAVE_AS_PDF');
 
@@ -26,6 +34,8 @@ enum BrowserActionType {
 
 /// Requête d'action navigateur envoyée depuis Flutter vers l'extension.
 class BrowserAction {
+  static int _counter = 0;
+
   final String actionId;
   final BrowserActionType action;
   final Map<String, dynamic> params;
@@ -33,7 +43,7 @@ class BrowserAction {
   BrowserAction({
     required this.action,
     required this.params,
-  }) : actionId = DateTime.now().millisecondsSinceEpoch.toString();
+  }) : actionId = '${DateTime.now().millisecondsSinceEpoch}_${++_counter}';
 
   Map<String, dynamic> toJson() => {
         'actionId': actionId,

@@ -21,6 +21,9 @@
 
 set -euo pipefail
 
+# Ensure Flutter is in PATH
+export PATH="$HOME/flutter/bin:$PATH"
+
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUILD_WEB="$PROJECT_ROOT/build/web"
 BUILD_EXT="$PROJECT_ROOT/build/extension"
@@ -58,14 +61,8 @@ rm -rf "$BUILD_EXT"
 cp -r "$BUILD_WEB" "$BUILD_EXT"
 
 # Copier les fichiers spécifiques à l'extension
-cp "$WEB_SRC/manifest.json"     "$BUILD_EXT/manifest.json"
-cp "$WEB_SRC/background.js"     "$BUILD_EXT/background.js"
-cp "$WEB_SRC/content_script.js" "$BUILD_EXT/content_script.js"
-cp "$WEB_SRC/speech_bridge.js"  "$BUILD_EXT/speech_bridge.js"
-cp "$WEB_SRC/extension_bridge.js" "$BUILD_EXT/extension_bridge.js"
-cp "$WEB_SRC/browser_actions.js" "$BUILD_EXT/browser_actions.js"
-cp "$WEB_SRC/dom_actions.js"    "$BUILD_EXT/dom_actions.js"
-cp "$WEB_SRC/corely_init.js"    "$BUILD_EXT/corely_init.js"
+cp_files() { local f; for f in "$@"; do [[ -f "$WEB_SRC/$f" ]] && cp "$WEB_SRC/$f" "$BUILD_EXT/$f" || echo "⚠️  $f non trouvé, ignoré."; done; }
+cp_files manifest.json background.js content_script.js speech_bridge.js extension_bridge.js dom_actions.js corely_init.js
 
 # Créer le dossier icons si absent
 mkdir -p "$BUILD_EXT/icons"

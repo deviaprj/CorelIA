@@ -67,20 +67,20 @@ void main() {
   group('_lastSentenceEnd', () {
     test('trouve la dernière phrase avant la limite', () {
       final text = 'Première phrase. Deuxième phrase. Troisième phrase. Quatrième phrase.';
-      final pos = FileUploadService._lastSentenceEnd(text, 40);
+      final pos = FileUploadService.lastSentenceEnd(text, 40);
       expect(pos, greaterThan(0));
       expect(pos, lessThanOrEqualTo(40));
     });
 
     test('retourne 0 si aucune fin de phrase trouvée', () {
       final text = 'pas de ponctuation finale ici';
-      final pos = FileUploadService._lastSentenceEnd(text, 15);
+      final pos = FileUploadService.lastSentenceEnd(text, 15);
       expect(pos, 0);
     });
 
     test('trouve les fins de phrases avec ! et ?', () {
       final text = 'Question? Réponse! Et encore.';
-      final pos = FileUploadService._lastSentenceEnd(text, 30);
+      final pos = FileUploadService.lastSentenceEnd(text, 30);
       expect(pos, greaterThan(0));
     });
   });

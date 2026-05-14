@@ -29,6 +29,8 @@ String? _dartDefineValue(String key) => switch (key) {
   'REVENUECAT_API_KEY_ANDROID' => const String.fromEnvironment('REVENUECAT_API_KEY_ANDROID', defaultValue: ''),
   'REVENUECAT_API_KEY_IOS' => const String.fromEnvironment('REVENUECAT_API_KEY_IOS', defaultValue: ''),
   'STRIPE_PUBLIC_KEY' => const String.fromEnvironment('STRIPE_PUBLIC_KEY', defaultValue: ''),
+  'SERPAPI_API_KEY' => const String.fromEnvironment('SERPAPI_API_KEY', defaultValue: ''),
+  'OPENWEATHERMAP_API_KEY' => const String.fromEnvironment('OPENWEATHERMAP_API_KEY', defaultValue: ''),
   _ => null,
 };
 
@@ -107,6 +109,10 @@ abstract class AppConstants {
   static String get stripePublicKey => _env('STRIPE_PUBLIC_KEY') ??
       (kDebugMode ? 'pk_test_fallback' : '');
   static const stripeCheckoutBaseUrl = 'https://aironbot.app/checkout';
+
+  // ── Search APIs ───────────────────────────────────────────────────────────────
+  static String? get serpApiKey => _env('SERPAPI_API_KEY');
+  static String? get openWeatherApiKey => _env('OPENWEATHERMAP_API_KEY');
 
   // ── App ─────────────────────────────────────────────────────────────────────
   static const appName = 'Corely';

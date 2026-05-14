@@ -53,7 +53,8 @@ void main() {
       });
 
       test('indique les caractères restants', () {
-        final text = 'a' * 20000;
+        final sentence = 'Ceci est une phrase complete. ';
+        final text = sentence * 1500; // ~45k chars, with sentence breaks
         final result = FileUploadService.truncateForContext(text, isPro: false);
         expect(result, contains('caracteres restants'));
       });

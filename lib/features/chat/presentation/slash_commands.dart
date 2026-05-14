@@ -110,6 +110,90 @@ class SlashCommands {
       params: [],
       icon: Icons.arrow_forward,
     ),
+    SlashCommand(
+      name: 'forms',
+      description: 'Extraire et lister les formulaires de la page courante',
+      usage: '/forms [index]',
+      params: ['index'],
+      icon: Icons.dynamic_form,
+    ),
+    SlashCommand(
+      name: 'tables',
+      description: 'Extraire les tableaux de la page courante',
+      usage: '/tables [index]',
+      params: ['index'],
+      icon: Icons.table_chart,
+    ),
+    SlashCommand(
+      name: 'media',
+      description: 'Extraire les médias (images, vidéos, audio) de la page',
+      usage: '/media [images|videos|audio|all]',
+      params: ['type'],
+      icon: Icons.perm_media,
+    ),
+    SlashCommand(
+      name: 'metadata',
+      description: 'Afficher les métadonnées de la page (SEO, auteur, stats)',
+      usage: '/metadata',
+      params: [],
+      icon: Icons.info_outline,
+    ),
+    SlashCommand(
+      name: 'autofill',
+      description: 'Remplir automatiquement un formulaire avec des données de test',
+      usage: '/autofill [form_selector]',
+      params: ['form_selector'],
+      icon: Icons.auto_fix_high,
+    ),
+    SlashCommand(
+      name: 'inspect',
+      description: 'Inspecter un élément (sélecteur CSS) et afficher ses propriétés',
+      usage: '/inspect <selector>',
+      params: ['selector'],
+      icon: Icons.search,
+    ),
+    SlashCommand(
+      name: 'highlight',
+      description: 'Surligner un élément sur la page (sélecteur CSS)',
+      usage: '/highlight <selector>',
+      params: ['selector'],
+      icon: Icons.highlight,
+    ),
+    SlashCommand(
+      name: 'waitfor',
+      description: 'Attendre qu\'un élément apparaisse sur la page',
+      usage: '/waitfor <selector> [timeout_ms]',
+      params: ['selector', 'timeout_ms'],
+      icon: Icons.hourglass_bottom,
+    ),
+    SlashCommand(
+      name: 'export',
+      description: 'Exporter les données de la page (JSON, CSV, Markdown)',
+      usage: '/export [json|csv|md]',
+      params: ['format'],
+      icon: Icons.file_download,
+    ),
+    SlashCommand(
+      name: 'monitor',
+      description: 'Surveiller la page pour détecter des changements (prix, stock, contenu)',
+      usage: '/monitor <selector> [interval_sec]',
+      params: ['selector', 'interval_sec'],
+      icon: Icons.monitor_heart,
+    ),
+    SlashCommand(
+      name: 'translate',
+      description: 'Traduire le contenu de la page ou un texte sélectionné',
+      usage: '/translate [fr|en|es|de|it|pt|ja|zh|ar]',
+      params: ['langue_cible'],
+      icon: Icons.translate,
+    ),
+    SlashCommand(
+      name: 'searchpage',
+      description: 'Rechercher un terme dans le contenu de la page courante',
+      usage: '/searchpage <terme>',
+      params: ['terme'],
+      icon: Icons.pageview,
+    ),
   ];
 
   /// Recherche les commandes correspondant à un préfixe.
@@ -150,6 +234,86 @@ class ParsedSlashCommand {
 
   /// Reconstruit le texte de la commande.
   String get fullText => '/${command.name} ${args.join(' ')}'.trim();
+
+  /// Traduit la commande en langage naturel pour affichage dans la conversation.
+  String toNaturalLanguage() {
+    final a = args;
+    switch (command.name) {
+      case 'download':
+        return 'Telecharge ${a.isNotEmpty ? a[0] : 'un fichier'}';
+      case 'links':
+        final filter = a.isNotEmpty ? a[0] : 'all';
+        const labels = {
+          'all': '',
+          'video': ' videos',
+          'image': ' images',
+          'audio': ' audios',
+          'document': ' documents',
+        };
+        final label = labels[filter];
+        if (label != null) return 'Extrais tous les liens$label de la page courante';
+        return 'Extrais tous les liens $filter de la page courante';
+      case 'pdf':
+        return 'Sauvegarde la page en PDF${a.isNotEmpty ? ' (${a[0]})' : ''}';
+      case 'summarize':
+        return 'Resume la page courante';
+      case 'extract':
+        return 'Extrais le contenu${a.isNotEmpty ? ' de ${a[0]}' : ' de la page'}';
+      case 'scroll':
+        return 'Defile ${a.isNotEmpty ? a[0] : 'la page'}${a.length > 1 ? ' de ${a[1]}px' : ''}';
+      case 'open':
+        return 'Ouvre ${a.isNotEmpty ? a[0] : 'un URL'}';
+      case 'click':
+        return 'Clique sur ${a.isNotEmpty ? a[0] : "l'element"}';
+      case 'fill':
+        return 'Remplis ${a.isNotEmpty ? a[0] : 'le champ'} avec ${a.length > 1 ? a[1] : 'la valeur'}';
+      case 'screenshot':
+        return "Capture d'ecran de la page courante";
+      case 'back':
+        return 'Retour a la page precedente';
+      case 'forward':
+        return 'Avance a la page suivante';
+      case 'forms':
+        return 'Liste les formulaires${a.isNotEmpty ? ' (index: ${a[0]})' : ' de la page courante'}';
+      case 'tables':
+        return 'Extrais les tableaux${a.isNotEmpty ? ' (index: ${a[0]})' : ' de la page courante'}';
+      case 'media':
+        final type = a.isNotEmpty ? a[0] : 'tous';
+        const typeLabels = {
+          'images': 'les images',
+          'videos': 'les videos',
+          'audio': 'les audios',
+          'all': 'tous les medias',
+        };
+        return 'Liste ${typeLabels[type] ?? type} de la page courante';
+      case 'metadata':
+        return 'Affiche les metadonnees de la page courante';
+      case 'autofill':
+        return 'Remplis automatiquement le formulaire${a.isNotEmpty ? ' ${a[0]}' : ''}';
+      case 'inspect':
+        return 'Inspecte ${a.isNotEmpty ? a[0] : "l'element"}';
+      case 'highlight':
+        return 'Surligne ${a.isNotEmpty ? a[0] : "l'element"}';
+      case 'waitfor':
+        return 'Attends ${a.isNotEmpty ? a[0] : "l'element"}${a.length > 1 ? ' (timeout: ${a[1]}ms)' : ''}';
+      case 'export':
+        return 'Exporte les donnees${a.isNotEmpty ? ' en ${a[0].toUpperCase()}' : ''}';
+      case 'monitor':
+        return 'Surveille ${a.isNotEmpty ? a[0] : 'la page'}${a.length > 1 ? ' toutes les ${a[1]}s' : ''}';
+      case 'translate':
+        final lang = a.isNotEmpty ? a[0] : 'fr';
+        const langNames = {
+          'fr': 'francais', 'en': 'anglais', 'es': 'espagnol',
+          'de': 'allemand', 'it': 'italien', 'pt': 'portugais',
+          'ja': 'japonais', 'zh': 'chinois', 'ar': 'arabe',
+        };
+        return 'Traduis le contenu en ${langNames[lang] ?? lang}';
+      case 'searchpage':
+        return 'Recherche ${a.isNotEmpty ? '"${a[0]}"' : 'un terme'} dans la page';
+      default:
+        return fullText;
+    }
+  }
 }
 
 /// Widget de palette de commandes slash.

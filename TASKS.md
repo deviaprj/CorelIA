@@ -1,6 +1,6 @@
 # TASKS.md — Suivi Corely
 
-Dernière mise à jour : 2026-05-13 — Session V6 : Extension Runtime Fixes
+Dernière mise à jour : 2026-05-14 — Session V8 : Commandes Slash, Docs & Tests
 
 ## Terminé (sessions précédentes)
 
@@ -46,10 +46,39 @@ Dernière mise à jour : 2026-05-13 — Session V6 : Extension Runtime Fixes
 
 ## Backlog (sessions futures)
 
-### 1. EXTENSION CHROME — Commandes slash cassées
-- [ ] **Corriger les commandes slash** : `/download`, `/pdf`, `/links`, `/summarize`, `/extract`, `/scroll`, `/open`, `/click`, `/fill`, `/screenshot`, `/back`, `/forward`
-- [ ] Le flux complet ne fonctionne pas : `ChatNotifier._handleSlashCommand()` → `ExtensionBridge.executeAction()` → `browser_actions.js` → `background.js` → `content_script.js` → retour. Le `_pendingActions` Completer ne reçoit jamais de réponse.
-- [ ] Piste : vérifier `chrome.runtime.sendMessage` callback dans `extension_bridge.js` et le flux de réponse asynchrone
+## Terminé — Session V8 (2026-05-14) — Commandes Slash, Docs & Tests
+
+### Fix racine : commandes slash de l'extension ✅
+- **Cause** : `web/extension_bridge.js` n'avait pas de listener pour l'événement `corely_browser_action` dispatché par Dart. Le flux était cassé : Dart → CustomEvent → [RIEN].
+- **Fix** : Ajout d'un listener `window.addEventListener('corely_browser_action', ...)` dans `extension_bridge.js` qui relaie vers `chrome.runtime.sendMessage` et dispatch le résultat via `corely_browser_action_result`.
+- **Fichier manquant** : `web/dom_actions.js` créé (386 lignes) — 14 handlers d'actions DOM injectés via `chrome.scripting.executeScript`.
+
+### Nouvelles commandes slash (12 → 24) ✅
+- **Commandes ajoutées** : `/forms`, `/tables`, `/media`, `/metadata`, `/autofill`, `/inspect`, `/highlight`, `/waitfor`, `/export`, `/monitor`, `/translate`, `/searchpage`
+- **Handlers** : 12 nouvelles méthodes dans `ChatNotifier` (~250 lignes)
+- **BrowserActionType** : 8 nouveaux types d'actions (extractTables, extractForms, extractMedia, pageMetadata, autoFillPage, highlightElement, waitForSelector, getElementInfo)
+- **dom_actions.js** : handlers pour CLICK_ELEMENT, FILL_FORM, SCROLL, EXTRACT_TEXT/LINKS/TABLES/FORMS/MEDIA, PAGE_METADATA, HIGHLIGHT_ELEMENT, AUTOFILL_PAGE, WAIT_FOR_SELECTOR, GET_ELEMENT_INFO
+
+### Documentation ✅
+- `docs/GUIDE_COMMANDES_SLASH.md` — Référence complète 24 commandes avec exemples et combos naturels
+- `docs/GUIDE_UTILISATEUR_MOBILE.md` — 8 sections : chat, vocal, pièces jointes, recherche, paramètres, Pro
+- `docs/GUIDE_UTILISATEUR_EXTENSION.md` — 10 sections : installation, modes, interaction web, limitations
+- `docs/GUIDE_COMBOS.md` — 24 combos concrets, 5 patterns, méthodologie de création
+
+### Tests ✅ (108 tests, 0 échecs)
+- `test/features/chat/slash_commands_test.dart` — 24 commandes, parsing, recherche, combos, validation groups
+- `test/features/chat/slash_command_handlers_test.dart` — BrowserAction, ActionResult, enums, mapping, CSS selectors, validation
+- `test/features/chat/data/file_upload_service_test.dart` — `lastSentenceEnd()` fix (RangeError + public API)
+- `test/features/chat/data/tts_cache_service_test.dart` — Références `_lastSentenceEnd` → `lastSentenceEnd`
+
+### Bug fix : actionId flaky test ✅
+- **Cause** : `BrowserAction.actionId = DateTime.now().millisecondsSinceEpoch.toString()` — deux objets créés dans la même ms ont le même ID.
+- **Fix** : Compteur statique `_counter` → `'${timestamp}_${++_counter}'` garantit l'unicité.
+
+### 1. EXTENSION CHROME — Commandes slash ✅ CORRIGÉ
+- [x] **Corriger les commandes slash** : `/download`, `/pdf`, `/links`, `/summarize`, `/extract`, `/scroll`, `/open`, `/click`, `/fill`, `/screenshot`, `/back`, `/forward`
+- [x] Le flux complet fonctionne : `ChatNotifier._handleSlashCommand()` → `ExtensionBridge.executeAction()` → `extension_bridge.js` → `background.js` → `dom_actions.js` → retour. Le `_pendingActions` Completer reçoit maintenant la réponse.
+- [x] 12 nouvelles commandes ajoutées (/forms, /tables, /media, /metadata, /autofill, /inspect, /highlight, /waitfor, /export, /monitor, /translate, /searchpage)
 
 ### 2. EXTENSION CHROME — Chargement et validation
 - [ ] Tester le side panel et le popup (les deux modes d'affichage)
