@@ -388,7 +388,7 @@ void main() {
       final result = SlashCommands.parse('/links video')!;
       expect(
         result.toNaturalLanguage(),
-        equals('Extrais tous les liens videos de la page courante'),
+        equals('Extrais tous les liens vidéos de la page courante'),
       );
     });
 
@@ -397,20 +397,20 @@ void main() {
           SlashCommands.parse('/download https://example.com/doc.pdf')!;
       expect(
         result.toNaturalLanguage(),
-        equals('Telecharge https://example.com/doc.pdf'),
+        equals('Télécharge https://example.com/doc.pdf'),
       );
     });
 
     test('/summarize → natural language', () {
       final result = SlashCommands.parse('/summarize')!;
-      expect(result.toNaturalLanguage(), equals('Resume la page courante'));
+      expect(result.toNaturalLanguage(), equals('Résume la page courante'));
     });
 
     test('/screenshot → natural language', () {
       final result = SlashCommands.parse('/screenshot')!;
       expect(
         result.toNaturalLanguage(),
-        equals("Capture d'ecran de la page courante"),
+        equals("Capture d'écran de la page courante"),
       );
     });
 
@@ -418,7 +418,7 @@ void main() {
       final result = SlashCommands.parse('/translate en')!;
       expect(
         result.toNaturalLanguage(),
-        equals('Traduis le contenu en anglais'),
+        equals('Traduis la page en anglais'),
       );
     });
 
@@ -426,7 +426,7 @@ void main() {
       final result = SlashCommands.parse('/forms')!;
       expect(
         result.toNaturalLanguage(),
-        equals('Liste les formulaires de la page courante'),
+        equals('Extrais les formulaires de la page'),
       );
     });
 
@@ -434,7 +434,7 @@ void main() {
       final result = SlashCommands.parse('/media images')!;
       expect(
         result.toNaturalLanguage(),
-        equals('Liste les images de la page courante'),
+        equals('Extrais les médias (images) de la page'),
       );
     });
 
@@ -442,7 +442,7 @@ void main() {
       final result = SlashCommands.parse('/searchpage prix')!;
       expect(
         result.toNaturalLanguage(),
-        equals('Recherche "prix" dans la page'),
+        equals('Cherche "prix" dans la page'),
       );
     });
 
@@ -451,20 +451,20 @@ void main() {
           SlashCommands.parse('/fill input[name="email"] test@test.com')!;
       expect(
         result.toNaturalLanguage(),
-        equals('Remplis input[name="email"] avec test@test.com'),
+        equals('Remplis input[name="email"] avec "test@test.com"'),
       );
     });
 
     test('/export → natural language', () {
       final result = SlashCommands.parse('/export csv')!;
-      expect(result.toNaturalLanguage(), equals('Exporte les donnees en CSV'));
+      expect(result.toNaturalLanguage(), equals('Exporte la page en CSV'));
     });
 
     test('/monitor → natural language', () {
       final result = SlashCommands.parse('/monitor .price 1800')!;
       expect(
         result.toNaturalLanguage(),
-        equals('Surveille .price toutes les 1800s'),
+        equals('Surveille .price'),
       );
     });
   });

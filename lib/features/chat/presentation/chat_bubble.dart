@@ -120,6 +120,14 @@ class ChatBubble extends StatelessWidget {
                               child: MarkdownBody(
                                 data: message.content,
                                 selectable: true,
+                                onTapLink: (text, href, title) async {
+                                  if (href == null) return;
+                                  final uri = Uri.tryParse(href);
+                                  if (uri != null && await canLaunchUrl(uri)) {
+                                    await launchUrl(uri,
+                                        mode: LaunchMode.externalApplication);
+                                  }
+                                },
                                 styleSheet: MarkdownStyleSheet(
                                   codeblockDecoration: BoxDecoration(
                                     color: colorScheme.surface,

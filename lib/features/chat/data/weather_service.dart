@@ -80,6 +80,7 @@ class WeatherService {
     String? city,
     String? postalCode,
     String countryCode = 'FR',
+    String lang = 'fr',
   }) async {
     final key = _apiKey;
     if (key == null || key.isEmpty) return null;
@@ -114,7 +115,7 @@ class WeatherService {
         'lon': longitude,
         'appid': key,
         'units': 'metric',
-        'lang': 'fr',
+        'lang': lang,
       });
 
       if (weatherResp.statusCode != 200) return null;
@@ -132,7 +133,7 @@ class WeatherService {
         'lon': longitude,
         'appid': key,
         'units': 'metric',
-        'lang': 'fr',
+        'lang': lang,
       });
 
       final hourly = <HourlyForecast>[];

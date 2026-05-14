@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../../../core/language/language_service.dart';
 import '../../../core/providers/app_providers.dart';
 import '../../../core/providers/firebase_providers.dart';
 import '../../../core/secure_storage.dart';
@@ -111,6 +112,25 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                       v ? ThemeMode.dark : ThemeMode.light,
                     );
               },
+            ),
+          ),
+          ListTile(
+            leading: const Icon(Icons.language),
+            title: const Text('Langue'),
+            trailing: DropdownButton<AppLanguage>(
+              value: ref.watch(languageProvider),
+              underline: const SizedBox.shrink(),
+              onChanged: (lang) {
+                if (lang != null) {
+                  ref.read(languageProvider.notifier).setLanguage(lang);
+                }
+              },
+              items: AppLanguage.values
+                  .map((l) => DropdownMenuItem(
+                        value: l,
+                        child: Text(l.displayName),
+                      ))
+                  .toList(),
             ),
           ),
 

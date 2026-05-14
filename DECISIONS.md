@@ -264,4 +264,40 @@ Les utilisateurs gratuits doivent voir des publicités.
 
 ---
 
-*Dernière mise à jour : 2026-03-27*
+## ADR-011 : Recherche Enrichie avec Fallback DuckDuckGo
+
+**Date** : 2026-05-14
+**Statut** : Accepté
+
+### Contexte
+La recherche enrichie (vols, hôtels, produits, météo) nécessite des APIs externes (SerpAPI, OpenWeatherMap) qui peuvent être absentes du `.env`. Sans fallback, les utilisateurs recevaient des réponses génériques "je n'ai pas accès aux systèmes de réservation".
+
+### Décision
+Architecture de fallback en 3 niveaux :
+1. **API dédiée** (SerpAPI, OWM) si clé disponible
+2. **DuckDuckGo HTML scraping** avec décodage des URLs de redirection (`uddg` param)
+3. **Liens directs** toujours générés (Skyscanner, Google Flights, Kayak, Opodo, Booking, Airbnb) avec les paramètres extraits
+
+Les résultats sont injectés comme message système dans le contexte IA (`enhancedContext` → `_buildStream()`) pour que l'IA les présente naturellement.
+
+### Pattern d'extraction de paramètres
+- **2-stage parsing** : tentative originale → sanitization (45 stop words) → capitalisation → retry
+- **Regex sans raw strings** : concaténation pour interpoler les variables dans les patterns
+- **Multilingue** : patterns de déclenchement dans 6 langues, noms de mois localisés
+
+### Alternatives Considérées
+- SerpAPI obligatoire (ne fonctionne pas sans clé)
+- Backend cloud uniquement (dépendance réseau, latence)
+- Pas de recherche enrichie (expérience utilisateur dégradée)
+
+### Conséquences
+- ✅ Recherche enrichie fonctionnelle sans aucune clé API
+- ✅ IA présente les résultats de façon naturelle
+- ✅ Liens comparateurs toujours générés
+- ⚠️ DuckDuckGo scraping fragile (dépend du markup HTML)
+- ⚠️ Pas de résultats structurés (prix, disponibilité) sans SerpAPI
+- ⚠️ Extraction de paramètres limitée aux vols/hôtels/produits/météo
+
+---
+
+*Dernière mise à jour : 2026-05-14*

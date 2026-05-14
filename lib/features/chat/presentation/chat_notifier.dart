@@ -29,6 +29,7 @@ import '../../settings/presentation/settings_screen.dart' show systemPromptProvi
 import '../../monetization/credits/credit_providers.dart';
 import '../../monetization/credits/credit_service.dart';
 import '../../../main.dart' show isDemoMode;
+import '../../../core/language/language_service.dart' as lang;
 import 'slash_commands.dart';
 
 // ── Conversations stream ───────────────────────────────────────────────────
@@ -142,7 +143,8 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
     }
 
     // Add natural language user message to conversation
-    final naturalText = parsed.toNaturalLanguage();
+    final appLang = ref.read(lang.languageProvider);
+    final naturalText = parsed.toNaturalLanguage(appLang);
     final userMsg = Message(
       id: 'slash_user_${DateTime.now().millisecondsSinceEpoch}',
       conversationId: arg,
@@ -1074,23 +1076,30 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
       }
     }
 
-    // Recherche web — uniquement si l'utilisateur l'a activée OU si l'intent le nécessite
+    // Recherche enrichie (météo, vols, hôtels, produits) — toujours active,
+    // indépendamment de shouldSearch, pour supporter toutes les langues.
     List<WebSearchResult>? searchResults;
     InstantAnswer? instantAnswer;
     String? enhancedResultMarkdown;
+
+    final appLang = ref.read(lang.languageProvider);
+    final intent = lang.classifySearchIntent(userMsg.content, appLang);
+    if (intent != 'general') {
+      try {
+        enhancedResultMarkdown = await _performEnhancedSearch(
+            userMsg.content, intent, _extractSearchQuery(userMsg.content), appLang);
+      } catch (e) {
+        debugPrint('[ChatNotifier] Recherche enrichie echouee : $e');
+      }
+    }
+
+    // Recherche web classique — uniquement si l'utilisateur l'a activée OU si l'intent le nécessite
     final shouldSearch = state.useSearch || _needsWebSearch(userMsg.content);
     if (shouldSearch) {
       try {
         state = state.copyWith(isSearching: true);
         final searchService = ref.read(searchServiceProvider);
         final searchQuery = _extractSearchQuery(userMsg.content);
-
-        // Déterminer le type de recherche enrichie
-        final intent = classifySearchIntent(userMsg.content);
-        if (intent != 'general') {
-          enhancedResultMarkdown = await _performEnhancedSearch(
-              userMsg.content, intent, searchQuery);
-        }
 
         // Lancer la recherche principale et l'Instant Answer en parallèle
         final results = await searchService.searchWithFallback(searchQuery);
@@ -1123,6 +1132,7 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
             instantAnswer: instantAnswer,
             fileContent: fileContent,
             fileName: fileName,
+            enhancedContext: enhancedResultMarkdown,
           );
 
           await for (final token in stream) {
@@ -1238,6 +1248,7 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
     InstantAnswer? instantAnswer,
     String? fileContent,
     String? fileName,
+    String? enhancedContext,
   }) async {
     // ── 0. Prompt système Corely ───────────────────────────────────────────
     final corelySystemPrompt = ref.read(systemPromptProvider);
@@ -1298,6 +1309,22 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
         conversationId: arg,
         role: Role.system,
         content: 'Réponse rapide issue d\'une encyclopédie. Utilise cette information si pertinente.\n\n$instantContext',
+        createdAt: DateTime.now(),
+      ));
+    }
+
+    if (enhancedContext != null && enhancedContext.isNotEmpty) {
+      historyMessages.insert(0, Message(
+        id: 'enhanced_context_${DateTime.now().millisecondsSinceEpoch}',
+        conversationId: arg,
+        role: Role.system,
+        content: 'Voici les résultats de recherche structurée (vols, hôtels, '
+            'météo, produits) pour la question de l\'utilisateur. '
+            'Présente ces résultats de façon naturelle et utile. '
+            'Si les résultats contiennent des liens, mentionne-les. '
+            'Ne dis JAMAIS que tu n\'as pas accès aux systèmes de réservation '
+            'puisque les données sont déjà là ci-dessous.\n\n'
+            '$enhancedContext',
         createdAt: DateTime.now(),
       ));
     }
@@ -1470,7 +1497,7 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
   // Les conversations générales, la créativité et le code n'en ont pas besoin.
   static bool _needsWebSearch(String message) {
     final lower = message.toLowerCase();
-    // Mots-clés déclencheurs : informations factuelles/temporelles
+    // Mots-clés déclencheurs : informations factuelles/temporelles (multilingue)
     final triggerWords = [
       'actualité', 'actualites', 'news', 'aujourd\'hui', 'en ce moment',
       'quelle est la', 'quel est le', 'combien de', 'combien coûte',
@@ -1481,7 +1508,6 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
       'score de', 'résultat de', 'classement de',
       'est-ce que', 'est-il vrai', 'vrai ou faux',
       'comment aller', 'itinéraire', 'distance entre',
-      // Enhanced search triggers
       'le moins cher', 'meilleur prix', 'pas cher', 'acheter', 'comparer',
       'billet d\'avion', 'vol direct', 'vols pas', 'vol pour',
       'hotel', 'hôtel', 'logement', 'airbnb', 'réservation',
@@ -1489,8 +1515,30 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
       'site pour', 'où acheter', 'trouve le', 'trouve moi',
       'cherche le', 'cherche moi', 'recherche le',
       'xiaomi', 'iphone', 'samsung', 'téléphone', 'smartphone',
+      // EN
+      'what is', 'who is', 'where is', 'when is', 'why is', 'how is',
+      'how much', 'how many', 'price of', 'cost of',
+      'weather', 'forecast', 'rain', 'stock', 'score of',
+      'cheapest', 'best price', 'buy', 'where to buy',
+      'flight', 'flights', 'plane ticket',
+      // ES
+      'qué es', 'quién es', 'dónde está', 'cuándo es', 'cuánto',
+      'clima', 'lluvia', 'pronóstico', 'precio de',
+      'más barato', 'comprar', 'vuelo', 'vuelos',
+      // DE
+      'was ist', 'wer ist', 'wo ist', 'wann ist', 'wie viel',
+      'wetter', 'regen', 'vorhersage', 'preis von',
+      'günstigste', 'kaufen', 'flug', 'flüge',
+      // IT
+      'cosa è', 'chi è', 'dov\'è', 'quando è', 'quanto',
+      'meteo', 'pioggia', 'previsioni', 'prezzo di',
+      'più economico', 'comprare', 'volo', 'voli',
+      // PT
+      'o que é', 'quem é', 'onde está', 'quando é', 'quanto',
+      'clima', 'chuva', 'previsão', 'preço de',
+      'mais barato', 'comprar', 'voo', 'voos',
     ];
-    // Mots-clés exclus : créativité, code, opinion, conversation
+    // Mots-clés exclus : créativité, code, opinion, conversation (multilingue)
     final excludeWords = [
       'écris', 'ecris', 'rédige', 'redige', 'raconte', 'invente',
       'imagine', 'crée', 'cree', 'dessine', 'compose',
@@ -1498,6 +1546,22 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
       'explique-moi', 'explique comment', 'pourquoi le',
       'qu\'en penses-tu', 'ton avis', 'selon toi',
       'story', 'poème', 'poeme', 'chanson', 'blague',
+      // EN
+      'write a', 'compose a', 'imagine', 'create a', 'draw',
+      'code a', 'program', 'function', 'what do you think',
+      'your opinion', 'story', 'poem', 'song', 'joke',
+      // ES
+      'escribe', 'redacta', 'imagina', 'crea', 'dibuja',
+      'programa', 'función', 'qué opinas', 'poema', 'canción',
+      // DE
+      'schreibe', 'erfinde', 'erstelle', 'zeichne',
+      'programmiere', 'funktion', 'was denkst du', 'gedicht',
+      // IT
+      'scrivi', 'inventa', 'immagina', 'crea', 'disegna',
+      'programma', 'funzione', 'cosa pensi', 'poesia',
+      // PT
+      'escreve', 'inventa', 'imagina', 'cria', 'desenha',
+      'programa', 'função', 'o que achas', 'poema',
     ];
     // Si le message contient un mot-clé exclusif, pas de recherche
     if (excludeWords.any((w) => lower.contains(w))) return false;
@@ -1536,59 +1600,22 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
 
   /// Classify search intent from user message.
   /// Returns 'products', 'flights', 'hotels', 'weather', or 'general'.
+  /// Kept as static for test backward compatibility; delegates to LanguageService.
   static String classifySearchIntent(String message) {
-    final lower = message.toLowerCase();
-
-    // Weather patterns
-    if (lower.contains('météo') || lower.contains('meteo') ||
-        lower.contains('pleuvoir') || lower.contains('température') ||
-        lower.contains('temperature') || lower.contains('quel temps') ||
-        lower.contains('pluie') || lower.contains('temps fait') ||
-        lower.contains('prévisions') || lower.contains('previsions')) {
-      return 'weather';
-    }
-
-    // Flight patterns
-    if (lower.contains('billet') || lower.contains('vol ') ||
-        lower.contains('vols ') || lower.contains('avion') ||
-        lower.contains('aller-retour') || lower.contains('aller retour') ||
-        (lower.contains('direct') &&
-            (lower.contains('paris') || lower.contains('vol')))) {
-      return 'flights';
-    }
-
-    // Hotel patterns
-    if (lower.contains('hotel') || lower.contains('hôtel') ||
-        lower.contains('airbnb') || lower.contains('logement') ||
-        lower.contains('booking') || lower.contains('nuit ') ||
-        lower.contains('nuits ') || lower.contains('séjour') ||
-        lower.contains('sejour') || lower.contains('réservation') ||
-        lower.contains('reservation') || lower.contains('hebergement') ||
-        lower.contains('hébergement')) {
-      return 'hotels';
-    }
-
-    // Product patterns
-    if (lower.contains('moins cher') || lower.contains('meilleur prix') ||
-        lower.contains('acheter') || lower.contains('trouve le') ||
-        lower.contains('trouve moi') || lower.contains('cherche le') ||
-        lower.contains('cherche moi') || lower.contains('prix le plus bas') ||
-        lower.contains('comparer') || lower.contains('le moins cher')) {
-      return 'products';
-    }
-
-    return 'general';
+    return lang.classifySearchIntent(message, lang.AppLanguage.fr);
   }
 
   /// Execute enhanced search and return formatted markdown.
   Future<String?> _performEnhancedSearch(
-      String message, String intent, String searchQuery) async {
+      String message, String intent, String searchQuery, lang.AppLanguage language) async {
     switch (intent) {
       case 'products':
         final service = ref.read(enhancedSearchServiceProvider);
-        var products = await service.searchProducts(searchQuery);
+        var products = await service.searchProducts(searchQuery,
+            hl: language.serpApiHl, gl: language.serpApiGl);
         if (products.isEmpty) {
-          products = await service.searchGoogleShopping(searchQuery);
+          products = await service.searchGoogleShopping(searchQuery,
+              hl: language.serpApiHl, gl: language.serpApiGl);
         }
         if (products.isNotEmpty) {
           return EnhancedSearchService.formatProducts(products, searchQuery);
@@ -1604,6 +1631,8 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
           to: parsed['to']!,
           departDate: parsed['departDate']!,
           returnDate: parsed['returnDate'],
+          hl: language.serpApiHl,
+          gl: language.serpApiGl,
         );
         if (flights.isNotEmpty) {
           return EnhancedSearchService.formatFlights(flights);
@@ -1612,7 +1641,8 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
 
       case 'hotels':
         final service = ref.read(enhancedSearchServiceProvider);
-        final hotels = await service.searchHotels(searchQuery);
+        final hotels = await service.searchHotels(searchQuery,
+            hl: language.serpApiHl, gl: language.serpApiGl);
         if (hotels.isNotEmpty) {
           return EnhancedSearchService.formatHotels(hotels, searchQuery);
         }
@@ -1625,9 +1655,9 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
         final zip = extractZipCode(message);
 
         if (city != null) {
-          weather = await weatherService.getCurrentWeather(city: city);
+          weather = await weatherService.getCurrentWeather(city: city, lang: language.owmLang);
         } else if (zip != null) {
-          weather = await weatherService.getCurrentWeather(postalCode: zip);
+          weather = await weatherService.getCurrentWeather(postalCode: zip, lang: language.owmLang);
         } else {
           final locationService = ref.read(locationServiceProvider);
           final location = await locationService.getCurrentLocation();
@@ -1635,6 +1665,7 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
             weather = await weatherService.getCurrentWeather(
               lat: location.latitude,
               lon: location.longitude,
+              lang: language.owmLang,
             );
           }
         }
@@ -1652,11 +1683,52 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
   // ── Flight/Weather parameter parsers ──────────────────────────────────────
 
   /// Parse flight search parameters from natural language.
+  /// Handles: "Paris-Zagreb du 29 mai au 2 juin",
+  /// "vol Paris-Zagreb du 29/05 au 02/06",
+  /// "billet avion Paris Zagreb 15 juin", etc.
   static Map<String, String>? parseFlightParams(String message) {
-    // Case-sensitive city pattern (must start with uppercase)
+    // Try original message first (handles properly capitalized input)
+    var result = _tryParseFlightParams(message);
+    if (result != null) return result;
+
+    // Fallback: clean stop words + capitalize for lowercase queries
+    final cleaned = _sanitizeFlightQuery(message);
+    final capitalized = cleaned.replaceAllMapped(
+      RegExp(r'\b([a-zà-ÿ])'),
+      (m) => m.group(1)!.toUpperCase(),
+    );
+    if (capitalized != cleaned) {
+      return _tryParseFlightParams(capitalized);
+    }
+    return null;
+  }
+
+  /// Remove common flight-related stop words that interfere with city extraction.
+  static String _sanitizeFlightQuery(String msg) {
+    const stopWords = [
+      'vol', 'vols', 'billet', 'billets', 'avion', 'avions',
+      'aller', 'retour', 'direct', 'directs', 'cher', 'chers',
+      'moins', 'trouver', 'trouve', 'cherche', 'chercher',
+      'recherche', 'rechercher', 'depart', 'arrivee', 'reservation',
+      'reserver', 'partir', 'pour', 'via', 'avec', 'sur',
+      'flight', 'flights', 'ticket', 'tickets', 'cheap', 'find',
+      'search', 'one', 'way', 'round', 'trip', 'from', 'and',
+      'pas', 'les', 'des', 'une', 'mon', 'mes', 'ton', 'tes',
+      'son', 'ses', 'notre', 'nos', 'votre', 'vos', 'leur', 'leurs',
+      'quel', 'quels', 'quelle', 'quelles', 'est', 'sont',
+      'me', 'le', 'la', 'du', 'de', 'au', 'aux',
+    ];
+    var cleaned = msg;
+    for (final w in stopWords) {
+      cleaned = cleaned.replaceAll(RegExp('\\b$w\\b', caseSensitive: false), ' ');
+    }
+    // Collapse multiple spaces
+    return cleaned.replaceAll(RegExp(r'\s+'), ' ').trim();
+  }
+
+  static Map<String, String>? _tryParseFlightParams(String message) {
     const cityName = r'[A-ZÀ-Ÿ][a-zà-ÿ]+(?:\s[A-ZÀ-Ÿ][a-zà-ÿ]+)?';
     const numericDate = r'\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4}';
-    // Longer month names first, handle case via character classes
     const months =
         r'[Jj]anvier|[Ff]évrier|[Ff]evrier|[Mm]ars|[Aa]vril|[Mm]ai|'
         r'[Jj]uillet|[Jj]uin|[Aa]oût|[Aa]out|[Ss]eptembre|[Oo]ctobre|'
@@ -1665,59 +1737,102 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
         r'[Jj]uly|[Jj]une|[Aa]ugust|[Ss]eptember|[Oo]ctober|'
         r'[Nn]ovember|[Dd]ecember';
 
-    // Pattern 1: "City1-City2 du date1 au date2"
-    final routeDate = RegExp(
-      '($cityName)\\s*[-àa]\\s*($cityName)\\s+'
-      '(?:d[ue]|le|pour le)\\s+($numericDate)'
-      '(?:\\s+(?:au|au retour le)\\s+($numericDate))?',
-    );
-    final match1 = routeDate.firstMatch(message);
-    if (match1 != null) {
-      return {
-        'from': match1.group(1)!.trim(),
-        'to': match1.group(2)!.trim(),
-        'departDate': normalizeDate(match1.group(3)!),
-        if (match1.group(4) != null)
-          'returnDate': normalizeDate(match1.group(4)!),
-      };
-    }
-
-    // Pattern 2: "vol direct City1 City2 day month year"
-    final directVol = RegExp(
-      '(?:[Vv]ol|[Bb]illet)\\s+(?:\\w+\\s+)*(?:de\\s+)?'
-      '($cityName)\\s+'
-      '(?:à|vers|pour|-)?\\s*($cityName)\\s+'
-      '(?:le\\s+)?(\\d{1,2})\\s+'
+    // Pattern A: "City1-City2 du DD mois au DD mois" (hyphen, text dates)
+    // Matches: "Paris-Zagreb du 29 mai au 2 juin"
+    final hyphenTextDates = RegExp(
+      '($cityName)\\s*-\\s*($cityName)\\b'
+      r'.{0,30}?'
+      r'(?:d[ue]|le|départ\s+le)\s+(\d{1,2})\s+'
       '($months)'
-      '(?:\\s+(\\d{4}))?',
+      r'(?:\s*(?:au|retour(?:\s+le)?)\s+(\d{1,2})\s+(' + months + r'))?',
     );
-    final match2 = directVol.firstMatch(message);
-    if (match2 != null) {
-      final day = match2.group(3)!;
-      final monthName = match2.group(4)!;
-      final year = match2.group(5) ?? DateTime.now().year.toString();
-      final month = parseMonth(monthName);
-      final dateStr =
-          '$year-${month.toString().padLeft(2, '0')}-${int.parse(day).toString().padLeft(2, '0')}';
+    final matchA = hyphenTextDates.firstMatch(message);
+    if (matchA != null) {
+      final d1 = int.parse(matchA.group(3)!);
+      final m1 = lang.parseMonth(matchA.group(4)!);
+      final y = DateTime.now().year;
+      final departDate =
+          '$y-${m1.toString().padLeft(2, '0')}-${d1.toString().padLeft(2, '0')}';
+      String? returnDate;
+      if (matchA.group(5) != null) {
+        final d2 = int.parse(matchA.group(5)!);
+        final m2 = lang.parseMonth(matchA.group(6)!);
+        returnDate =
+            '$y-${m2.toString().padLeft(2, '0')}-${d2.toString().padLeft(2, '0')}';
+      }
       return {
-        'from': match2.group(1)!.trim(),
-        'to': match2.group(2)!.trim(),
-        'departDate': dateStr,
+        'from': matchA.group(1)!.trim(),
+        'to': matchA.group(2)!.trim(),
+        'departDate': departDate,
+        if (returnDate != null) 'returnDate': returnDate,
       };
     }
 
-    // Pattern 3: Compact "City1 City2 YYYY-MM-DD"
+    // Pattern B: "City1-City2 du date1 au date2" (hyphen, numeric dates)
+    // Matches: "Paris-Zagreb du 29/05/2026 au 02/06/2026"
+    final hyphenNumDates = RegExp(
+      '($cityName)\\s*-\\s*($cityName)\\b'
+      r'.{0,20}?'
+      '(?:d[ue]|le)\\s+(' + numericDate + r')'
+      r'(?:\s+(?:au|retour)\s+(' + numericDate + r'))?',
+    );
+    final matchB = hyphenNumDates.firstMatch(message);
+    if (matchB != null) {
+      return {
+        'from': matchB.group(1)!.trim(),
+        'to': matchB.group(2)!.trim(),
+        'departDate': normalizeDate(matchB.group(3)!),
+        if (matchB.group(4) != null)
+          'returnDate': normalizeDate(matchB.group(4)!),
+      };
+    }
+
+    // Pattern C: "City1 City2 du DD mois au DD mois" (space/separator, text dates)
+    // Matches: "vol Paris Zagreb du 29 mai au 2 juin", "vol direct Paris Zagreb 29 mai 2026"
+    final spaceTextDates = RegExp(
+      '($cityName)\\s+'
+      r'(?:à|vers|pour|-)?\s*'
+      '($cityName)\\b'
+      r'.{0,30}?'
+      r'(?:d[ue]|le\s+)?(\d{1,2})\s+'
+      '($months)'
+      r'(?:\s*(?:au|retour)\s+(\d{1,2})\s+(' + months + r'))?',
+    );
+    final matchC = spaceTextDates.firstMatch(message);
+    if (matchC != null) {
+      final d1 = int.parse(matchC.group(3)!);
+      final m1 = lang.parseMonth(matchC.group(4)!);
+      final y = DateTime.now().year;
+      final departDate =
+          '$y-${m1.toString().padLeft(2, '0')}-${d1.toString().padLeft(2, '0')}';
+      String? returnDate;
+      if (matchC.group(5) != null) {
+        final d2 = int.parse(matchC.group(5)!);
+        final m2 = lang.parseMonth(matchC.group(6)!);
+        returnDate =
+            '$y-${m2.toString().padLeft(2, '0')}-${d2.toString().padLeft(2, '0')}';
+      }
+      return {
+        'from': matchC.group(1)!.trim(),
+        'to': matchC.group(2)!.trim(),
+        'departDate': departDate,
+        if (returnDate != null) 'returnDate': returnDate,
+      };
+    }
+
+    // Pattern D: "City1 City2 numericDate" — compact with numeric date
     final compact = RegExp(
       '(?:de\\s+)?($cityName)\\s+'
-      '(?:à|vers|pour|-)?\\s*($cityName)',
+      r'(?:à|vers|pour|-)?\s*'
+      '($cityName)',
     );
-    final match3 = compact.firstMatch(message);
+    final matchD = compact.firstMatch(message);
     final dateFinder = RegExp('($numericDate)');
     final dateMatch = dateFinder.firstMatch(message);
-    if (match3 != null && dateMatch != null) {
+    if (matchD != null && dateMatch != null) {
       return {
-        'from': match3.group(1)!.trim(),
-        'to': match3.group(2)!.trim(),
+        'from': matchD.group(1)!.trim(),
+        'to': matchD.group(2)!.trim(),
         'departDate': normalizeDate(dateMatch.group(1)!),
       };
     }
@@ -1727,16 +1842,28 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
 
   /// Extract city name from weather-related message.
   static String? extractCity(String message) {
-    // Pattern: "météo Paris", "temps à Lyon", "pleuvoir à Marseille"
+    var result = _tryExtractCity(message);
+    if (result != null) return result;
+
+    // Fallback: capitalize first letter of each word for lowercase queries
+    final capitalized = message.replaceAllMapped(
+      RegExp(r'\b([a-zà-ÿ])'),
+      (m) => m.group(1)!.toUpperCase(),
+    );
+    if (capitalized != message) {
+      return _tryExtractCity(capitalized);
+    }
+    return null;
+  }
+
+  static String? _tryExtractCity(String message) {
+    // Pattern: "météo Paris", "temps à Lyon", "weather in London", etc.
+    const city = r'([A-ZÀ-Ÿ][a-zà-ÿ]+(?:\s[A-ZÀ-Ÿ][a-zà-ÿ]+)?)';
     final patterns = [
-      RegExp(r'(?:météo|meteo|temps|pleuvoir|température|temperature)\s+(?:à|de|pour|sur)\s+'
-          r'([A-ZÀ-Ÿ][a-zà-ÿ]+(?:\s[A-ZÀ-Ÿ][a-zà-ÿ]+)?)'),
-      RegExp(r'(?:météo|meteo|temps|pleuvoir|température|temperature)\s+'
-          r'([A-ZÀ-Ÿ][a-zà-ÿ]+)'),
-      RegExp(r'(?:fait-il|fera-t-il)\s+(?:à|de|pour|sur)\s+'
-          r'([A-ZÀ-Ÿ][a-zà-ÿ]+(?:\s[A-ZÀ-Ÿ][a-zà-ÿ]+)?)'),
-      RegExp(r"(?:est-ce qu'il|va-t-il)\s+\w+\s+(?:à|de|pour|sur)\s+"
-          r'([A-ZÀ-Ÿ][a-zà-ÿ]+(?:\s[A-ZÀ-Ÿ][a-zà-ÿ]+)?)'),
+      RegExp(r'(?:météo|meteo|temps|pleuvoir|température|temperature|weather|clima|tempo|wetter)\s+(?:à|de|pour|sur|in|en|a|em|bei)\s+' + city),
+      RegExp(r'(?:météo|meteo|temps|pleuvoir|température|temperature|weather|clima|tempo|wetter)\s+' + city),
+      RegExp(r'(?:fait-il|fera-t-il|how is the weather|como está el clima|wie ist das wetter)\s+(?:à|de|pour|sur|in|en|a|em|bei)\s+' + city),
+      RegExp(r"(?:est-ce qu'il|va-t-il)\s+\w+\s+(?:à|de|pour|sur|in|en|a|em|bei)\s+" + city),
     ];
 
     for (final pattern in patterns) {
@@ -1771,15 +1898,7 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
   }
 
   static int parseMonth(String name) {
-    const months = {
-      'janvier': 1, 'février': 2, 'fevrier': 2, 'mars': 3, 'avril': 4,
-      'mai': 5, 'may': 5, 'juin': 6, 'june': 6, 'juillet': 7, 'july': 7,
-      'août': 8, 'aout': 8, 'august': 8, 'septembre': 9, 'september': 9,
-      'octobre': 10, 'october': 10, 'novembre': 11, 'november': 11,
-      'décembre': 12, 'decembre': 12, 'december': 12,
-      'january': 1, 'february': 2, 'march': 3, 'april': 4,
-    };
-    return months[name.toLowerCase()] ?? 1;
+    return lang.parseMonth(name);
   }
 
   /// Charge plus de messages dans l'historique (UI pagination).

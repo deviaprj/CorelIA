@@ -207,7 +207,7 @@ flutter build web --dart-define=DEEPSEEK_API_KEY=sk-xxx --dart-define=OPENROUTER
 - `_pendingTranscript` protège contre les doublons de callback
 
 **TTS** (`lib/features/chat/presentation/tts_natural_service.dart`):
-- `flutter_tts` natif, vitesse par défaut : 0.65
+- `flutter_tts` natif, vitesse par défaut : 0.50, pitch 1.10
 - Nettoyage markdown : strip URLs, citations `[n]`, emojis, formatting
 - `speakNaturally()` : nettoye → lit → attend la fin via `Completer`
 
@@ -264,6 +264,48 @@ flutter build web --dart-define=DEEPSEEK_API_KEY=sk-xxx --dart-define=OPENROUTER
 - LRU cache avec clés SHA-256, TTL 15 min
 - Sauvegardé en SharedPreferences
 
+## Enhanced Search (Recherche Enrichie)
+
+**Architecture 3 niveaux** (`lib/features/chat/data/enhanced_search_service.dart`):
+1. API dédiée (SerpAPI, OpenWeatherMap) si clé disponible
+2. DuckDuckGo HTML scraping avec décodage URLs de redirection (`_decodeDdgUrl()`)
+3. Liens directs toujours générés (Skyscanner, Google Flights, Kayak, Opodo, Booking, Airbnb)
+
+**Types de recherche supportés** :
+- **Vols** (`searchFlights()`) : extraction ville départ/arrivée + dates via `parseFlightParams()`
+- **Hôtels** (`searchHotels()`) : extraction ville + dates check-in/check-out
+- **Produits** (`searchProducts()`) : shopping via DuckDuckGo + Google Shopping lien direct
+- **Météo** (`searchWeather()`) : géocodage ville → prévisions 5 jours
+
+**Extraction de paramètres** (`chat_notifier.dart`):
+- `parseFlightParams()` : 2-stage parsing (original → sanitize stop words → capitalize → retry)
+- 4 patterns (A/B/C/D) : hyphenated/space-separated cities, text/numeric dates
+- `_sanitizeFlightQuery()` : 45 stop words filtrés (vol, billet, avion, aller, retour, etc.)
+- **ATTENTION** : raw strings Dart (`r'...'`) n'interpolent PAS les variables → utiliser concaténation
+
+**Injection contexte IA** (`_buildStream()`):
+- `enhancedContext` passé comme paramètre, injecté comme message système AVANT l'historique
+- Instruction explicite : "Ne dis JAMAIS que tu n'as pas accès aux systèmes de réservation"
+- Pattern à suivre pour tout nouveau type : intent → extraction params → fallback → injection → markdown
+
+## Multilingue
+
+**LanguageService** (`lib/core/language/language_service.dart`):
+- 6 langues : FR, EN, ES, DE, IT, PT
+- `classifySearchIntent()` : patterns multilingues pour vols, hôtels, produits, météo
+- `parseMonth()` : noms de mois dans les 6 langues
+- Paramètres API localisés : OWM `lang`, SerpAPI `hl`/`gl`
+
+**Interface utilisateur** :
+- Sélecteur de langue dans `SettingsScreen` (DropdownButton)
+- `toNaturalLanguage()` dans `slash_commands.dart` délègue à `LanguageService`
+
+## Chat UI — Liens cliquables
+
+**MarkdownBody** (`lib/features/chat/presentation/chat_bubble.dart`):
+- `onTapLink` callback → `canLaunchUrl()` → `launchUrl(mode: externalApplication)`
+- Les URLs dans les réponses IA sont cliquables directement
+
 ## Chrome Extension Specifics
 
 **Build Process** (`scripts/build_extension.sh`):
@@ -298,9 +340,11 @@ flutter build web --dart-define=DEEPSEEK_API_KEY=sk-xxx --dart-define=OPENROUTER
 **Limitations actuelles de l'extension** :
 - Pas de pont TTS audio (speech_bridge.js gère STT + TTS basique via Web Speech API)
 - Pas de document offscreen pour audio playback en Manifest V3
+- Micro non détecté en mode vocal : permission `audioCapture` à vérifier
 - `content_script.js` ne fait que capturer la sélection de texte
-- Pas de résumé de page, pas d'extraction média, pas d'autofill
-- Les commandes slash (/download, /pdf, /links, /summarize, /extract, /scroll, /open, /click, /fill, /screenshot, /back, /forward) ne fonctionnent PAS sur l'extension — l'ExtensionBridge.executeAction() envoie l'action au background.js mais le résultat ne revient pas au chat. Le système de BrowserActions côté JS ne retourne pas de réponse au callback Dart.
+- [x] Commandes slash : 24 commandes fonctionnelles via extension_bridge.js → background.js → dom_actions.js (corrigé session V8)
+- [x] Résumé de page : SUMMARIZE_PAGE action implémentée
+- [x] Navigation : OPEN_URL, NAVIGATE_BACK/FORWARD, SCROLL fonctionnels
 
 **Riverpod pitfalls (important)**:
 - **Ne PAS modifier `state` dans un `Notifier.build()`** — Riverpod interdit la modification de `state` pendant la construction. Retourner directement l'état initial au lieu de `state = state.copyWith(...)`.
@@ -355,5 +399,13 @@ flutter build web --dart-define=DEEPSEEK_API_KEY=sk-xxx --dart-define=OPENROUTER
 - [ ] Pas de support HEIC/HEIF pour les images
 - [ ] Extension Chrome : pas de TTS audio, pas de résumé de page, pas d'extraction média
 - [x] Interruption vocale (barge-in) pendant le TTS (500ms anti-echo)
-- [ ] Extension Chrome : commandes slash (/download, /links, etc.) ne fonctionnent pas — BrowserActions ne retourne pas de résultat au callback Dart
+- [x] Extension Chrome : commandes slash (/download, /links, etc.) fonctionnent — corrigé session V8
+- [x] Recherche enrichie : vols, hôtels, produits, météo fonctionnels sans clés API — fallback DuckDuckGo + liens directs
+- [x] Intégration multilingue : 6 langues, patterns de recherche localisés, noms de mois traduits
+- [x] Liens cliquables dans le chat : `onTapLink` → `url_launcher`
+- [x] TTS vitesse : 0.65 → 0.50
+- [x] Bug extension : `sender is not defined` dans background.js
 - [ ] Pas de synchronisation temps réel des préférences entre mobile et extension
+- [ ] Généralisation parsing paramètres : concerts, musées, restaurants, locations, forfaits (au-delà des vols)
+- [ ] Mapping codes IATA pour recherches de vols (meilleure compatibilité comparateurs)
+- [ ] Extension Chrome : microphone en mode vocal

@@ -46,7 +46,9 @@
     "https://api.deepseek.com/*",
     "https://openrouter.ai/*",
     "https://*.firebaseio.com/*",
-    "https://*.googleapis.com/*"
+    "https://*.googleapis.com/*",
+    "https://serpapi.com/*",
+    "https://api.openweathermap.org/*"
   ],
 
   "content_security_policy": {

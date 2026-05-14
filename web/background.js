@@ -58,7 +58,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
   // ── Browser actions ──────────────────────────────────────────────────────
   if (message.type === 'BROWSER_ACTION') {
-    handleBrowserAction(message, sender, sendResponse);
+    handleBrowserAction(message, _sender, sendResponse);
     return true; // Keep channel open for async response
   }
 

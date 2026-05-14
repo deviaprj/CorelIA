@@ -1,6 +1,6 @@
 # TASKS.md — Suivi Corely
 
-Dernière mise à jour : 2026-05-14 — Session V8 : Commandes Slash, Docs & Tests
+Dernière mise à jour : 2026-05-14 — Session V9 : Multilingue, Recherche Enrichie & Correctifs UX
 
 ## Terminé (sessions précédentes)
 
@@ -110,3 +110,56 @@ Dernière mise à jour : 2026-05-14 — Session V8 : Commandes Slash, Docs & Tes
 ### 6. RIVERPORD — Vérifier les providers existants
 - [ ] Chercher d'autres `state = state.copyWith(...)` dans des méthodes `build()` qui pourraient causer des réentrances
 - [ ] Vérifier que tous les `AsyncValue.value!` sont remplacés par `valueOrNull`
+
+---
+
+## Terminé — Session V9 (2026-05-14) — Multilingue, Recherche Enrichie & Correctifs UX
+
+### Intégration multilingue ✅
+- **LanguageService** (`lib/core/language/language_service.dart`) : 6 langues (FR/EN/ES/DE/IT/PT)
+- `classifySearchIntent()` avec patterns multilingues pour vols, hôtels, produits, météo
+- `toNaturalLanguage()` traduit les commandes slash selon la locale
+- `parseMonth()` supporte les noms de mois dans les 6 langues
+- Paramètres API localisés : OWM `lang`, SerpAPI `hl`/`gl`
+- Sélecteur de langue dans `SettingsScreen`
+
+### Correctif critique : parseFlightParams regex non fonctionnelles ✅
+- **Cause** : `$numericDate` et `$months` non interpolés dans les raw strings Dart (`r'...'`)
+- **Fix** : Concaténation de chaînes + fallback de capitalisation pour entrées minuscules
+- **Stop words** : 45 mots filtrés pour éviter extraction de "Avion"/"Aller" comme villes
+
+### Correctif architectural : résultats enrichis injectés dans le contexte IA ✅
+- **Cause** : Résultats de `_performEnhancedSearch()` jamais transmis à `_buildStream()`
+- **Fix** : Paramètre `enhancedContext` injecté comme message système avant l'historique
+
+### Recherche enrichie sans clé API SerpAPI ✅
+- **Cause** : Pas de `SERPAPI_API_KEY` dans `.env` → `searchFlights()`/`searchHotels()`/`searchProducts()` retournaient `[]`
+- **Fix** : Fallback DuckDuckGo scraping + liens directs toujours générés (Skyscanner, Google Flights, Kayak, Opodo, Booking.com, Airbnb)
+
+### Liens cliquables dans le chat ✅
+- Ajout `onTapLink` sur le `MarkdownBody` → ouvre les URLs via `url_launcher`
+
+### Vitesse TTS réduite ✅
+- `_speechRate` : 0.65 → 0.50 (plus lent, reste dynamique avec pitch 1.10)
+
+### Bug extension : `sender is not defined` ✅
+- `background.js:61` : `sender` → `_sender`
+
+---
+
+## Backlog (sessions futures)
+
+### 7. PARSING PARAMÈTRES — Généralisation pour tous types de services/biens
+- [ ] **Généraliser l'extraction de paramètres** au-delà des vols : concerts, musées, restaurants, locations vacances, forfaits voyage, etc.
+- [ ] **Mapping codes IATA** pour les recherches de vols (les comparateurs fonctionnent mieux avec PAR/BEG qu'avec "Paris"/"Belgrade")
+- [ ] **Normalisation des dates** : Kayak a retourné des dates décalées de 2 jours (13-20 juin au lieu de 15-22)
+- [ ] **Pattern unifié** : extraire type de recherche → paramètres → fallback sans API → injection contexte IA → formatage markdown
+
+### 8. EXTENSION CHROME — Microphone
+- [ ] Micro non détecté en mode vocal : vérifier permission `audioCapture`, améliorer UX de demande de permission
+- [ ] Tests cross-browser (Firefox, Edge, Brave)
+
+### 9. QUALITÉ
+- [ ] Tests d'intégration extension Chrome (build + load + test flux complet)
+- [ ] Audit sécurité : clés API non exposées dans l'APK/extension
+- [ ] Performance : profiler temps de démarrage cold/warm

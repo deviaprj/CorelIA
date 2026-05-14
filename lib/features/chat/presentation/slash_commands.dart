@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../core/language/language_service.dart' as lang;
 
 /// Définition d'une commande slash.
 class SlashCommand {
@@ -236,83 +237,8 @@ class ParsedSlashCommand {
   String get fullText => '/${command.name} ${args.join(' ')}'.trim();
 
   /// Traduit la commande en langage naturel pour affichage dans la conversation.
-  String toNaturalLanguage() {
-    final a = args;
-    switch (command.name) {
-      case 'download':
-        return 'Telecharge ${a.isNotEmpty ? a[0] : 'un fichier'}';
-      case 'links':
-        final filter = a.isNotEmpty ? a[0] : 'all';
-        const labels = {
-          'all': '',
-          'video': ' videos',
-          'image': ' images',
-          'audio': ' audios',
-          'document': ' documents',
-        };
-        final label = labels[filter];
-        if (label != null) return 'Extrais tous les liens$label de la page courante';
-        return 'Extrais tous les liens $filter de la page courante';
-      case 'pdf':
-        return 'Sauvegarde la page en PDF${a.isNotEmpty ? ' (${a[0]})' : ''}';
-      case 'summarize':
-        return 'Resume la page courante';
-      case 'extract':
-        return 'Extrais le contenu${a.isNotEmpty ? ' de ${a[0]}' : ' de la page'}';
-      case 'scroll':
-        return 'Defile ${a.isNotEmpty ? a[0] : 'la page'}${a.length > 1 ? ' de ${a[1]}px' : ''}';
-      case 'open':
-        return 'Ouvre ${a.isNotEmpty ? a[0] : 'un URL'}';
-      case 'click':
-        return 'Clique sur ${a.isNotEmpty ? a[0] : "l'element"}';
-      case 'fill':
-        return 'Remplis ${a.isNotEmpty ? a[0] : 'le champ'} avec ${a.length > 1 ? a[1] : 'la valeur'}';
-      case 'screenshot':
-        return "Capture d'ecran de la page courante";
-      case 'back':
-        return 'Retour a la page precedente';
-      case 'forward':
-        return 'Avance a la page suivante';
-      case 'forms':
-        return 'Liste les formulaires${a.isNotEmpty ? ' (index: ${a[0]})' : ' de la page courante'}';
-      case 'tables':
-        return 'Extrais les tableaux${a.isNotEmpty ? ' (index: ${a[0]})' : ' de la page courante'}';
-      case 'media':
-        final type = a.isNotEmpty ? a[0] : 'tous';
-        const typeLabels = {
-          'images': 'les images',
-          'videos': 'les videos',
-          'audio': 'les audios',
-          'all': 'tous les medias',
-        };
-        return 'Liste ${typeLabels[type] ?? type} de la page courante';
-      case 'metadata':
-        return 'Affiche les metadonnees de la page courante';
-      case 'autofill':
-        return 'Remplis automatiquement le formulaire${a.isNotEmpty ? ' ${a[0]}' : ''}';
-      case 'inspect':
-        return 'Inspecte ${a.isNotEmpty ? a[0] : "l'element"}';
-      case 'highlight':
-        return 'Surligne ${a.isNotEmpty ? a[0] : "l'element"}';
-      case 'waitfor':
-        return 'Attends ${a.isNotEmpty ? a[0] : "l'element"}${a.length > 1 ? ' (timeout: ${a[1]}ms)' : ''}';
-      case 'export':
-        return 'Exporte les donnees${a.isNotEmpty ? ' en ${a[0].toUpperCase()}' : ''}';
-      case 'monitor':
-        return 'Surveille ${a.isNotEmpty ? a[0] : 'la page'}${a.length > 1 ? ' toutes les ${a[1]}s' : ''}';
-      case 'translate':
-        final lang = a.isNotEmpty ? a[0] : 'fr';
-        const langNames = {
-          'fr': 'francais', 'en': 'anglais', 'es': 'espagnol',
-          'de': 'allemand', 'it': 'italien', 'pt': 'portugais',
-          'ja': 'japonais', 'zh': 'chinois', 'ar': 'arabe',
-        };
-        return 'Traduis le contenu en ${langNames[lang] ?? lang}';
-      case 'searchpage':
-        return 'Recherche ${a.isNotEmpty ? '"${a[0]}"' : 'un terme'} dans la page';
-      default:
-        return fullText;
-    }
+  String toNaturalLanguage([lang.AppLanguage language = lang.AppLanguage.fr]) {
+    return lang.toNaturalLanguage(command.name, args, language);
   }
 }
 
