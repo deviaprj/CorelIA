@@ -1,9 +1,9 @@
-import 'dart:convert';
 import 'package:dio/dio.dart';
 import '../../../core/constants.dart';
 import 'search_service.dart';
+import 'iata_codes.dart';
 
-/// Structured product result from Google Shopping.
+/// Structured product result.
 class ProductResult {
   final String title;
   final String price;
@@ -66,20 +66,31 @@ class HotelResult {
   });
 }
 
-/// Enhanced search with support for products, flights, hotels.
-/// Uses SerpAPI for structured results with DuckDuckGo fallback.
+/// Enhanced search service.
+///
+/// Strategy:
+/// 1. SerpAPI for structured data when API key is available
+/// 2. Direct links to comparators/reservation platforms with pre-filled parameters
+///    (no DuckDuckGo scraping — that produces generic results)
+///
+/// Every search method ALWAYS returns direct comparator links as the primary
+/// result, supplemented by SerpAPI data when available.
 class EnhancedSearchService {
   final Dio _dio;
 
-  EnhancedSearchService() : _dio = Dio();
+  EnhancedSearchService() : _dio = Dio(BaseOptions(
+    connectTimeout: const Duration(seconds: 8),
+    receiveTimeout: const Duration(seconds: 10),
+  ));
 
   String? get _serpApiKey => AppConstants.serpApiKey;
 
   // ── Helpers ─────────────────────────────────────────────────────────────
 
-  static String _s(dynamic v, [String def = '']) => (v as String?) ?? def;
+  static String _s(dynamic v, [String def = '']) =>
+      (v is String && v.isNotEmpty) ? v : def;
 
-  static String? _ns(dynamic v) => v as String?;
+  static String? _ns(dynamic v) => (v is String && v.isNotEmpty) ? v : null;
 
   static List<Map<String, dynamic>> _list(dynamic data, String key) {
     final raw = data[key];
@@ -87,13 +98,65 @@ class EnhancedSearchService {
     return [];
   }
 
-  // ── Structured Google Shopping search ───────────────────────────────────
+  /// Format date: yyyy-MM-dd → yyMMdd (Skyscanner)
+  static String _toSkyDate(String yyyyMmDd) {
+    final d = yyyyMmDd.replaceAll(RegExp(r'[/.-]'), '-');
+    final parts = d.split('-');
+    if (parts.length == 3) {
+      return '${parts[0].substring(2)}${parts[1]}${parts[2]}';
+    }
+    return d;
+  }
+
+  /// Format date: yyyy-MM-dd → DD/MM/YYYY (Expedia)
+  static String _toExpediaDate(String yyyyMmDd) {
+    final parts = yyyyMmDd.split('-');
+    if (parts.length == 3) return '${parts[2]}/${parts[1]}/${parts[0]}';
+    return yyyyMmDd;
+  }
+
+  static double _parseNum(String price) {
+    return double.tryParse(
+        price.replaceAll(RegExp(r'[^\d.,]'), '').replaceAll(',', '.')) ??
+        double.infinity;
+  }
+
+  static String? _extractPrice(String text) {
+    final patterns = [
+      RegExp(r'(\d[\d\s]*[\d.,]*\s?[€$])\s'),
+      RegExp(r'(\d[\d\s]*[\d.,]*\s?(?:EUR|USD|€|\$))'),
+      RegExp(r'prix[:\s]*(\d[\d\s]*[\d.,]*\s?[€$])'),
+      RegExp(r'à partir de (\d[\d\s]*[\d.,]*\s?[€$])'),
+      RegExp(r'dès (\d[\d\s]*[\d.,]*\s?[€$])'),
+    ];
+    for (final pattern in patterns) {
+      final match = pattern.firstMatch(text);
+      if (match != null) return match.group(1)?.trim();
+    }
+    return null;
+  }
+
+  static String _extractDomain(String url) {
+    try {
+      return Uri.parse(url).host.replaceAll('www.', '');
+    } catch (_) {
+      return url;
+    }
+  }
+
+  static String _escapeMd(String text) {
+    return text
+        .replaceAll('|', '\\|')
+        .replaceAll('[', '\\[')
+        .replaceAll(']', '\\]');
+  }
+
+  // ── Products ────────────────────────────────────────────────────────────
 
   Future<List<ProductResult>> searchProducts(String query,
       {String hl = 'fr', String gl = 'fr'}) async {
     final results = <ProductResult>[];
 
-    // Try SerpAPI Google Shopping if key is available
     final key = _serpApiKey;
     if (key != null && key.isNotEmpty) {
       try {
@@ -106,68 +169,55 @@ class EnhancedSearchService {
               'hl': hl,
               'num': 10,
             });
-
         if (resp.statusCode == 200) {
           final shopping = _list(resp.data, 'shopping_results');
           results.addAll(shopping.take(10).map((r) => ProductResult(
                 title: _s(r['title']),
-                price:
-                    _s(r['price'], _s(r['extracted_price']?.toString())),
+                price: _s(r['price'], _s(r['extracted_price']?.toString())),
                 oldPrice: _ns(r['old_price']),
                 source: _s(r['source']),
                 link: _s(r['link'], _s(r['product_link'])),
                 imageUrl: _ns(r['thumbnail']),
               )));
         }
-      } catch (_) {
-        // SerpAPI failed, continue with fallback
-      }
+      } catch (_) {}
     }
 
-    // DuckDuckGo fallback
-    if (results.isEmpty) {
-      try {
-        final ddgResp = await _dio.get('https://lite.duckduckgo.com/lite/',
-            queryParameters: {'q': '$query prix achat'});
-        if (ddgResp.statusCode == 200) {
-          final html = ddgResp.data as String;
-          final linkReg = RegExp(
-              r'<a[^>]*href="((?:https?:)?//[^"]+)"[^>]*>(.*?)</a>',
-              dotAll: true);
-          final priceReg = RegExp(r'(\d[\d\s]*[€$]\d*)');
-          final matches = linkReg.allMatches(html);
-          for (final m in matches.take(10)) {
-            final rawUrl = m.group(1)!;
-            final url = _decodeDdgUrl(rawUrl);
-            final title = m.group(2)!.replaceAll(RegExp(r'<[^>]+>'), '');
-            final priceMatch = priceReg.firstMatch(m.group(0) ?? '');
-            final domain = _extractDomain(url);
-            if (!domain.contains('duckduckgo')) {
-              results.add(ProductResult(
-                title: title,
-                price: priceMatch?.group(1) ?? 'Voir prix',
-                source: domain,
-                link: url,
-              ));
-            }
-          }
-        }
-      } catch (_) {
-        // DuckDuckGo fallback failed
-      }
+    // Always add direct links to major shopping platforms
+    final q = Uri.encodeComponent(query);
+    if (!results.any((r) => r.source.contains('Google Shopping'))) {
+      results.add(ProductResult(
+        title: 'Rechercher sur Google Shopping',
+        price: 'Rechercher',
+        source: 'Google Shopping',
+        link: 'https://www.google.com/search?tbm=shop&q=$q',
+      ));
     }
+    results.add(ProductResult(
+        title: 'Rechercher sur Amazon',
+        price: 'Rechercher',
+        source: 'Amazon',
+        link: 'https://www.amazon.fr/s?k=$q'));
+    results.add(ProductResult(
+        title: 'Rechercher sur Fnac',
+        price: 'Rechercher',
+        source: 'Fnac',
+        link: 'https://www.fnac.com/SearchResult/ResultList.aspx?Search=$q'));
+    results.add(ProductResult(
+        title: 'Rechercher sur Darty',
+        price: 'Rechercher',
+        source: 'Darty',
+        link: 'https://www.darty.com/nav/extra/list?s=$q'));
 
     return results;
   }
 
-  /// Search products via regular Google with shopping intent.
   Future<List<ProductResult>> searchGoogleShopping(String query,
       {String hl = 'fr', String gl = 'fr'}) async {
-    // Delegates to searchProducts which now has DuckDuckGo fallback
     return searchProducts(query, hl: hl, gl: gl);
   }
 
-  // ── Flight search ────────────────────────────────────────────────────────
+  // ── Flights ─────────────────────────────────────────────────────────────
 
   Future<List<FlightResult>> searchFlights({
     required String from,
@@ -179,239 +229,653 @@ class EnhancedSearchService {
   }) async {
     final results = <FlightResult>[];
 
-    // Try SerpAPI if key is available
+    final fromCode = resolveIataCode(from) ?? from;
+    final toCode = resolveIataCode(to) ?? to;
+    final fromIata = fromCode.toUpperCase();
+    final toIata = toCode.toUpperCase();
+    final depart = departDate; // yyyy-MM-dd
+    final retour = returnDate; // yyyy-MM-dd or null
+
+    // ── Tier 1: SerpAPI Google Flights ──
     final key = _serpApiKey;
     if (key != null && key.isNotEmpty) {
       try {
-        final query =
-            'vol direct $from $to $departDate${returnDate != null ? ' retour $returnDate' : ''} pas cher';
-        final resp = await _dio.get('https://serpapi.com/search',
-            queryParameters: {
-              'engine': 'google',
-              'q': query,
-              'api_key': key,
-              'gl': gl,
-              'hl': hl,
-              'num': 15,
-            });
+        final params = {
+          'engine': 'google_flights',
+          'departure_id': fromIata,
+          'arrival_id': toIata,
+          'outbound_date': depart,
+          'api_key': key,
+          'gl': gl,
+          'hl': hl,
+          'currency': 'EUR',
+        };
+        if (retour != null) params['return_date'] = retour;
 
+        final resp = await _dio.get(
+            'https://serpapi.com/search', queryParameters: params);
         if (resp.statusCode == 200) {
-          final organic = _list(resp.data, 'organic_results');
-          for (final r in organic) {
-            final snippet = _s(r['snippet']);
-            final price = _extractPrice(snippet);
-            final link = _s(r['link']);
-            if (price != null &&
-                (snippet.contains('€') ||
-                    snippet.contains('EUR') ||
-                    snippet.contains('vol'))) {
-              results.add(FlightResult(
-                departure: from,
-                arrival: to,
-                date: departDate,
-                price: price,
-                airline: _s(r['title']),
-                stops: snippet.contains('escale') || snippet.contains('stop')
-                    ? 1
-                    : 0,
-                link: link,
-                source: _extractDomain(link),
-              ));
-            }
-          }
-          results.sort((a, b) {
-            final pa = double.tryParse(
-                    a.price.replaceAll(RegExp(r'[^\d.]'), '')) ??
-                double.infinity;
-            final pb = double.tryParse(
-                    b.price.replaceAll(RegExp(r'[^\d.]'), '')) ??
-                double.infinity;
-            return pa.compareTo(pb);
-          });
-        }
-      } catch (_) {
-        // SerpAPI failed, continue with fallback
-      }
-    }
+          final bestFlights = _list(resp.data, 'best_flights');
+          final otherFlights = _list(resp.data, 'other_flights');
+          for (final f in [...bestFlights, ...otherFlights].take(12)) {
+            final flights = _list(f, 'flights');
+            final firstLeg = flights.isNotEmpty ? flights.first : null;
+            final lastLeg = flights.isNotEmpty ? flights.last : null;
+            final airline = firstLeg != null
+                ? _s(firstLeg['airline'])
+                : _s(f['airline']);
+            final depAirport = firstLeg != null
+                ? _s(firstLeg['departure_airport']?['name'])
+                : from;
+            final arrAirport = lastLeg != null
+                ? _s(lastLeg['arrival_airport']?['name'])
+                : to;
 
-    // DuckDuckGo fallback — always try for additional results
-    try {
-      final ddgQuery =
-          'vol $from $to $departDate${returnDate != null ? ' retour $returnDate' : ''} billet avion prix';
-      final ddgResp = await _dio.get('https://lite.duckduckgo.com/lite/',
-          queryParameters: {'q': ddgQuery});
-      if (ddgResp.statusCode == 200) {
-        final html = ddgResp.data as String;
-        final linkReg = RegExp(
-            r'<a[^>]*href="((?:https?:)?//[^"]+)"[^>]*>(.*?)</a>',
-            dotAll: true);
-        final priceReg = RegExp(r'(\d[\d\s]*[€$]\d*)');
-        final matches = linkReg.allMatches(html);
-        for (final m in matches.take(10)) {
-          final url = m.group(1)!;
-          final title = m.group(2)!.replaceAll(RegExp(r'<[^>]+>'), '');
-          final priceMatch =
-              priceReg.firstMatch(m.group(0) ?? '');
-          final domain = _extractDomain(url);
-          final decodedUrl = _decodeDdgUrl(url);
-          if (!results.any((r) => r.link == decodedUrl) &&
-              !domain.contains('duckduckgo')) {
             results.add(FlightResult(
-              departure: from,
-              arrival: to,
-              date: departDate,
-              price: priceMatch?.group(1) ?? 'Voir prix',
-              airline: title,
-              link: decodedUrl,
-              source: _extractDomain(decodedUrl),
+              departure: depAirport,
+              arrival: arrAirport,
+              date: depart,
+              price: '${_s(f['price'].toString())} €',
+              airline: airline.isNotEmpty ? airline : 'Compagnie',
+              stops: _list(f, 'layovers').isNotEmpty
+                  ? _list(f, 'layovers').length
+                  : 0,
+              link: _s(f['link']),
+              source: 'Google Flights',
             ));
           }
         }
-      }
-    } catch (_) {
-      // DuckDuckGo fallback failed, no problem
+      } catch (_) {}
     }
 
-    // Generate direct links to comparison sites (always)
-    final directLinks =
-        _generateFlightLinks(from, to, departDate, returnDate);
-    for (final link in directLinks) {
-      results.add(FlightResult(
-        departure: from,
-        arrival: to,
-        date: departDate,
-        price: 'Rechercher',
-        airline: link['name']!,
-        link: link['url']!,
-        source: link['name']!,
-      ));
+    // ── Tier 2: Direct comparator links (ALWAYS added) ──
+
+    // Google Flights
+    final gfQuery = Uri.encodeComponent(
+        'Vols $from $to le $depart${retour != null ? ' retour le $retour' : ''}');
+    results.add(FlightResult(
+      departure: from,
+      arrival: to,
+      date: depart,
+      price: 'Comparer',
+      airline: 'Google Flights',
+      link: 'https://www.google.com/travel/flights?q=$gfQuery',
+      source: 'Google Flights',
+    ));
+
+    // Skyscanner — uses IATA codes + yyMMdd dates
+    final skyFrom = fromIata.toLowerCase();
+    final skyTo = toIata.toLowerCase();
+    final skyDepart = _toSkyDate(depart);
+    final skyReturn = retour != null ? _toSkyDate(retour) : null;
+    final skyUrl = skyReturn != null
+        ? 'https://www.skyscanner.fr/transport/flights/$skyFrom/$skyTo/$skyDepart/$skyReturn/'
+        : 'https://www.skyscanner.fr/transport/flights/$skyFrom/$skyTo/$skyDepart/';
+    results.add(FlightResult(
+      departure: from,
+      arrival: to,
+      date: depart,
+      price: 'Comparer',
+      airline: 'Skyscanner',
+      link: skyUrl,
+      source: 'Skyscanner',
+    ));
+
+    // Kayak — uses IATA city codes + yyyy-MM-dd
+    final kayakUrl = retour != null
+        ? 'https://www.kayak.fr/flights/$fromIata-$toIata/$depart/$retour'
+        : 'https://www.kayak.fr/flights/$fromIata-$toIata/$depart';
+    results.add(FlightResult(
+      departure: from,
+      arrival: to,
+      date: depart,
+      price: 'Comparer',
+      airline: 'Kayak',
+      link: kayakUrl,
+      source: 'Kayak',
+    ));
+
+    // Kiwi — uses city names in URL
+    final kiwiFrom = Uri.encodeComponent(from.toLowerCase());
+    final kiwiTo = Uri.encodeComponent(to.toLowerCase());
+    final kiwiUrl = retour != null
+        ? 'https://www.kiwi.com/fr/search/results/$kiwiFrom/$kiwiTo/$depart/$retour'
+        : 'https://www.kiwi.com/fr/search/results/$kiwiFrom/$kiwiTo/$depart';
+    results.add(FlightResult(
+      departure: from,
+      arrival: to,
+      date: depart,
+      price: 'Comparer',
+      airline: 'Kiwi.com',
+      link: kiwiUrl,
+      source: 'Kiwi.com',
+    ));
+
+    // Expedia
+    final expFrom = fromIata;
+    final expTo = toIata;
+    final expDepart = _toExpediaDate(depart);
+    final expReturn = retour != null ? _toExpediaDate(retour) : null;
+    final expediaUrl = StringBuffer('https://www.expedia.fr/lp/flights/'
+        '$expFrom/$expTo?leg1=from:$expFrom,to:$expTo,departure:'
+        '$expDepart');
+    if (expReturn != null) {
+      expediaUrl.write(
+          '&leg2=from:$expTo,to:$expFrom,departure:$expReturn');
     }
+    results.add(FlightResult(
+      departure: from,
+      arrival: to,
+      date: depart,
+      price: 'Comparer',
+      airline: 'Expedia',
+      link: expediaUrl.toString(),
+      source: 'Expedia',
+    ));
+
+    // Opodo
+    final opodoUrl = StringBuffer(
+        'https://www.opodo.fr/flights/search?origin=$fromIata'
+        '&destination=$toIata&outboundDate=$depart&adults=1');
+    if (retour != null) opodoUrl.write('&inboundDate=$retour');
+    results.add(FlightResult(
+      departure: from,
+      arrival: to,
+      date: depart,
+      price: 'Comparer',
+      airline: 'Opodo',
+      link: opodoUrl.toString(),
+      source: 'Opodo',
+    ));
+
+    // Momondo
+    final momondoUrl = retour != null
+        ? 'https://www.momondo.fr/flight-search/$fromIata-$toIata/$depart/$retour'
+        : 'https://www.momondo.fr/flight-search/$fromIata-$toIata/$depart';
+    results.add(FlightResult(
+      departure: from,
+      arrival: to,
+      date: depart,
+      price: 'Comparer',
+      airline: 'Momondo',
+      link: momondoUrl,
+      source: 'Momondo',
+    ));
+
+    // Sort: real prices first, then "Comparer" links
+    results.sort((a, b) {
+      final paIsComparer = a.price == 'Comparer';
+      final pbIsComparer = b.price == 'Comparer';
+      if (paIsComparer && !pbIsComparer) return 1;
+      if (!paIsComparer && pbIsComparer) return -1;
+      return _parseNum(a.price).compareTo(_parseNum(b.price));
+    });
 
     return results;
   }
 
-  List<Map<String, String>> _generateFlightLinks(
-      String from, String to, String departDate, String? returnDate) {
-    final links = <Map<String, String>>[];
-    links.add({
-      'name': 'Skyscanner',
-      'url':
-          'https://www.skyscanner.fr/transport/flights/${from.toLowerCase()}/${to.toLowerCase()}/$departDate/${returnDate ?? ''}',
-    });
-    links.add({
-      'name': 'Google Flights',
-      'url':
-          'https://www.google.com/travel/flights?q=Flights+to+${to.toUpperCase()}+from+${from.toUpperCase()}+on+$departDate${returnDate != null ? '+return+$returnDate' : ''}',
-    });
-    links.add({
-      'name': 'Kayak',
-      'url':
-          'https://www.kayak.fr/flights/$from-$to/$departDate${returnDate != null ? '/$returnDate' : ''}',
-    });
-    links.add({
-      'name': 'Opodo',
-      'url':
-          'https://www.opodo.fr/flights/search?origin=$from&destination=$to&departureDate=$departDate${returnDate != null ? '&returnDate=$returnDate' : ''}',
-    });
-    return links;
-  }
-
-  // ── Hotel/Accommodation search ───────────────────────────────────────────
+  // ── Hotels ──────────────────────────────────────────────────────────────
 
   Future<List<HotelResult>> searchHotels(String query,
-      {String hl = 'fr', String gl = 'fr'}) async {
+      {String hl = 'fr', String gl = 'fr',
+       String? checkIn, String? checkOut, int? guests}) async {
     final results = <HotelResult>[];
 
-    // Try SerpAPI if key is available
+    // Clean the query
+    final cleanQuery = query
+        .replaceAll('hotel', '')
+        .replaceAll('hôtel', '')
+        .replaceAll('logement', '')
+        .replaceAll('hébergement', '')
+        .replaceAll('hebergement', '')
+        .trim();
+    final city = cleanQuery.isNotEmpty ? cleanQuery : query.trim();
+    final cityEncoded = Uri.encodeComponent(city);
+
+    // ── Tier 1: SerpAPI Google Hotels ──
     final key = _serpApiKey;
     if (key != null && key.isNotEmpty) {
       try {
         final resp = await _dio.get('https://serpapi.com/search',
             queryParameters: {
-              'engine': 'google',
-              'q': '$query hotel reservation prix',
+              'engine': 'google_hotels',
+              'q': '$city hotel',
               'api_key': key,
               'gl': gl,
               'hl': hl,
-              'num': 15,
             });
-
         if (resp.statusCode == 200) {
-          final organic = _list(resp.data, 'organic_results');
-          for (final r in organic) {
-            final snippet = _s(r['snippet']);
-            final price = _extractPrice(snippet);
-            final link = _s(r['link']);
+          final properties = _list(resp.data, 'properties');
+          for (final p in properties.take(12)) {
+            final price = _s(p['total_rate']?.toString(),
+                _s(p['rate_per_night']?['lowest']?.toString()));
             results.add(HotelResult(
-              name: _s(r['title']),
-              location: _extractLocation(snippet),
-              pricePerNight: price ?? 'Voir prix',
-              rating: _extractRating(snippet),
-              description: snippet,
-              link: link,
-              source: _extractDomain(link),
-            ));
-            if (results.length >= 10) break;
-          }
-        }
-      } catch (_) {
-        // SerpAPI failed, continue with fallback
-      }
-    }
-
-    // DuckDuckGo fallback
-    try {
-      final ddgResp = await _dio.get('https://lite.duckduckgo.com/lite/',
-          queryParameters: {'q': '$query hotel reservation prix'});
-      if (ddgResp.statusCode == 200) {
-        final html = ddgResp.data as String;
-        final linkReg = RegExp(
-            r'<a[^>]*href="((?:https?:)?//[^"]+)"[^>]*>(.*?)</a>',
-            dotAll: true);
-        final matches = linkReg.allMatches(html);
-        for (final m in matches.take(10)) {
-          final rawUrl = m.group(1)!;
-          final url = _decodeDdgUrl(rawUrl);
-          final title = m.group(2)!.replaceAll(RegExp(r'<[^>]+>'), '');
-          final domain = _extractDomain(url);
-          if (!results.any((r) => r.link == url) &&
-              !domain.contains('duckduckgo')) {
-            results.add(HotelResult(
-              name: title,
-              location: '',
-              pricePerNight: 'Voir prix',
-              link: url,
-              source: domain,
+              name: _s(p['name']),
+              location: _s(p['address'], _s(p['neighborhood'])),
+              pricePerNight: price.isNotEmpty ? '$price €' : 'Voir prix',
+              rating: (p['overall_rating'] is num)
+                  ? (p['overall_rating'] as num).toDouble()
+                  : null,
+              description: _s(p['description']),
+              link: _s(p['link']),
+              source: 'Google Hotels',
             ));
           }
         }
-      }
-    } catch (_) {
-      // DuckDuckGo fallback failed
+      } catch (_) {}
     }
 
-    // Add booking search links (always)
-    final encoded = Uri.encodeComponent(
-        query.replaceAll('hotel', '').replaceAll('logement', '').trim());
+    // ── Tier 2: Direct booking platform links (ALWAYS added) ──
+
+    final ci = checkIn ?? '';
+    final co = checkOut ?? '';
+    final g = guests ?? 2;
+
+    // Booking.com
+    final bookingUrl = StringBuffer(
+        'https://www.booking.com/searchresults.fr.html?ss=$cityEncoded');
+    if (ci.isNotEmpty) bookingUrl.write('&checkin=$ci');
+    if (co.isNotEmpty) bookingUrl.write('&checkout=$co');
+    bookingUrl.write('&group_adults=$g');
     results.add(HotelResult(
       name: 'Rechercher sur Booking.com',
-      location: '',
+      location: city,
       pricePerNight: 'Rechercher',
-      link: 'https://www.booking.com/searchresults.fr.html?ss=$encoded',
+      link: bookingUrl.toString(),
       source: 'Booking.com',
     ));
+
+    // Expedia
+    final expediaUrl = StringBuffer(
+        'https://www.expedia.fr/Hotel-Search?destination=$cityEncoded');
+    if (ci.isNotEmpty) expediaUrl.write('&startDate=$ci');
+    if (co.isNotEmpty) expediaUrl.write('&endDate=$co');
+    expediaUrl.write('&rooms=$g');
+    results.add(HotelResult(
+      name: 'Rechercher sur Expedia',
+      location: city,
+      pricePerNight: 'Rechercher',
+      link: expediaUrl.toString(),
+      source: 'Expedia',
+    ));
+
+    // Hotels.com
+    results.add(HotelResult(
+      name: 'Rechercher sur Hotels.com',
+      location: city,
+      pricePerNight: 'Rechercher',
+      link: 'https://fr.hotels.com/Hotel-Search?destination=$cityEncoded',
+      source: 'Hotels.com',
+    ));
+
+    // Agoda
+    results.add(HotelResult(
+      name: 'Rechercher sur Agoda',
+      location: city,
+      pricePerNight: 'Rechercher',
+      link: 'https://www.agoda.com/search?city=$cityEncoded&checkIn=$ci'
+          '&checkOut=$co&guests=$g',
+      source: 'Agoda',
+    ));
+
+    // Trivago
+    results.add(HotelResult(
+      name: 'Rechercher sur Trivago',
+      location: city,
+      pricePerNight: 'Rechercher',
+      link: 'https://www.trivago.fr/fr/odr/hotels-$cityEncoded?search='
+          '${Uri.encodeComponent('{"sQuery":"$city"}')}',
+      source: 'Trivago',
+    ));
+
+    // TripAdvisor
+    results.add(HotelResult(
+      name: 'Rechercher sur TripAdvisor',
+      location: city,
+      pricePerNight: 'Rechercher',
+      link: 'https://www.tripadvisor.fr/Search?q=${Uri.encodeComponent(
+          'hotels $city')}&searchSessionId=',
+      source: 'TripAdvisor',
+    ));
+
+    // Airbnb
     results.add(HotelResult(
       name: 'Rechercher sur Airbnb',
-      location: '',
+      location: city,
       pricePerNight: 'Rechercher',
-      link: 'https://www.airbnb.fr/s/$encoded/homes',
+      link: 'https://www.airbnb.fr/s/$cityEncoded/homes'
+          '${ci.isNotEmpty ? '?checkin=$ci&checkout=$co&adults=$g' : ''}',
       source: 'Airbnb',
     ));
 
+    // Abritel
+    results.add(HotelResult(
+      name: 'Rechercher sur Abritel',
+      location: city,
+      pricePerNight: 'Rechercher',
+      link: 'https://www.abritel.fr/s/$cityEncoded/homes',
+      source: 'Abritel',
+    ));
+
+    // Trip.com
+    results.add(HotelResult(
+      name: 'Rechercher sur Trip.com',
+      location: city,
+      pricePerNight: 'Rechercher',
+      link: 'https://fr.trip.com/hotels/list?city=$cityEncoded'
+          '${ci.isNotEmpty ? '&checkIn=$ci&checkOut=$co' : ''}',
+      source: 'Trip.com',
+    ));
+
+    // GoVoyages
+    results.add(HotelResult(
+      name: 'Rechercher sur GoVoyages',
+      location: city,
+      pricePerNight: 'Rechercher',
+      link: 'https://www.govoyages.com/hotels/search?q=$cityEncoded',
+      source: 'GoVoyages',
+    ));
+
     return results;
   }
 
-  // ── General enhanced search (SerpAPI with DuckDuckGo fallback) ──────────
+  // ── Events ──────────────────────────────────────────────────────────────
+
+  Future<List<WebSearchResult>> searchEvents(String query,
+      {String hl = 'fr', String gl = 'fr', String? domain}) async {
+    final results = <WebSearchResult>[];
+    final domainQuery = domain != null && domain != 'events' ? '$domain ' : '';
+    final fullQuery = '$domainQuery$query billets reservation';
+
+    // SerpAPI Google Events
+    final key = _serpApiKey;
+    if (key != null && key.isNotEmpty) {
+      try {
+        final resp = await _dio.get('https://serpapi.com/search',
+            queryParameters: {
+              'engine': 'google_events',
+              'q': fullQuery,
+              'api_key': key,
+              'gl': gl,
+              'hl': hl,
+            });
+        if (resp.statusCode == 200) {
+          final events = _list(resp.data, 'events_results');
+          results.addAll(events.take(10).map((r) => WebSearchResult(
+                title: _s(r['title']),
+                url: _s(r['link'], _s(r['ticket_link'])),
+                snippet: '${_s(r['date'])} — '
+                    '${_s(r['venue']?['name'] ?? '')}',
+              )));
+        }
+      } catch (_) {}
+    }
+
+    // Direct links to ticket platforms
+    final q = Uri.encodeComponent(query.trim());
+
+    results.add(WebSearchResult(
+        title: 'Rechercher sur Ticketmaster',
+        url: 'https://www.ticketmaster.fr/fr/recherche?q=$q',
+        snippet: ''));
+    results.add(WebSearchResult(
+        title: 'Rechercher sur FNAC Spectacles',
+        url: 'https://www.fnacspectacles.com/recherche?q=$q',
+        snippet: ''));
+    results.add(WebSearchResult(
+        title: 'Rechercher sur BilletReduc',
+        url: 'https://www.billetreduc.com/recherche?q=$q',
+        snippet: ''));
+
+    return results;
+  }
+
+  // ── Restaurants ─────────────────────────────────────────────────────────
+
+  Future<List<WebSearchResult>> searchRestaurants(
+      String query, String location,
+      {String hl = 'fr', String gl = 'fr'}) async {
+    final results = <WebSearchResult>[];
+    final fullQuery = 'restaurant $query $location';
+
+    // SerpAPI Google Local
+    final key = _serpApiKey;
+    if (key != null && key.isNotEmpty) {
+      try {
+        final resp = await _dio.get('https://serpapi.com/search',
+            queryParameters: {
+              'engine': 'google_local',
+              'q': fullQuery,
+              'api_key': key,
+              'gl': gl,
+              'hl': hl,
+            });
+        if (resp.statusCode == 200) {
+          final local = _list(resp.data, 'local_results');
+          results.addAll(local.take(10).map((r) => WebSearchResult(
+                title: _s(r['title']),
+                url: _s(r['link'], _s(r['website'])),
+                snippet: '${_s(r['rating']?.toString())}⭐ — '
+                    '${_s(r['type'])} — ${_s(r['address'])}',
+              )));
+        }
+      } catch (_) {}
+    }
+
+    // Direct links
+    final q = Uri.encodeComponent('$query $location'.trim());
+    results.add(WebSearchResult(
+        title: 'Rechercher sur TripAdvisor',
+        url: 'https://www.tripadvisor.fr/Search?q=$q',
+        snippet: ''));
+    results.add(WebSearchResult(
+        title: 'Rechercher sur TheFork',
+        url: 'https://www.thefork.fr/search/$q',
+        snippet: ''));
+    results.add(WebSearchResult(
+        title: 'Rechercher sur Google Maps',
+        url: 'https://www.google.com/maps/search/$q',
+        snippet: ''));
+
+    return results;
+  }
+
+  // ── Vacation Rentals ────────────────────────────────────────────────────
+
+  Future<List<WebSearchResult>> searchRentals(String query,
+      {String? checkIn, String? checkOut, int? guests,
+       String hl = 'fr', String gl = 'fr'}) async {
+    final results = <WebSearchResult>[];
+
+    final ci = checkIn ?? '';
+    final co = checkOut ?? '';
+    final g = guests ?? 2;
+    final q = Uri.encodeComponent(query.trim());
+
+    // SerpAPI general search for rentals
+    final key = _serpApiKey;
+    if (key != null && key.isNotEmpty) {
+      try {
+        final dateInfo = [
+          if (checkIn != null) checkIn,
+          if (checkOut != null) 'au $checkOut',
+        ].join(' ');
+        final resp = await _dio.get('https://serpapi.com/search',
+            queryParameters: {
+              'engine': 'google',
+              'q': 'location vacances $query $dateInfo',
+              'api_key': key, 'gl': gl, 'hl': hl, 'num': 10,
+            });
+        if (resp.statusCode == 200) {
+          final organic = _list(resp.data, 'organic_results');
+          results.addAll(organic.take(10).map((r) => WebSearchResult(
+                title: _s(r['title']),
+                url: _s(r['link']),
+                snippet: _s(r['snippet']),
+              )));
+        }
+      } catch (_) {}
+    }
+
+    // Always add direct links
+    results.add(WebSearchResult(
+        title: 'Rechercher sur Airbnb',
+        url: 'https://www.airbnb.fr/s/$q/homes'
+            '${ci.isNotEmpty ? '?checkin=$ci&checkout=$co&adults=$g' : ''}',
+        snippet: ''));
+    results.add(WebSearchResult(
+        title: 'Rechercher sur Abritel',
+        url: 'https://www.abritel.fr/s/$q/homes',
+        snippet: ''));
+    results.add(WebSearchResult(
+        title: 'Rechercher sur Booking.com',
+        url: 'https://www.booking.com/searchresults.fr.html?ss=$q'
+            '${ci.isNotEmpty ? '&checkin=$ci&checkout=$co' : ''}',
+        snippet: ''));
+    results.add(WebSearchResult(
+        title: 'Rechercher sur Casamundo',
+        url: 'https://www.casamundo.fr/search?q=$q'
+            '${ci.isNotEmpty ? '&startDate=$ci&endDate=$co' : ''}',
+        snippet: ''));
+    results.add(WebSearchResult(
+        title: 'Rechercher sur HomeToGo',
+        url: 'https://www.hometogo.fr/search/$q'
+            '${ci.isNotEmpty ? '?arrival=$ci&departure=$co' : ''}',
+        snippet: ''));
+
+    return results;
+  }
+
+  // ── Second-Hand ─────────────────────────────────────────────────────────
+
+  Future<List<ProductResult>> searchSecondHand(String query,
+      {String hl = 'fr', String gl = 'fr', String condition = 'used'}) async {
+    final conditionStr = condition == 'refurbished'
+        ? 'reconditionné renouvelé'
+        : 'occasion seconde main';
+    final fullQuery = '$query $conditionStr';
+    final results = <ProductResult>[];
+
+    // SerpAPI
+    final key = _serpApiKey;
+    if (key != null && key.isNotEmpty) {
+      try {
+        final resp = await _dio.get('https://serpapi.com/search',
+            queryParameters: {
+              'engine': 'google',
+              'q': fullQuery,
+              'api_key': key, 'gl': gl, 'hl': hl, 'num': 10,
+            });
+        if (resp.statusCode == 200) {
+          final organic = _list(resp.data, 'organic_results');
+          for (final r in organic) {
+            results.add(ProductResult(
+              title: _s(r['title']),
+              price: _extractPrice(_s(r['snippet'])) ?? 'Voir prix',
+              source: _extractDomain(_s(r['link'])),
+              link: _s(r['link']),
+            ));
+          }
+        }
+      } catch (_) {}
+    }
+
+    // Direct marketplace links
+    final q = Uri.encodeComponent(fullQuery);
+    results.add(ProductResult(
+        title: 'Rechercher sur eBay', price: 'Rechercher',
+        source: 'eBay', link: 'https://www.ebay.fr/sch/i.html?_nkw=$q'));
+    results.add(ProductResult(
+        title: 'Rechercher sur Rakuten', price: 'Rechercher',
+        source: 'Rakuten', link: 'https://fr.shopping.rakuten.com/s/$q'));
+    results.add(ProductResult(
+        title: 'Rechercher sur Back Market', price: 'Rechercher',
+        source: 'Back Market',
+        link: 'https://www.backmarket.fr/search?q=$q'));
+    results.add(ProductResult(
+        title: 'Rechercher sur Vinted', price: 'Rechercher',
+        source: 'Vinted',
+        link: 'https://www.vinted.fr/catalog?search_text=$q'));
+    results.add(ProductResult(
+        title: 'Rechercher sur Leboncoin', price: 'Rechercher',
+        source: 'Leboncoin',
+        link: 'https://www.leboncoin.fr/recherche?text=$q'));
+
+    return results;
+  }
+
+  // ── Best Deal ───────────────────────────────────────────────────────────
+
+  Future<List<ProductResult>> searchBestDeal(String query,
+      {String hl = 'fr', String gl = 'fr'}) async {
+    final results = <ProductResult>[];
+
+    // SerpAPI Google Shopping + general search in parallel
+    final key = _serpApiKey;
+    if (key != null && key.isNotEmpty) {
+      try {
+        final results2 = await Future.wait([
+          _dio.get('https://serpapi.com/search', queryParameters: {
+            'engine': 'google_shopping', 'q': query,
+            'api_key': key, 'gl': gl, 'hl': hl, 'num': 10,
+          }),
+          _dio.get('https://serpapi.com/search', queryParameters: {
+            'engine': 'google', 'q': '$query meilleur prix promo comparer',
+            'api_key': key, 'gl': gl, 'hl': hl, 'num': 10,
+          }),
+        ]);
+
+        // Shopping results
+        if (results2[0].statusCode == 200) {
+          final shopping = _list(results2[0].data, 'shopping_results');
+          results.addAll(shopping.take(8).map((r) => ProductResult(
+                title: _s(r['title']),
+                price: _s(r['price']),
+                source: _s(r['source']),
+                link: _s(r['link']),
+              )));
+        }
+
+        // General results
+        if (results2[1].statusCode == 200) {
+          final organic = _list(results2[1].data, 'organic_results');
+          for (final r in organic) {
+            final link = _s(r['link']);
+            if (!results.any((x) => x.link == link)) {
+              results.add(ProductResult(
+                title: _s(r['title']),
+                price: _extractPrice(_s(r['snippet'])) ?? 'Voir prix',
+                source: _extractDomain(link),
+                link: link,
+              ));
+            }
+          }
+        }
+      } catch (_) {}
+    }
+
+    // Direct links
+    final q = Uri.encodeComponent('$query meilleur prix');
+    results.add(ProductResult(
+        title: 'Rechercher sur Google Shopping', price: 'Rechercher',
+        source: 'Google Shopping',
+        link: 'https://www.google.com/search?tbm=shop&q=$q'));
+    results.add(ProductResult(
+        title: 'Rechercher sur Idealo', price: 'Rechercher',
+        source: 'Idealo',
+        link: 'https://www.idealo.fr/prix/$q'));
+    results.add(ProductResult(
+        title: 'Rechercher sur LeGuide', price: 'Rechercher',
+        source: 'LeGuide',
+        link: 'https://www.leguide.com/s/$q'));
+
+    // Sort by price
+    results.sort((a, b) => _parseNum(a.price).compareTo(_parseNum(b.price)));
+
+    return results;
+  }
+
+  // ── General enhanced search ─────────────────────────────────────────────
 
   Future<List<WebSearchResult>> enhancedSearch(String query,
       {String hl = 'fr', String gl = 'fr'}) async {
@@ -428,192 +892,350 @@ class EnhancedSearchService {
             'hl': hl,
             'num': 10,
           });
-
       if (resp.statusCode != 200) return [];
-
       final organic = _list(resp.data, 'organic_results');
       return organic.take(10).map((r) => WebSearchResult(
-        title: _s(r['title']),
-        url: _s(r['link']),
-        snippet: _s(r['snippet']),
-      )).toList();
+            title: _s(r['title']),
+            url: _s(r['link']),
+            snippet: _s(r['snippet']),
+          )).toList();
     } catch (_) {
       return [];
     }
   }
 
-  // ── Formatting helpers ───────────────────────────────────────────────────
+  // ── Ranking System ─────────────────────────────────────────────────────
 
-  /// Format product results as rich markdown for chat.
+  static List<Map<String, dynamic>> rankTop3(List<ProductResult> products) {
+    if (products.isEmpty) return [];
+    final real = products
+        .where((p) => p.price != 'Rechercher' && p.price != 'Voir prix')
+        .toList();
+
+    final scored = <Map<String, dynamic>>[];
+    for (final p in real) {
+      double score = 5.0;
+      final priceVal = double.tryParse(
+          p.price.replaceAll(RegExp(r'[^\d.,]'), '').replaceAll(',', '.'));
+      if (priceVal != null && priceVal > 0) {
+        score += (5000.0 / (priceVal + 100)).clamp(0.0, 5.0);
+      }
+      if (p.source.contains('amazon') || p.source.contains('fnac') ||
+          p.source.contains('darty') || p.source.contains('boulanger')) {
+        score += 1.0;
+      }
+      scored.add({'product': p, 'score': score});
+    }
+    scored.sort(
+        (a, b) => (b['score'] as double).compareTo(a['score'] as double));
+
+    final top = <Map<String, dynamic>>[];
+    final seen = <String>{};
+    for (final s in scored) {
+      final p = s['product'] as ProductResult;
+      if (seen.add(p.link)) top.add(s);
+      if (top.length >= 3) break;
+    }
+    if (top.isNotEmpty) top[0]['rank'] = 'best';
+    if (top.length >= 2) top[1]['rank'] = 'alternative1';
+    if (top.length >= 3) top[2]['rank'] = 'alternative2';
+
+    for (final p in products.where((p) => p.price == 'Rechercher').take(2)) {
+      top.add({'product': p, 'score': -1.0, 'rank': 'search'});
+    }
+    return top;
+  }
+
+  static List<Map<String, dynamic>> rankTopHotels(List<HotelResult> hotels) {
+    if (hotels.isEmpty) return [];
+    final real = hotels
+        .where((h) =>
+            h.pricePerNight != 'Rechercher' && h.pricePerNight != 'Voir prix')
+        .toList();
+    final scored = <Map<String, dynamic>>[];
+    for (final h in real) {
+      double score = 5.0;
+      final priceVal = double.tryParse(h.pricePerNight
+          .replaceAll(RegExp(r'[^\d.,]'), '')
+          .replaceAll(',', '.'));
+      if (priceVal != null && priceVal > 0) {
+        score += (500.0 / (priceVal + 10)).clamp(0.0, 3.0);
+      }
+      if (h.rating != null) score += h.rating! * 0.5;
+      scored.add({'hotel': h, 'score': score});
+    }
+    scored.sort(
+        (a, b) => (b['score'] as double).compareTo(a['score'] as double));
+    final top = <Map<String, dynamic>>[];
+    for (int i = 0; i < scored.length && i < 3; i++) {
+      top.add({
+        'hotel': scored[i]['hotel'],
+        'score': scored[i]['score'],
+        'rank': i == 0
+            ? 'best'
+            : (i == 1 ? 'alternative1' : 'alternative2'),
+      });
+    }
+    return top;
+  }
+
+  // ── Formatting ──────────────────────────────────────────────────────────
+
   static String formatProducts(List<ProductResult> products, String query) {
     if (products.isEmpty) {
-      return '_Aucun resultat produit trouve pour "$query"._';
+      return '_Aucun résultat produit trouvé pour "$query"._';
     }
-
     final buf = StringBuffer();
     buf.writeln('## 🛍️ Résultats — $query');
     buf.writeln();
     buf.writeln('| Produit | Prix | Marchand |');
     buf.writeln('|---------|------|----------|');
-
     for (final p in products.take(8)) {
-      final oldPrice = p.oldPrice != null ? ' ~~$p.oldPrice~~' : '';
-      buf.writeln(
-          '| [${_escapeMd(p.title)}](${p.link}) | **${_escapeMd(p.price)}**$oldPrice | ${_escapeMd(p.source)} |');
+      final oldPrice = p.oldPrice != null ? ' ~~${p.oldPrice}~~' : '';
+      buf.writeln('| [${_escapeMd(p.title)}](${p.link}) | '
+          '**${_escapeMd(p.price)}**$oldPrice | ${_escapeMd(p.source)} |');
     }
-
     return buf.toString();
   }
 
-  /// Format flight results as rich markdown.
   static String formatFlights(List<FlightResult> flights) {
-    if (flights.isEmpty) return '_Aucun vol trouve._';
+    if (flights.isEmpty) return '_Aucun vol trouvé._';
 
-    final searchResults =
-        flights.where((f) => f.airline != 'Rechercher').toList();
-    final searchLinks =
-        flights.where((f) => f.airline == 'Rechercher').toList();
+    final withPrices = flights
+        .where((f) => f.price != 'Comparer' && f.price != 'Rechercher')
+        .toList();
+    final comparators = flights
+        .where((f) => f.price == 'Comparer')
+        .toList();
 
     final buf = StringBuffer();
     buf.writeln('## ✈️ Vols trouvés');
     buf.writeln();
 
-    if (searchResults.isNotEmpty) {
-      for (final f in searchResults.take(5)) {
-        final stops = f.stops != null && f.stops! > 0
+    if (withPrices.isNotEmpty) {
+      buf.writeln('### 💰 Meilleures offres');
+      for (final f in withPrices.take(6)) {
+        final stopsStr = f.stops != null && f.stops! > 0
             ? ' (${f.stops} escale(s))'
             : ' (direct)';
-        buf.writeln('- **${f.price}** — ${f.airline}$stops');
+        buf.writeln('- **${f.price}** — ${f.airline}$stopsStr');
         buf.writeln('  ${f.departure} → ${f.arrival}, ${f.date}');
-        buf.writeln('  [Voir l\'offre](${f.link}) — _${f.source}_');
+        if (f.link.isNotEmpty) {
+          buf.writeln('  [Voir l\'offre](${f.link}) — _${f.source}_');
+        }
         buf.writeln();
       }
     }
 
-    if (searchLinks.isNotEmpty) {
-      buf.writeln('### 🔎 Comparateurs de vols');
-      for (final link in searchLinks) {
-        buf.writeln('- [Rechercher sur ${link.source}](${link.link})');
+    if (comparators.isNotEmpty) {
+      buf.writeln('### 🔎 Comparer sur');
+      final seen = <String>{};
+      for (final c in comparators) {
+        if (seen.add(c.source)) {
+          buf.writeln('- [${c.source}](${c.link})');
+        }
       }
     }
 
     return buf.toString();
   }
 
-  /// Format hotel results as rich markdown.
   static String formatHotels(List<HotelResult> hotels, String query) {
-    if (hotels.isEmpty) return '_Aucun logement trouve pour "$query"._';
+    if (hotels.isEmpty) return '_Aucun logement trouvé pour "$query"._';
+
+    final withPrices = hotels
+        .where((h) => h.pricePerNight != 'Rechercher')
+        .toList();
+    final platforms = hotels
+        .where((h) => h.pricePerNight == 'Rechercher')
+        .toList();
 
     final buf = StringBuffer();
     buf.writeln('## 🏨 Hébergements — $query');
     buf.writeln();
-    buf.writeln('| Établissement | Prix/nuit | Note |');
-    buf.writeln('|--------------|-----------|------|');
 
-    for (final h in hotels.take(8)) {
-      final rating =
-          h.rating != null ? '⭐${h.rating!.toStringAsFixed(1)}' : '-';
-      buf.writeln(
-          '| [${_escapeMd(h.name)}](${h.link}) | ${_escapeMd(h.pricePerNight)} | $rating |');
+    if (withPrices.isNotEmpty) {
+      buf.writeln('| Établissement | Prix/nuit | Note |');
+      buf.writeln('|--------------|-----------|------|');
+      for (final h in withPrices.take(8)) {
+        final rating =
+            h.rating != null ? '⭐${h.rating!.toStringAsFixed(1)}' : '-';
+        buf.writeln('| [${_escapeMd(h.name)}](${h.link}) | '
+            '${_escapeMd(h.pricePerNight)} | $rating |');
+      }
+    }
+
+    if (platforms.isNotEmpty) {
+      buf.writeln();
+      buf.writeln('### 🔎 Réserver sur');
+      for (final p in platforms) {
+        buf.writeln('- [${p.name}](${p.link})');
+      }
     }
 
     return buf.toString();
   }
 
-  /// Format rich result summary when no structured results are available.
-  static String formatRichSummary(
-      List<WebSearchResult> results, String query, String category) {
+  static String formatSecondHand(List<ProductResult> results, String query) {
     if (results.isEmpty) {
-      return '_Aucun resultat trouve pour "$query". Essayez avec des termes differents._';
+      return '_Aucun résultat occasion trouvé pour "$query"._';
+    }
+    final ranked = rankTop3(results);
+    if (ranked.isEmpty) {
+      return '_Aucun résultat avec prix trouvé pour "$query"._';
     }
 
     final buf = StringBuffer();
-    final emoji = {
-      'products': '🛍️',
-      'flights': '✈️',
-      'hotels': '🏨',
-      'general': '🔍',
-    }[category] ?? '🔍';
-
-    buf.writeln('## $emoji Résultats — $query');
+    buf.writeln('## 🔄 Occasion/Reconditionné — $query');
     buf.writeln();
+    buf.writeln('| 🏆 | Produit | Prix | Marchand |');
+    buf.writeln('|-----|---------|------|----------|');
 
-    for (var i = 0; i < results.length && i < 5; i++) {
-      final r = results[i];
-      buf.writeln('${i + 1}. **[${_escapeMd(r.title)}](${r.url})**');
-      if (r.snippet.isNotEmpty) {
-        final maxLen = r.snippet.length > 300 ? 300 : r.snippet.length;
-        buf.writeln('   ${_escapeMd(r.snippet.substring(0, maxLen))}');
-      }
-      buf.writeln();
+    final labels = {
+      'best': '🥇 Meilleur',
+      'alternative1': '🥈 Alternative',
+      'alternative2': '🥉 Alternative',
+      'search': '🔍',
+    };
+    for (final r in ranked) {
+      final p = r['product'] as ProductResult;
+      final rank = r['rank'] as String;
+      final label = labels[rank] ?? '⭐';
+      buf.writeln('| $label | [${_escapeMd(p.title)}](${p.link}) | '
+          '**${_escapeMd(p.price)}** | ${_escapeMd(p.source)} |');
     }
-
     return buf.toString();
   }
 
-  // ── Private helpers ──────────────────────────────────────────────────────
-
-  static String? _extractPrice(String text) {
-    final patterns = [
-      RegExp(r'(\d[\d\s]*[\d.,]*\s?[€$])\s'),
-      RegExp(r'(\d[\d\s]*[\d.,]*\s?(?:EUR|USD|€|\$))'),
-      RegExp(r'prix[:\s]*(\d[\d\s]*[\d.,]*\s?[€$])'),
-      RegExp(r'à partir de (\d[\d\s]*[\d.,]*\s?[€$])'),
-      RegExp(r'dès (\d[\d\s]*[\d.,]*\s?[€$])'),
-    ];
-
-    for (final pattern in patterns) {
-      final match = pattern.firstMatch(text);
-      if (match != null) return match.group(1)?.trim();
+  static String formatBestDeal(List<ProductResult> results, String query) {
+    if (results.isEmpty) return '_Aucun deal trouvé pour "$query"._';
+    final ranked = rankTop3(results);
+    if (ranked.isEmpty) {
+      return '_Aucun résultat avec prix trouvé pour "$query"._';
     }
-    return null;
-  }
 
-  static double? _extractRating(String text) {
-    final match =
-        RegExp(r'(\d[.,]\d)\s*(?:/5|sur\s*5|étoiles)').firstMatch(text);
-    if (match != null) {
-      return double.tryParse(match.group(1)!.replaceAll(',', '.'));
+    final buf = StringBuffer();
+    buf.writeln('## 💰 Meilleurs Deals — $query');
+    buf.writeln();
+    buf.writeln('| 🏆 | Produit | Prix | Marchand |');
+    buf.writeln('|-----|---------|------|----------|');
+
+    final labels = {
+      'best': '🥇 Meilleur deal',
+      'alternative1': '🥈 Deal 2',
+      'alternative2': '🥉 Deal 3',
+    };
+    for (final r in ranked) {
+      if (r['rank'] == 'search') continue;
+      final p = r['product'] as ProductResult;
+      final rank = r['rank'] as String;
+      final label = labels[rank] ?? '⭐';
+      buf.writeln('| $label | [${_escapeMd(p.title)}](${p.link}) | '
+          '**${_escapeMd(p.price)}** | ${_escapeMd(p.source)} |');
     }
-    return null;
+    buf.writeln();
+    buf.writeln('*Prix comparés sur plusieurs sources.*');
+    return buf.toString();
   }
 
-  static String _extractLocation(String text) {
-    final match = RegExp(
-            r'à\s+([A-ZÀ-Ÿ][a-zà-ÿ]+(?:\s[A-ZÀ-Ÿ][a-zà-ÿ]+)*)')
-        .firstMatch(text);
-    if (match != null) return match.group(1)!;
-    final match2 = RegExp(r'dans\s+([A-ZÀ-Ÿ][a-zà-ÿ]+)').firstMatch(text);
-    if (match2 != null) return match2.group(1)!;
-    return '';
-  }
+  static String formatEvents(List<WebSearchResult> events, String query,
+      {String? domain}) {
+    if (events.isEmpty) return '_Aucun événement trouvé pour "$query"._';
 
-  static String _extractDomain(String url) {
-    try {
-      final uri = Uri.parse(url);
-      return uri.host.replaceAll('www.', '');
-    } catch (_) {
-      return url;
+    final icons = {
+      'concerts': '🎵 Concerts',
+      'museums': '🏛️ Musées',
+      'festivals': '🎪 Festivals',
+      'theater': '🎭 Théâtre',
+      'sports': '⚽ Sports',
+      'exhibitions': '🖼️ Expositions',
+      'events': '📅 Événements',
+    };
+    final icon = icons[domain] ?? '📅 Événements';
+    final buf = StringBuffer();
+    buf.writeln('## $icon — $query');
+    buf.writeln();
+
+    int count = 0;
+    for (final e in events) {
+      if (e.title.contains('Rechercher sur')) continue;
+      count++;
+      buf.writeln('- **[${_escapeMd(e.title)}](${e.url})**');
+      if (e.snippet.isNotEmpty) buf.writeln('  ${_escapeMd(e.snippet)}');
+      buf.writeln();
+      if (count >= 8) break;
     }
-  }
 
-  /// Decode DuckDuckGo redirect URL (//duckduckgo.com/l/?uddg=...).
-  /// Returns the actual target URL.
-  static String _decodeDdgUrl(String raw) {
-    try {
-      final uri = Uri.parse(raw.startsWith('//') ? 'https:$raw' : raw);
-      final uddg = uri.queryParameters['uddg'];
-      if (uddg != null && uddg.isNotEmpty) {
-        return Uri.decodeComponent(uddg);
+    final searchLinks =
+        events.where((e) => e.title.contains('Rechercher sur'));
+    if (searchLinks.isNotEmpty) {
+      buf.writeln('### 🔎 Billetterie');
+      for (final link in searchLinks) {
+        buf.writeln('- [${link.title}](${link.url})');
       }
-    } catch (_) {}
-    return raw;
+    }
+    return buf.toString();
   }
 
-  static String _escapeMd(String text) {
-    return text
-        .replaceAll('|', '\\|')
-        .replaceAll('[', '\\[')
-        .replaceAll(']', '\\]');
+  static String formatRestaurants(
+      List<WebSearchResult> restaurants, String query) {
+    if (restaurants.isEmpty) {
+      return '_Aucun restaurant trouvé pour "$query"._';
+    }
+    final buf = StringBuffer();
+    buf.writeln('## 🍽️ Restaurants — $query');
+    buf.writeln();
+
+    int count = 0;
+    for (final r in restaurants) {
+      if (r.title.contains('Rechercher sur')) continue;
+      count++;
+      buf.writeln('- **[${_escapeMd(r.title)}](${r.url})**');
+      if (r.snippet.isNotEmpty) buf.writeln('  ${_escapeMd(r.snippet)}');
+      buf.writeln();
+      if (count >= 8) break;
+    }
+
+    final searchLinks =
+        restaurants.where((r) => r.title.contains('Rechercher sur'));
+    if (searchLinks.isNotEmpty) {
+      buf.writeln('### 🔎 Voir aussi');
+      for (final link in searchLinks) {
+        buf.writeln('- [${link.title}](${link.url})');
+      }
+    }
+    return buf.toString();
+  }
+
+  static String formatRentals(List<WebSearchResult> rentals, String query) {
+    if (rentals.isEmpty) {
+      return '_Aucune location trouvée pour "$query"._';
+    }
+    final buf = StringBuffer();
+    buf.writeln('## 🏠 Locations Vacances — $query');
+    buf.writeln();
+
+    int count = 0;
+    for (final r in rentals) {
+      if (r.title.contains('Rechercher sur')) continue;
+      count++;
+      buf.writeln('- **[${_escapeMd(r.title)}](${r.url})**');
+      if (r.snippet.isNotEmpty) {
+        final maxLen = r.snippet.length > 200 ? 200 : r.snippet.length;
+        buf.writeln('  ${_escapeMd(r.snippet.substring(0, maxLen))}');
+      }
+      buf.writeln();
+      if (count >= 8) break;
+    }
+
+    final searchLinks =
+        rentals.where((r) => r.title.contains('Rechercher sur'));
+    if (searchLinks.isNotEmpty) {
+      buf.writeln('### 🔎 Plateformes');
+      for (final link in searchLinks) {
+        buf.writeln('- [${link.title}](${link.url})');
+      }
+    }
+    return buf.toString();
   }
 }

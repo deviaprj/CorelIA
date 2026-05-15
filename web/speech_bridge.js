@@ -2,6 +2,8 @@
 // Injecté dans la page d'extension (index.html) pour accéder à
 // window.SpeechRecognition et window.SpeechSynthesis,
 // qui ne sont pas disponibles dans les Service Workers.
+//
+// v2 — Multi-language, continuous dictation mode, improved error recovery.
 'use strict';
 
 (function initSpeechBridge() {
@@ -14,54 +16,160 @@
   }
 
   let recognition = null;
+  let _continuousMode = false;
+  let _currentLang = 'fr-FR';
+  let _retryCount = 0;
+  const MAX_RETRIES = 3;
+  let _retryTimer = null;
+
+  // Language voice map — best voices for each supported language
+  const langVoiceMap = {
+    'fr-FR': { code: 'fr', name: 'French' },
+    'en-US': { code: 'en', name: 'English' },
+    'es-ES': { code: 'es', name: 'Spanish' },
+    'de-DE': { code: 'de', name: 'German' },
+    'it-IT': { code: 'it', name: 'Italian' },
+    'pt-PT': { code: 'pt', name: 'Portuguese' },
+  };
+
+  let cachedVoices = {}; // lang -> best voice
 
   // Flutter → JS : démarrer l'écoute
   window.addEventListener('corely_speech_start', (e) => {
     const lang = e.detail?.lang ?? 'fr-FR';
-    startRecognition(lang);
+    const continuous = e.detail?.continuous ?? false;
+    _continuousMode = continuous;
+    _currentLang = lang;
+    _retryCount = 0;
+    startRecognition(lang, continuous);
   });
 
   // Flutter → JS : arrêter l'écoute
   window.addEventListener('corely_speech_stop', () => {
-    if (recognition) recognition.stop();
+    _continuousMode = false;
+    clearTimeout(_retryTimer);
+    if (recognition) {
+      try { recognition.stop(); } catch (_) {}
+    }
   });
 
-  function startRecognition(lang) {
-    if (!SpeechRecognition) return;
-    if (recognition) recognition.abort();
-
-    recognition = new SpeechRecognition();
-    recognition.lang = lang;
-    recognition.continuous = false;
-    recognition.interimResults = true;
-    recognition.maxAlternatives = 1;
-
-    recognition.onresult = (event) => {
-      const last = event.results[event.results.length - 1];
-      const transcript = last[0].transcript;
-      const isFinal = last.isFinal;
-
+  // Flutter → JS : vérifier disponibilité micro
+  window.addEventListener('corely_mic_check', () => {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
       window.dispatchEvent(
-        new CustomEvent('corely_speech_result', {
-          detail: { transcript, isFinal },
+        new CustomEvent('corely_mic_status', {
+          detail: { available: false, error: 'getUserMedia not supported' },
         })
       );
-    };
+      return;
+    }
 
-    recognition.onerror = (event) => {
+    navigator.mediaDevices.getUserMedia({ audio: true })
+      .then((stream) => {
+        stream.getTracks().forEach(t => t.stop());
+        window.dispatchEvent(
+          new CustomEvent('corely_mic_status', {
+            detail: { available: true },
+          })
+        );
+      })
+      .catch((err) => {
+        window.dispatchEvent(
+          new CustomEvent('corely_mic_status', {
+            detail: { available: false, error: err.name || err.message },
+          })
+        );
+      });
+  });
+
+  function startRecognition(lang, continuous) {
+    if (!SpeechRecognition) {
       window.dispatchEvent(
         new CustomEvent('corely_speech_error', {
-          detail: { error: event.error },
+          detail: { error: 'speech-recognition-unavailable' },
         })
       );
-    };
+      return;
+    }
 
-    recognition.onend = () => {
-      window.dispatchEvent(new CustomEvent('corely_speech_end'));
+    // Clean up previous instance
+    if (recognition) {
+      try { recognition.abort(); } catch (_) {}
       recognition = null;
-    };
+    }
 
-    recognition.start();
+    try {
+      recognition = new SpeechRecognition();
+      recognition.lang = lang;
+      recognition.continuous = continuous;
+      recognition.interimResults = true;
+      recognition.maxAlternatives = 1;
+
+      recognition.onresult = (event) => {
+        _retryCount = 0; // Reset retry on successful result
+        const last = event.results[event.results.length - 1];
+        const transcript = last[0].transcript;
+        const isFinal = last.isFinal;
+
+        window.dispatchEvent(
+          new CustomEvent('corely_speech_result', {
+            detail: { transcript, isFinal },
+          })
+        );
+      };
+
+      recognition.onerror = (event) => {
+        console.warn('[SpeechBridge] Erreur STT :', event.error);
+
+        // Handle retriable errors
+        if (event.error === 'network' || event.error === 'audio-capture' ||
+            event.error === 'service-not-allowed') {
+          if (_retryCount < MAX_RETRIES && _continuousMode) {
+            _retryCount++;
+            console.info('[SpeechBridge] Retry ' + _retryCount + '/' + MAX_RETRIES);
+            clearTimeout(_retryTimer);
+            _retryTimer = setTimeout(() => {
+              if (_continuousMode) {
+                startRecognition(lang, continuous);
+              }
+            }, 1000 * _retryCount);
+            return;
+          }
+        }
+
+        window.dispatchEvent(
+          new CustomEvent('corely_speech_error', {
+            detail: { error: event.error, message: event.message },
+          })
+        );
+      };
+
+      recognition.onend = () => {
+        // Auto-restart in continuous mode
+        if (_continuousMode && recognition != null) {
+          try {
+            recognition.start();
+            return;
+          } catch (e) {
+            console.warn('[SpeechBridge] Échec redémarrage continu :', e);
+          }
+        }
+
+        window.dispatchEvent(new CustomEvent('corely_speech_end'));
+        recognition = null;
+      };
+
+      recognition.start();
+      console.info('[SpeechBridge] Écoute démarrée (lang=' + lang +
+        ', continuous=' + continuous + ')');
+    } catch (e) {
+      console.error('[SpeechBridge] Échec démarrage STT :', e);
+      window.dispatchEvent(
+        new CustomEvent('corely_speech_error', {
+          detail: { error: 'start-failed', message: e.message },
+        })
+      );
+    }
   }
 
   // ── TTS (Text-to-Speech) ──────────────────────────────────────────────────
@@ -78,28 +186,47 @@
     friendly:  { rate: 1.05, pitch: 1.1,  voice: null },
   };
 
-  // Charger les voix disponibles et choisir la meilleure voix française
-  let frVoice = null;
-  function loadVoices() {
+  function getBestVoice(lang) {
+    if (cachedVoices[lang]) return cachedVoices[lang];
+
     const voices = synth.getVoices();
-    // Priorité : voix neurale française Google > voix française native > toute voix FR
-    frVoice = voices.find(v => v.name.includes('Google') && v.lang.startsWith('fr'))
-      || voices.find(v => v.lang === 'fr-FR' && v.localService)
-      || voices.find(v => v.lang.startsWith('fr'));
-    if (frVoice) {
-      console.info('[SpeechBridge] Voix TTS sélectionnée :', frVoice.name);
+    if (voices.length === 0) return null;
+
+    const langPrefix = lang.split('-')[0];
+
+    // Priority: Google neural > native local > any matching lang
+    let best = voices.find(v => v.name.includes('Google') && v.lang.startsWith(langPrefix))
+      || voices.find(v => v.lang === lang && v.localService)
+      || voices.find(v => v.lang.startsWith(langPrefix))
+      || null;
+
+    if (best) {
+      cachedVoices[lang] = best;
+      console.info('[SpeechBridge] Voix TTS pour ' + lang + ' :', best.name);
     }
+    return best;
+  }
+
+  function loadAllVoices() {
+    const voices = synth.getVoices();
+    if (voices.length === 0) return;
+
+    // Cache best voice for each supported language
+    Object.keys(langVoiceMap).forEach(lang => {
+      getBestVoice(lang);
+    });
   }
 
   if (synth) {
-    synth.onvoiceschanged = loadVoices;
-    loadVoices();
+    synth.onvoiceschanged = loadAllVoices;
+    loadAllVoices();
   }
 
-  // Flutter → JS : lire du texte avec émotion
+  // Flutter → JS : lire du texte avec émotion et langue
   window.addEventListener('corely_tts_speak', (e) => {
     const text = e.detail?.text ?? '';
     const emotion = (e.detail?.emotion ?? 'neutral').toLowerCase();
+    const lang = e.detail?.lang ?? 'fr-FR';
     const config = emotionConfig[emotion] || emotionConfig.neutral;
 
     if (!synth || !text.trim()) return;
@@ -107,12 +234,14 @@
     synth.cancel(); // Arrêter toute lecture en cours
 
     const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = 'fr-FR';
+    utterance.lang = lang;
     utterance.rate = config.rate;
     utterance.pitch = config.pitch;
     utterance.volume = 1.0;
 
-    if (frVoice) utterance.voice = frVoice;
+    // Try to use best voice for this language
+    const voice = getBestVoice(lang);
+    if (voice) utterance.voice = voice;
 
     utterance.onend = () => {
       window.dispatchEvent(new CustomEvent('corely_tts_end'));
@@ -143,5 +272,5 @@
     );
   });
 
-  console.info('[SpeechBridge] Initialisé (STT + TTS).');
+  console.info('[SpeechBridge] Initialisé v2 (STT multi-langue + continu + TTS multi-langue).');
 })();

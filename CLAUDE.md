@@ -406,6 +406,7 @@ flutter build web --dart-define=DEEPSEEK_API_KEY=sk-xxx --dart-define=OPENROUTER
 - [x] TTS vitesse : 0.65 → 0.50
 - [x] Bug extension : `sender is not defined` dans background.js
 - [ ] Pas de synchronisation temps réel des préférences entre mobile et extension
-- [ ] Généralisation parsing paramètres : concerts, musées, restaurants, locations, forfaits (au-delà des vols)
-- [ ] Mapping codes IATA pour recherches de vols (meilleure compatibilité comparateurs)
-- [ ] Extension Chrome : microphone en mode vocal
+- [x] Généralisation parsing paramètres : concerts, musées, restaurants, locations, occasions, forfaits (SearchIntentExtractor + SearchMemory + ranking top3)
+- [x] Mapping codes IATA pour recherches de vols (~300 aéroports, fuzzy matching)
+- [x] Extension Chrome : microphone en mode vocal (speech_bridge.js v2 multi-langue + continuous + retry)
+- [x] Architecture search-first : DuckDuckGo/Google comme proxies → vraies URLs comparateurs (plus d'URLs construites en dur)

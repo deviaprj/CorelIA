@@ -256,7 +256,7 @@ int parseMonth(String name) {
     'maggio': 5, 'giugno': 6, 'luglio': 7,
     'settembre': 9, 'ottobre': 10, 'dicembre': 12,
     // Portuguese
-    'janeiro': 1, 'fevereiro': 2, 'março': 2, 'marco': 3,
+    'janeiro': 1, 'fevereiro': 2, 'março': 3, 'marco': 3,
     'maio': 5, 'junho': 6, 'julho': 7,
     'outubro': 10, 'novembro': 11, 'dezembro': 12,
   };

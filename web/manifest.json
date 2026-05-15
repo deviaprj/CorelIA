@@ -39,7 +39,8 @@
     "scripting",
     "activeTab",
     "tabs",
-    "downloads"
+    "downloads",
+    "offscreen"
   ],
 
   "host_permissions": [
@@ -48,7 +49,10 @@
     "https://*.firebaseio.com/*",
     "https://*.googleapis.com/*",
     "https://serpapi.com/*",
-    "https://api.openweathermap.org/*"
+    "https://api.openweathermap.org/*",
+    "https://lite.duckduckgo.com/*",
+    "https://html.duckduckgo.com/*",
+    "https://api.duckduckgo.com/*"
   ],
 
   "content_security_policy": {
@@ -57,7 +61,7 @@
 
   "web_accessible_resources": [
     {
-      "resources": ["*.js", "*.dart.js", "*.wasm", "assets/**", "canvaskit/**", "dom_actions.js"],
+      "resources": ["*.js", "*.dart.js", "*.wasm", "assets/**", "canvaskit/**", "dom_actions.js", "offscreen.html", "offscreen.js"],
       "matches": ["<all_urls>"]
     }
   ]

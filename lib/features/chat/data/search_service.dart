@@ -197,7 +197,7 @@ class SearchService {
         connectTimeout: const Duration(seconds: 8),
         receiveTimeout: const Duration(seconds: 8),
         headers: {
-          'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36',
+          if (!kIsWeb) 'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36',
           'Accept': 'text/html',
         },
       ));

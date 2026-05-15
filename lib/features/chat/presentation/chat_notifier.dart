@@ -10,6 +10,7 @@ import '../data/mock_chat_repository.dart';
 import '../data/quota_service.dart';
 import '../data/search_service.dart';
 import '../data/enhanced_search_service.dart';
+import '../data/search_intent_extractor.dart';
 import '../data/weather_service.dart';
 import '../data/location_service.dart';
 import '../data/file_quota_service.dart';
@@ -1076,18 +1077,23 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
       }
     }
 
-    // Recherche enrichie (météo, vols, hôtels, produits) — toujours active,
+    // Recherche enrichie (météo, vols, hôtels, produits, events, restaurants, etc.)
     // indépendamment de shouldSearch, pour supporter toutes les langues.
     List<WebSearchResult>? searchResults;
     InstantAnswer? instantAnswer;
     String? enhancedResultMarkdown;
 
     final appLang = ref.read(lang.languageProvider);
-    final intent = lang.classifySearchIntent(userMsg.content, appLang);
+    final extractor = SearchIntentExtractor();
+    final searchParams = extractor.extract(userMsg.content, appLang);
+    final intent = searchParams.intent;
+
     if (intent != 'general') {
       try {
         enhancedResultMarkdown = await _performEnhancedSearch(
-            userMsg.content, intent, _extractSearchQuery(userMsg.content), appLang);
+            userMsg.content, intent, _extractSearchQuery(userMsg.content), appLang, searchParams);
+        // Record successful extraction for learning
+        extractor.memory.recordSuccess(intent, userMsg.content, searchParams);
       } catch (e) {
         debugPrint('[ChatNotifier] Recherche enrichie echouee : $e');
       }
@@ -1607,10 +1613,11 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
 
   /// Execute enhanced search and return formatted markdown.
   Future<String?> _performEnhancedSearch(
-      String message, String intent, String searchQuery, lang.AppLanguage language) async {
+      String message, String intent, String searchQuery, lang.AppLanguage language,
+      [SearchParams? params]) async {
+    final service = ref.read(enhancedSearchServiceProvider);
     switch (intent) {
       case 'products':
-        final service = ref.read(enhancedSearchServiceProvider);
         var products = await service.searchProducts(searchQuery,
             hl: language.serpApiHl, gl: language.serpApiGl);
         if (products.isEmpty) {
@@ -1622,10 +1629,41 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
         }
         return null;
 
+      case 'bestdeal':
+        final dealProducts = await service.searchBestDeal(searchQuery,
+            hl: language.serpApiHl, gl: language.serpApiGl);
+        if (dealProducts.isNotEmpty) {
+          return EnhancedSearchService.formatBestDeal(dealProducts, searchQuery);
+        }
+        return null;
+
+      case 'secondhand':
+        final condition = params?.condition ?? 'used';
+        final usedProducts = await service.searchSecondHand(searchQuery,
+            hl: language.serpApiHl, gl: language.serpApiGl, condition: condition);
+        if (usedProducts.isNotEmpty) {
+          return EnhancedSearchService.formatSecondHand(usedProducts, searchQuery);
+        }
+        return null;
+
       case 'flights':
-        final parsed = parseFlightParams(message);
+        var parsed = params?.fromLocation != null
+            ? {
+                'from': params!.fromLocation!,
+                'to': params.toLocation ?? '',
+                'departDate': params.departDate ?? '',
+                if (params.returnDate != null) 'returnDate': params.returnDate!,
+              }
+            : null;
+
+        // Validate: if extracted params look like garbage (too many words,
+        // contain flight-related terms), fall back to the reliable parser
+        if (parsed != null && !_isValidCityPair(parsed['from']!, parsed['to']!)) {
+          parsed = parseFlightParams(message);
+        }
+
+        parsed ??= parseFlightParams(message);
         if (parsed == null) return null;
-        final service = ref.read(enhancedSearchServiceProvider);
         final flights = await service.searchFlights(
           from: parsed['from']!,
           to: parsed['to']!,
@@ -1640,11 +1678,39 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
         return null;
 
       case 'hotels':
-        final service = ref.read(enhancedSearchServiceProvider);
         final hotels = await service.searchHotels(searchQuery,
             hl: language.serpApiHl, gl: language.serpApiGl);
         if (hotels.isNotEmpty) {
           return EnhancedSearchService.formatHotels(hotels, searchQuery);
+        }
+        return null;
+
+      case 'events':
+        final events = await service.searchEvents(searchQuery,
+            hl: language.serpApiHl, gl: language.serpApiGl, domain: params?.domain);
+        if (events.isNotEmpty) {
+          return EnhancedSearchService.formatEvents(events, searchQuery, domain: params?.domain);
+        }
+        return null;
+
+      case 'restaurants':
+        final location = params?.location ?? searchQuery;
+        final restaurants = await service.searchRestaurants(searchQuery, location,
+            hl: language.serpApiHl, gl: language.serpApiGl);
+        if (restaurants.isNotEmpty) {
+          return EnhancedSearchService.formatRestaurants(restaurants, searchQuery);
+        }
+        return null;
+
+      case 'rentals':
+        final rentals = await service.searchRentals(searchQuery,
+            checkIn: params?.checkIn,
+            checkOut: params?.checkOut,
+            guests: params?.guests,
+            hl: language.serpApiHl,
+            gl: language.serpApiGl);
+        if (rentals.isNotEmpty) {
+          return EnhancedSearchService.formatRentals(rentals, searchQuery);
         }
         return null;
 
@@ -1681,6 +1747,31 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
   }
 
   // ── Flight/Weather parameter parsers ──────────────────────────────────────
+
+  /// Validate that extracted city names look like actual cities, not random
+  /// words from the query. City names should be 1-3 words and not contain
+  /// flight-related terms.
+  static bool _isValidCityPair(String from, String to) {
+    const garbageTerms = [
+      'trouve', 'trouver', 'cherche', 'chercher', 'billet', 'billets',
+      'vol', 'vols', 'avion', 'aller', 'retour', 'direct', 'recherche',
+      'reservation', 'reserver', 'partir', 'depart', 'arrivee',
+      'flight', 'flights', 'ticket', 'find', 'search', 'cheap',
+    ];
+    final fromWords = from.split(' ').length;
+    final toWords = to.split(' ').length;
+    // City names are 1-3 words (e.g., "New York", "Sao Paulo", "Buenos Aires")
+    if (fromWords > 3 || toWords > 3) return false;
+    final fromLower = from.toLowerCase();
+    final toLower = to.toLowerCase();
+    for (final term in garbageTerms) {
+      if (fromLower == term || toLower == term) return false;
+      if (fromLower.contains(' $term ') || toLower.contains(' $term ')) return false;
+      if (fromLower.startsWith('$term ') || toLower.startsWith('$term ')) return false;
+      if (fromLower.endsWith(' $term') || toLower.endsWith(' $term')) return false;
+    }
+    return true;
+  }
 
   /// Parse flight search parameters from natural language.
   /// Handles: "Paris-Zagreb du 29 mai au 2 juin",
