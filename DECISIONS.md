@@ -300,4 +300,67 @@ Les résultats sont injectés comme message système dans le contexte IA (`enhan
 
 ---
 
-*Dernière mise à jour : 2026-05-14*
+## ADR-012 : Architecture Search-First avec Liens Directs Comparateurs
+
+**Date** : 2026-05-15
+**Statut** : Accepté (remplace l'approche DuckDuckGo scraping de l'ADR-011)
+
+### Contexte
+L'approche ADR-011 (DuckDuckGo HTML scraping) produisait des résultats trop génériques. Les utilisateurs recevaient des réponses vagues comme "Les résultats ne donnent pas de tarif précis pour ces dates exactes" au lieu de vrais liens vers les comparateurs. La construction directe d'URLs de comparateurs avait été abandonnée car les URLs étaient malformées (mauvais codes IATA, formats de date incorrects).
+
+### Décision
+**Architecture "search-first" en 2 niveaux** :
+1. **SerpAPI** pour données structurées si clé disponible (google_flights, google_hotels, google_shopping, google_events, google_local)
+2. **Liens directs** vers les comparateurs TOUJOURS générés avec paramètres pré-remplis :
+   - Vols : Google Flights, Skyscanner, Kayak, Kiwi, Expedia, Opodo, Momondo
+   - Hôtels : Booking, Expedia, Hotels.com, Agoda, Trivago, TripAdvisor, Airbnb, Abritel, Trip.com, GoVoyages
+   - Restaurants : TripAdvisor, TheFork, Google Maps
+   - Locations : Airbnb, Abritel, Booking, Casamundo, HomeToGo
+   - Occasion : eBay, Rakuten, Back Market, Vinted, Leboncoin
+
+**Suppression du DuckDuckGo scraping** comme source primaire — les liens directs sont toujours plus pertinents.
+
+### Extraction de paramètres généralisée
+- **SearchIntentExtractor** : 9 types d'intents, 6 langues
+- **SearchMemory** : apprentissage des patterns de recherche réussies
+- **Validation** : `_isValidCityPair()` pour détecter les extractions erronées et fallback vers `parseFlightParams`
+- **Sanitization + Capitalization** : fallback automatique pour les requêtes lowercase
+
+### IATA Codes
+- ~300 aéroports majeurs mappés
+- Fuzzy matching 3 niveaux : direct → contains → per-word → prefix 5 caractères
+- Exemple : "londre direct du" → mot "londre" → prefix "londr" match "londres" → LON
+
+### Conséquences
+- ✅ Utilisateurs obtiennent TOUJOURS des liens cliquables vers les comparateurs
+- ✅ Pas de dépendance au markup HTML de DuckDuckGo
+- ✅ Les URLs utilisent les IATA codes résolus pour une meilleure compatibilité
+- ✅ Extraction de paramètres robuste avec validation et fallback
+- ⚠️ Sans SerpAPI, pas de prix/offres structurés (seulement les liens)
+- ⚠️ Les URLs de comparateurs peuvent changer (mais les formats choisis sont stables)
+- ⚠️ ~300 aéroports couverts — les petits aéroports régionaux peuvent manquer
+
+---
+
+## ADR-013 : Extraction de Paramètres Vols — Double Fallback
+
+**Date** : 2026-05-15
+**Statut** : Accepté
+
+### Contexte
+Les requêtes utilisateur sont souvent en lowercase avec des mots parasites : "trouve un billet aller retour paris-londre direct du 29/05/2026 au 01/06/2026". Les regex d'extraction (`cityName = [A-ZÀ-Ÿ][a-zà-ÿ]+`) échouent sur le lowercase. Le fallback `_extractCities` extrayait des mots parasites ("Trouve", "Billet", "Aller", "Retour", "Direct") comme noms de ville.
+
+### Décision
+Triple protection :
+1. **`_tryParseFlightParamsGeneric`** : essai sur message original → si échec, sanitize (45 stop words) + capitalize → réessai
+2. **`_extractCities`** : patterns rendus case-insensitive, `direct`/`directs` ajoutés aux stop words
+3. **`_isValidCityPair`** dans `_performEnhancedSearch` : rejette les villes de >3 mots ou contenant des termes parasites → fallback `parseFlightParams` (qui a déjà le sanitize+capitalize)
+
+### Conséquences
+- ✅ Requêtes lowercase fonctionnent
+- ✅ Mots parasites filtrés à 3 niveaux
+- ⚠️ Si les 3 niveaux échouent, pas de recherche de vol
+
+---
+
+*Dernière mise à jour : 2026-05-15*

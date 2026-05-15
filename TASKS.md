@@ -1,6 +1,76 @@
 # TASKS.md — Suivi Corely
 
-Dernière mise à jour : 2026-05-14 — Session V9 : Multilingue, Recherche Enrichie & Correctifs UX
+Dernière mise à jour : 2026-05-15 — Session V10 : Search-First, Parsing Généralisé, IATA, Fix Micro Extension
+
+## Terminé — Session V10 (2026-05-15) — Search-First & Parsing Généralisé
+
+### SearchIntentExtractor (nouveau) ✅
+- **Fichier** : `lib/features/chat/data/search_intent_extractor.dart` (~1150 lignes)
+- Extraction généralisée pour 9 intents : flights, hotels, products, weather, events, restaurants, rentals, secondhand, bestdeal
+- `SearchMemory` : apprentissage par `recordSuccess()`, stocke patterns et mots-clés
+- Extraction paramètres : villes, dates (num/text/relative), condition, prix, tri, cuisine
+- Détection domaine événementiel : concerts, musées, festivals, théâtre, sports, expositions
+
+### IATA Codes (nouveau) ✅
+- **Fichier** : `lib/features/chat/data/iata_codes.dart` (~310 lignes)
+- ~300 aéroports majeurs mappés (city name → IATA code)
+- `resolveIataCode()` : direct → unaccented → fuzzy contains → per-word → prefix 5 chars
+- `toSearchableAirport()` pour résolution automatique
+
+### EnhancedSearchService — Réécrit ✅
+- **Fichier** : `lib/features/chat/data/enhanced_search_service.dart` (~1120 lignes)
+- **Changement architectural** : liens directs vers comparateurs avec paramètres pré-remplis
+- Plus de DuckDuckGo scraping comme source primaire
+- Vols : Google Flights, Skyscanner, Kayak, Kiwi, Expedia, Opodo, Momondo (7 liens)
+- Hôtels : Booking, Expedia, Hotels.com, Agoda, Trivago, TripAdvisor, Airbnb, Abritel, Trip.com, GoVoyages (10 liens)
+- Restaurants : TripAdvisor, TheFork, Google Maps
+- Rentals : Airbnb, Abritel, Booking, Casamundo, HomeToGo
+- Second-hand : eBay, Rakuten, Back Market, Vinted, Leboncoin
+
+### ChatNotifier — Intégration ✅
+- `sendMessage()` utilise `SearchIntentExtractor` + `recordSuccess()`
+- `_performEnhancedSearch()` gère les 9 intents
+- `_isValidCityPair()` : validation des villes extraites (≤3 mots, pas de termes parasites)
+- Fallback `parseFlightParams` si params extractor invalides
+
+### Bug Fixes ✅
+- **Parsing vols lowercase** : `_extractFlightParams` → sanitize+capitalize avant regex
+- **IATA fuzzy** : per-word matching + prefix 5 chars ("londre" → "londres" → LON)
+- **Stop words** : ajout `direct`, `directs` dans `_isStopWord`
+- **User-Agent** : `if (!kIsWeb)` pour éviter l'erreur "Refused to set unsafe header" dans l'extension
+- **Mois portugais** : `março: 2` → `março: 3`
+
+### Chrome Extension ✅
+- **speech_bridge.js v2** : STT multi-langue, continuous mode, retry x3, TTS multi-langue, mic check
+- **manifest.json** : permission `offscreen`, hosts DuckDuckGo ajoutés
+
+### Résultat ✅
+- **463 tests passés, 0 échec**
+- APK installé sur Xiaomi 12, Extension rebuildée
+- Branches `br-AironBot-V2` et `main` synchronisées sur origin
+
+---
+
+## À faire — Prochaine session
+
+### Priorité HAUTE
+- [ ] **Tester le parsing vols en conditions réelles** : "trouve un billet paris-londre direct du 29/05", "vol aller-retour nice-barcelone le 10 juin retour le 15", etc.
+- [ ] **Fix `_performEnhancedSearch` hôtels** : ne passe pas checkIn/checkOut/guests → la méthode `searchHotels` les accepte mais ne les reçoit pas
+- [ ] **Vérifier OPEN_URL timeout** dans l'extension après le fix de parsing (les URLs devraient être propres maintenant)
+
+### Priorité MOYENNE
+- [ ] **TTS audio dans l'extension** : speech_bridge.js v2 a le support, tester avec une vraie réponse IA
+- [ ] **Tests de non-régression** : `_tryParseFlightParamsGeneric` lowercase, `_isValidCityPair`, IATA fuzzy
+- [ ] **Analyse fichiers TXT/MD** : tester l'injection comme contexte conversationnel
+- [ ] **Résumé de page extension** : tester SUMMARIZE_PAGE + GET_PAGE_CONTENT
+
+### Priorité BASSE
+- [ ] Synchronisation temps réel des préférences entre mobile et extension
+- [ ] Support HEIC/HEIF pour les images
+- [ ] OCR pour PDF scannés
+- [ ] Firebase Storage pour les images (au lieu de base64)
+
+---
 
 ## Terminé (sessions précédentes)
 

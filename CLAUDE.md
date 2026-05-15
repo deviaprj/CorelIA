@@ -409,4 +409,10 @@ flutter build web --dart-define=DEEPSEEK_API_KEY=sk-xxx --dart-define=OPENROUTER
 - [x] Généralisation parsing paramètres : concerts, musées, restaurants, locations, occasions, forfaits (SearchIntentExtractor + SearchMemory + ranking top3)
 - [x] Mapping codes IATA pour recherches de vols (~300 aéroports, fuzzy matching)
 - [x] Extension Chrome : microphone en mode vocal (speech_bridge.js v2 multi-langue + continuous + retry)
-- [x] Architecture search-first : DuckDuckGo/Google comme proxies → vraies URLs comparateurs (plus d'URLs construites en dur)
+- [x] Architecture search-first : liens directs comparateurs avec paramètres pré-remplis (Skyscanner, Kayak, Google Flights, Booking, Expedia, etc.)
+- [ ] **Bug critique** : extraction des villes de vol sur requêtes lowercase + mots parasites ("trouve un billet paris-londre direct du 29/05") — fix appliqué (sanitize+capitalize+validation) mais à tester en conditions réelles
+- [ ] **Bug** : Extension Chrome OPEN_URL timeout — probablement lié aux URLs malformées, à revérifier après fix du parsing
+- [ ] Extension Chrome : TTS audio — speech_bridge.js v2 a le support TTS multi-langue mais à tester
+- [ ] Extension Chrome : résumé de page, extraction média — actions navigateur existent mais non testées
+- [ ] Tests de non-régression : ajouter des tests pour `_tryParseFlightParamsGeneric` avec requêtes lowercase, `_isValidCityPair`, IATA fuzzy per-word matching
+- [ ] Recherche hôtels : `searchHotels` n'utilise pas checkIn/checkOut/guests depuis les params → `_performEnhancedSearch` ne les passe pas
