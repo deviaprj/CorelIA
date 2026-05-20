@@ -234,6 +234,9 @@ class SlashCommands {
     return matches;
   }
 
+  /// Commandes universelles (fonctionnent sur toutes les plateformes).
+  static const Set<String> universalCommandNames = {'docgen'};
+
   /// Parse une commande slash depuis le texte de l'utilisateur.
   /// Retourne null si ce n'est pas une commande slash valide.
   static ParsedSlashCommand? parse(String text) {
@@ -308,7 +311,7 @@ class SlashCommandPalette extends StatelessWidget {
     final colorScheme = Theme.of(context).colorScheme;
 
     return Container(
-      constraints: const BoxConstraints(maxHeight: 280),
+      constraints: const BoxConstraints(maxHeight: 360),
       decoration: BoxDecoration(
         color: colorScheme.surfaceContainerHighest,
         borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),

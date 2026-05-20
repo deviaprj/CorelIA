@@ -148,9 +148,7 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
     final isExtension = bridge.isExtension;
 
     // Commands that work on ALL platforms (not just extension)
-    final universalCommands = {'docgen'};
-
-    if (!isExtension && !universalCommands.contains(parsed.command.name)) {
+    if (!isExtension && !SlashCommands.universalCommandNames.contains(parsed.command.name)) {
       // Extension-only commands require the extension bridge.
       state = state.copyWith(
         error: 'Commande /${parsed.command.name} disponible uniquement dans l\'extension Chrome.',
