@@ -25,11 +25,11 @@ class EmotionTtsConfig {
 
 /// Mapping émotion → config TTS.
 const emotionTtsConfigs = <TtsEmotion, EmotionTtsConfig>{
-  TtsEmotion.neutral: EmotionTtsConfig(voice: 'fr-FR-HenriNeural', rate: 0.77, pitch: 1.00),
-  TtsEmotion.joyful: EmotionTtsConfig(voice: 'fr-FR-DeniseNeural', rate: 0.85, pitch: 1.15),
-  TtsEmotion.sad: EmotionTtsConfig(voice: 'fr-FR-HenriNeural', rate: 0.66, pitch: 0.88),
-  TtsEmotion.serious: EmotionTtsConfig(voice: 'fr-FR-HenriNeural', rate: 0.70, pitch: 0.92),
-  TtsEmotion.excited: EmotionTtsConfig(voice: 'fr-FR-DeniseNeural', rate: 0.89, pitch: 1.20),
-  TtsEmotion.cheerful: EmotionTtsConfig(voice: 'fr-FR-DeniseNeural', rate: 0.83, pitch: 1.12),
-  TtsEmotion.friendly: EmotionTtsConfig(voice: 'fr-FR-DeniseNeural', rate: 0.81, pitch: 1.08),
+  TtsEmotion.neutral: EmotionTtsConfig(voice: 'fr-FR-HenriNeural', rate: 0.73, pitch: 1.00),
+  TtsEmotion.joyful: EmotionTtsConfig(voice: 'fr-FR-DeniseNeural', rate: 0.81, pitch: 1.15),
+  TtsEmotion.sad: EmotionTtsConfig(voice: 'fr-FR-HenriNeural', rate: 0.63, pitch: 0.88),
+  TtsEmotion.serious: EmotionTtsConfig(voice: 'fr-FR-HenriNeural', rate: 0.67, pitch: 0.92),
+  TtsEmotion.excited: EmotionTtsConfig(voice: 'fr-FR-DeniseNeural', rate: 0.85, pitch: 1.20),
+  TtsEmotion.cheerful: EmotionTtsConfig(voice: 'fr-FR-DeniseNeural', rate: 0.79, pitch: 1.12),
+  TtsEmotion.friendly: EmotionTtsConfig(voice: 'fr-FR-DeniseNeural', rate: 0.77, pitch: 1.08),
 };

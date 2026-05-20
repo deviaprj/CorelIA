@@ -722,7 +722,7 @@ void main() {
       final cmd1 = SlashCommands.parse('/searchpage "API key"');
       expect(cmd1, isNotNull);
       expect(cmd1!.command.name, equals('searchpage'));
-      expect(cmd1.args, equals(['"API', 'key"']));
+      expect(cmd1.args, equals(['API key']));
 
       final cmd2 = SlashCommands.parse('/extract .api-reference');
       expect(cmd2, isNotNull);

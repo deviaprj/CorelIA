@@ -43,7 +43,7 @@ class TtsNaturalService {
   bool _isSpeaking = false;
   TtsEngine _activeEngine = TtsEngine.flutterTts;
   TtsEmotion _currentEmotion = TtsEmotion.neutral;
-  double _speechRate = 0.44;
+  double _speechRate = 0.42;
   double _pitch = 1.10;
   String _language = 'fr-FR';
 
