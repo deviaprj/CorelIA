@@ -159,13 +159,20 @@ flutter build web --dart-define=DEEPSEEK_API_KEY=sk-xxx --dart-define=OPENROUTER
 - `openai/gpt-4o-mini` — vision Pro
 - Headers obligatoires : `HTTP-Referer`, `X-Title`
 
+**ModelRouter** (`lib/features/chat/data/model_router.dart`):
+- TaskType : general, reasoning, vision, document, code, longFile, vocal, vocalFast
+- `classifyTask()` : détermine le type de tâche (message normal, code, document, vision, etc.)
+- `resolveModel()` : résout le modèle via routing table + rate limit tracking
+- `markRateLimited()` : cooldown automatique en cas de 429
+
 **Routage des requêtes** (`_getDirectAiStream` dans `chat_notifier.dart`):
-1. **Image détectée** (`content` est un `List`) → `_getVisionStream()`
+1. **modelOverride** (ex: `task:vocal`) → ModelRouter → chaîne spécifique
+2. **Image détectée** (`content` est un `List`) → `_getVisionStream()`
    - OpenRouter GPT-4o-mini (si clé dispo)
    - Sinon DeepSeek `deepseek-chat` (modèle vision)
    - Sinon `AiException` avec message clair
-2. Pro sans image → OpenRouter Mistral
-3. Free sans image → DeepSeek V4 Flash
+3. Pro sans image → OpenRouter Mistral
+4. Free sans image → DeepSeek V4 Flash
 
 **System prompt** — Injecté en tête de chaque conversation:
 - Par défaut: personnalité Corely (chaleureux, direct, tutoiement, français)
@@ -207,9 +214,29 @@ flutter build web --dart-define=DEEPSEEK_API_KEY=sk-xxx --dart-define=OPENROUTER
 - `_pendingTranscript` protège contre les doublons de callback
 
 **TTS** (`lib/features/chat/presentation/tts_natural_service.dart`):
-- `flutter_tts` natif, vitesse par défaut : 0.50, pitch 1.10
+- **Primaire (mobile)** : OpenRouter TTS (`/audio/speech`) — voix réalistes (nova, shimmer, alloy, echo, fable, onyx)
+- **Fallback universel** : flutter_tts natif
+- OpenRouter TTS speed : 0.65, flutter_tts base : 0.45, pitch : 1.10
+- Chaîne : gpt-4o-mini-tts → kokoro-82m (fallback) → flutter_tts (dernier recours)
+- Cache TTS : `TtsCacheService` avec `putBytes()` pour audio OpenRouter
+- `AudioPlayerFactory` : just_audio (mobile) / stub (web)
 - Nettoyage markdown : strip URLs, citations `[n]`, emojis, formatting
 - `speakNaturally()` : nettoye → lit → attend la fin via `Completer`
+- `TtsEmotion` → voix : neutral→nova, joyful→shimmer, serious→echo, excited→fable, sad→onyx
+
+**Vocal LLM Routing** (`lib/features/chat/data/model_router.dart`):
+- `ModelRouter` avec `TaskType` enum : general, reasoning, vision, document, code, longFile, vocal, vocalFast
+- Chaîne vocale : arcee/trinity → neversleep/ring-2.6-1t → deepseek/deepseek-r1:free → openai/gpt-4o-mini
+- Chaîne vocalFast : neversleep/ring-2.6-1t → arcee/trinity → deepseek/deepseek-r1:free → openai/gpt-4o-mini
+- `RateLimitTracker` : cooldown map, `isCoolingDown()`, `setCooldown()`
+- Paramètres vocaux LLM : temperature=0.95, top_p=0.95, frequency_penalty=0.2
+- Prompt vocal jovial injecté quand `isVoiceConversation=true` : "MODE VOCAL ACTIF — Réponds comme un ami au téléphone"
+
+**OpenRouter TTS** (`lib/features/chat/data/openrouter_tts_service.dart`):
+- Appelle `/audio/speech` avec model gpt-4o-mini-tts → fallback kokoro-82m
+- TtsVoice enum (nova, shimmer, alloy, echo, fable, onyx)
+- Texte tronqué à 4096 chars, JSON escaping, `isAvailable` getter
+- Retourne `Uint8List?` (MP3 bytes)
 
 **Aurora Splash** (`lib/features/chat/presentation/aurora_splash.dart`):
 - Overlay plein écran pendant le mode vocal mains-libres
@@ -218,9 +245,10 @@ flutter build web --dart-define=DEEPSEEK_API_KEY=sk-xxx --dart-define=OPENROUTER
 - Affiche le transcript en temps réel pendant l'écoute
 
 **Extension Chrome — Pont vocal** (`web/speech_bridge.js`):
-- STT uniquement via `webkitSpeechRecognition`
-- Événements CustomEvent : `aironbot_speech_start`, `aironbot_speech_result`, `aironbot_speech_end`, `aironbot_speech_error`
-- Pas de pont TTS (à créer)
+- STT + TTS via `webkitSpeechRecognition` + `speechSynthesis`
+- STT : multi-langue, continuous mode, retry x3
+- TTS : mapping émotion → rate/pitch, sélection meilleure voix par langue (Google neural > native > any)
+- Événements CustomEvent : `corely_speech_start/result/end/error`, `corely_tts_speak/stop/end/error`
 
 ## Attachment UX (pièces jointes)
 
@@ -338,9 +366,8 @@ flutter build web --dart-define=DEEPSEEK_API_KEY=sk-xxx --dart-define=OPENROUTER
 - Permissions : storage, sidePanel, contextMenus, scripting, activeTab
 
 **Limitations actuelles de l'extension** :
-- Pas de pont TTS audio (speech_bridge.js gère STT + TTS basique via Web Speech API)
+- speech_bridge.js gère STT + TTS basique via Web Speech API (pas de OpenRouter TTS audio)
 - Pas de document offscreen pour audio playback en Manifest V3
-- Micro non détecté en mode vocal : permission `audioCapture` à vérifier
 - `content_script.js` ne fait que capturer la sélection de texte
 - [x] Commandes slash : 24 commandes fonctionnelles via extension_bridge.js → background.js → dom_actions.js (corrigé session V8)
 - [x] Résumé de page : SUMMARIZE_PAGE action implémentée
@@ -403,7 +430,7 @@ flutter build web --dart-define=DEEPSEEK_API_KEY=sk-xxx --dart-define=OPENROUTER
 - [x] Recherche enrichie : vols, hôtels, produits, météo fonctionnels sans clés API — fallback DuckDuckGo + liens directs
 - [x] Intégration multilingue : 6 langues, patterns de recherche localisés, noms de mois traduits
 - [x] Liens cliquables dans le chat : `onTapLink` → `url_launcher`
-- [x] TTS vitesse : 0.65 → 0.50
+- [x] TTS vitesse : 0.65 → 0.50 → OpenRouter TTS 0.65, flutter_tts 0.45
 - [x] Bug extension : `sender is not defined` dans background.js
 - [ ] Pas de synchronisation temps réel des préférences entre mobile et extension
 - [x] Généralisation parsing paramètres : concerts, musées, restaurants, locations, occasions, forfaits (SearchIntentExtractor + SearchMemory + ranking top3)
@@ -412,7 +439,12 @@ flutter build web --dart-define=DEEPSEEK_API_KEY=sk-xxx --dart-define=OPENROUTER
 - [x] Architecture search-first : liens directs comparateurs avec paramètres pré-remplis (Skyscanner, Kayak, Google Flights, Booking, Expedia, etc.)
 - [ ] **Bug critique** : extraction des villes de vol sur requêtes lowercase + mots parasites ("trouve un billet paris-londre direct du 29/05") — fix appliqué (sanitize+capitalize+validation) mais à tester en conditions réelles
 - [ ] **Bug** : Extension Chrome OPEN_URL timeout — probablement lié aux URLs malformées, à revérifier après fix du parsing
-- [ ] Extension Chrome : TTS audio — speech_bridge.js v2 a le support TTS multi-langue mais à tester
+- [ ] Extension Chrome : TTS audio — speech_bridge.js v2 a le support TTS multi-langue, OpenRouter TTS non supporté (Manifest V3 pas d'offscreen audio)
 - [ ] Extension Chrome : résumé de page, extraction média — actions navigateur existent mais non testées
 - [ ] Tests de non-régression : ajouter des tests pour `_tryParseFlightParamsGeneric` avec requêtes lowercase, `_isValidCityPair`, IATA fuzzy per-word matching
 - [ ] Recherche hôtels : `searchHotels` n'utilise pas checkIn/checkOut/guests depuis les params → `_performEnhancedSearch` ne les passe pas
+- [ ] **CRITIQUE** : Recherche avancée (vols, hôtels, restaurants, produits) cassée — DuckDuckGo scraping + liens directs ne fonctionnent plus, nécessite modèles/scripts performants
+- [ ] **CRITIQUE** : Commandes slash ne fonctionnent pas (malgré enhancement LLM ajoutée) — flux extension_bridge → background → dom_actions à déboguer
+- [ ] **CRITIQUE** : Images impossibles à charger dans la conversation — FilePicker ou ImageUploadService à investiguer
+- [ ] **CRITIQUE** : PDFs impossibles à lire — extraction `_extractPdf()` retourne des résultats partiels/vides
+- [ ] **HAUTE** : Autres types de fichiers (DOCX, XLSX, PPTX) : extraction médiocre, résultats partiels

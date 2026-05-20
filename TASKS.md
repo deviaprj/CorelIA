@@ -1,6 +1,72 @@
 # TASKS.md — Suivi Corely
 
-Dernière mise à jour : 2026-05-20 — Session complète : TTS, /docgen, Extension, Tests
+Dernière mise à jour : 2026-05-20 — Session V11 : OpenRouter TTS, ModelRouter, Vocal LLM, File Fixes
+
+## Terminé — Session V11 (2026-05-20) — OpenRouter TTS + ModelRouter + Vocal LLM + Fixes ✅
+
+### OpenRouter TTS (nouveau) ✅
+- **Fichier** : `lib/features/chat/data/openrouter_tts_service.dart`
+- Remplace Edge TTS comme moteur TTS primaire sur mobile
+- Chaîne : gpt-4o-mini-tts → kokoro-82m (fallback)
+- TtsVoice enum (nova, shimmer, alloy, echo, fable, onyx)
+- emotionVoiceMap : neutral→nova, joyful→shimmer, serious→echo, excited→fable, sad→onyx
+- Texte tronqué à 4096 chars, `isAvailable` getter
+- Cache audio via `TtsCacheService.putBytes()`
+
+### ModelRouter (nouveau) ✅
+- **Fichier** : `lib/features/chat/data/model_router.dart`
+- TaskType enum : general, reasoning, vision, document, code, longFile, vocal, vocalFast
+- RateLimitTracker avec cooldown map
+- Chaîne vocale : arcee/trinity → neversleep/ring-2.6-1t → deepseek-r1:free → gpt-4o-mini
+- Chaîne vocalFast : neversleep/ring-2.6-1t → arcee/trinity → deepseek-r1:free → gpt-4o-mini
+
+### Vocal LLM params ✅
+- temperature=0.95, top_p=0.95, frequency_penalty=0.2
+- Prompt jovial injecté : "MODE VOCAL ACTIF — Réponds comme un ami au téléphone"
+- `sendMessage()` accepte `modelOverride` et `isVoiceConversation`
+
+### TTS vitesse ajustée ✅
+- OpenRouter TTS speed : 0.65
+- flutter_tts base : 0.45
+- TtsEmotion rates réduits (neutral 0.85, joyful 0.95, etc.)
+- speech_bridge.js rates ajustés (neutral 0.90, joyful 1.00, etc.)
+
+### File attachment fix ✅
+- Guard : `if (trimmed.isEmpty && imageBase64 == null && fileContent == null) return;`
+- effectiveText : "Analyse ce document" quand texte vide mais fichier attaché
+- DOCX MIME type corrigé : offancedocument → officedocument
+- Hard 6000-char cap supprimé (respecte 15k/30k pro/free)
+
+### Slash commands LLM enhancement ✅
+- `/searchpage` : LLM analyse sémantique des occurrences, fallback indexOf
+- `/extract` : LLM nettoyage/structuration du texte, fallback raw text
+- `/metadata` : LLM évaluation SEO + suggestions, fallback raw metadata
+- `/autofill` : LLM génère JSON de données de test → fill fields, fallback hardcoded "Jean Dupont"
+
+### ModelSelectorBar ✅
+- 6 chips : Auto, Flash, Pro, Raison, Code, Vision
+- `selectedModel` default : 'auto'
+
+### DeepSeek SSE ✅
+- Skip `reasoning_content` dans les deltas SSE
+- `max_completion_tokens` pour reasoner, `max_tokens` pour les autres
+
+### Auth fallback ✅
+- isDemoMode=true quand Firebase indisponible
+- authRepositoryProvider throws StateError en demo mode
+
+---
+
+## CRITIQUE — Prochaine session
+
+### BUGS CRITIQUES À RÉSOUDRE EN PRIORITÉ
+- [ ] **Recherche avancée cassée** : vols, hôtels, restaurants, produits — DuckDuckGo scraping + liens directs ne fonctionnent plus. Nécessite réflexion sur modèles et scripts performants pour retrouver et optimiser cela.
+- [ ] **Commandes slash ne fonctionnent pas** : malgré enhancement LLM, le flux complet est cassé. Déboguer extension_bridge → background → dom_actions.
+- [ ] **Images impossibles à charger** : FilePicker ou ImageUploadService à investiguer.
+- [ ] **PDFs impossibles à lire** : extraction `_extractPdf()` retourne résultats partiels/vides.
+- [ ] **Autres fichiers médiocres** : DOCX, XLSX, PPTX extraction partielle, résultats décevants.
+
+---
 
 ## Terminé — Session 2026-05-20 — Bug Fixes ✅
 
