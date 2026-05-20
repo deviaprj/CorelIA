@@ -57,6 +57,7 @@ class InputBarState extends ConsumerState<InputBar> {
   final _focusNode = FocusNode();
   bool _hasText = false;
   DateTime? _lastSentAt;
+  bool _suppressSlashFilter = false;
 
   TextEditingController get controller => _controller;
 
@@ -71,7 +72,7 @@ class InputBarState extends ConsumerState<InputBar> {
     final val = text.isNotEmpty;
     if (val != _hasText) setState(() => _hasText = val);
     // Notify parent when typing a slash command
-    if (widget.onSlashTextChanged != null) {
+    if (widget.onSlashTextChanged != null && !_suppressSlashFilter) {
       if (text.startsWith('/')) {
         widget.onSlashTextChanged!(text.substring(1));
       } else {
@@ -82,10 +83,18 @@ class InputBarState extends ConsumerState<InputBar> {
 
   /// Replace current text with a slash command (e.g. "/download ").
   void setCommandText(String commandWithSpace) {
+    _suppressSlashFilter = true;
     _controller.text = commandWithSpace;
     _controller.selection = TextSelection.fromPosition(
       TextPosition(offset: _controller.text.length),
     );
+    _focusNode.requestFocus();
+    // Re-enable slash filter after the current microtask cycle
+    Future.microtask(() => _suppressSlashFilter = false);
+  }
+
+  /// Focus the text input field.
+  void requestFocus() {
     _focusNode.requestFocus();
   }
 

@@ -229,9 +229,9 @@ void main() {
         ),
       );
 
-      // Trouver le Row principal
-      final row = find.byType(Row);
-      expect(row, findsOneWidget);
+      // Trouver les Rows (message + action row for user messages)
+      final rows = find.byType(Row);
+      expect(rows, findsWidgets);
     });
 
     testWidgets('assistant message should align to start',

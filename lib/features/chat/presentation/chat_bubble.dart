@@ -10,10 +10,18 @@ import '../../../core/constants.dart';
 import 'voice_service.dart';
 
 class ChatBubble extends StatelessWidget {
-  const ChatBubble({super.key, required this.message, this.showTts = true});
+  const ChatBubble({
+    super.key,
+    required this.message,
+    this.showTts = true,
+    this.onCopy,
+    this.onEdit,
+  });
 
   final Message message;
   final bool showTts;
+  final VoidCallback? onCopy;
+  final VoidCallback? onEdit;
 
   @override
   Widget build(BuildContext context) {
@@ -143,6 +151,12 @@ class ChatBubble extends StatelessWidget {
                 ),
                 if (!isUser && !message.isStreaming && message.content.isNotEmpty)
                   _ActionRow(message: message, showTts: showTts),
+                if (isUser && message.content.isNotEmpty)
+                  _UserActionRow(
+                    message: message,
+                    onCopy: onCopy,
+                    onEdit: onEdit,
+                  ),
                 if (!isUser && message.hasSearchSources)
                   _SourcesRow(sources: message.searchSources!),
               ],
@@ -176,7 +190,7 @@ class _ActionRow extends ConsumerWidget {
             Clipboard.setData(ClipboardData(text: message.content));
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(
-                content: Text('Copié dans le presse-papiers'),
+                content: Text('Copie dans le presse-papiers'),
                 duration: Duration(seconds: 1),
               ),
             );
@@ -195,7 +209,7 @@ class _ActionRow extends ConsumerWidget {
         if (showTts) ...[
           _ActionButton(
             icon: isSpeaking ? Icons.stop_circle_outlined : Icons.volume_up_outlined,
-            tooltip: isSpeaking ? 'Arrêter' : 'Lire',
+            tooltip: isSpeaking ? 'Arreter' : 'Lire',
             onTap: () {
               if (isSpeaking) {
                 voiceNotifier.stopSpeaking();
@@ -205,6 +219,47 @@ class _ActionRow extends ConsumerWidget {
             },
           ),
         ],
+      ],
+    );
+  }
+}
+
+/// Action row for user messages (copy + edit).
+class _UserActionRow extends StatelessWidget {
+  const _UserActionRow({
+    required this.message,
+    this.onCopy,
+    this.onEdit,
+  });
+
+  final Message message;
+  final VoidCallback? onCopy;
+  final VoidCallback? onEdit;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _ActionButton(
+          icon: Icons.copy_outlined,
+          tooltip: 'Copier',
+          onTap: onCopy ?? () {
+            Clipboard.setData(ClipboardData(text: message.content));
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Copie dans le presse-papiers'),
+                duration: Duration(seconds: 1),
+              ),
+            );
+          },
+        ),
+        if (onEdit != null)
+          _ActionButton(
+            icon: Icons.edit_outlined,
+            tooltip: 'Modifier',
+            onTap: onEdit!,
+          ),
       ],
     );
   }

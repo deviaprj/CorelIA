@@ -26,18 +26,22 @@ class SlashCommand {
 
 /// Liste des commandes slash disponibles.
 class SlashCommands {
+  static final RegExp _argTokenizer = RegExp(
+    '"([^"\\\\]*(?:\\\\.[^"\\\\]*)*)"|\'([^\'\\\\]*(?:\\\\.[^\'\\\\]*)*)\'|(\\S+)',
+  );
+
   static const List<SlashCommand> all = [
     SlashCommand(
       name: 'download',
-      description: 'Télécharger un fichier (vidéo, image, document) depuis une URL',
-      usage: '/download <url> [filename]',
+      description: 'Télécharger un fichier depuis une URL, ou sans argument tous les liens du dernier /links',
+      usage: '/download [url] [filename]',
       params: ['url', 'filename'],
       icon: Icons.download,
     ),
     SlashCommand(
       name: 'links',
       description: 'Extraire les liens de la page courante (filtrables par type)',
-      usage: '/links [all|video|image|audio|document]',
+      usage: '/links [all|video|videos|image|audio|document]',
       params: ['filter'],
       icon: Icons.link,
     ),
@@ -184,7 +188,7 @@ class SlashCommands {
     SlashCommand(
       name: 'translate',
       description: 'Traduire le contenu de la page ou un texte sélectionné',
-      usage: '/translate [fr|en|es|de|it|pt|ja|zh|ar]',
+      usage: '/translate [fr|en|es|de|it|pt|ja|zh|ar|ru|ko|nl]',
       params: ['langue_cible'],
       icon: Icons.translate,
     ),
@@ -195,17 +199,39 @@ class SlashCommands {
       params: ['terme'],
       icon: Icons.pageview,
     ),
+    SlashCommand(
+      name: 'docgen',
+      description: 'Générer un document riche (word, powerpoint, excel, pdf, markdown, texte) à partir d\'un sujet',
+      usage: '/docgen <format> <sujet> [nom_fichier]',
+      params: ['format', 'sujet', 'nom_fichier'],
+      icon: Icons.description,
+    ),
   ];
 
   /// Recherche les commandes correspondant à un préfixe.
   static List<SlashCommand> search(String prefix) {
-    if (prefix.isEmpty) return all;
-    final lower = prefix.toLowerCase();
-    return all
+    if (prefix.isEmpty) {
+      final sorted = List<SlashCommand>.from(all)
+        ..sort((a, b) => a.name.compareTo(b.name));
+      return sorted;
+    }
+    final lower = prefix.toLowerCase().trim();
+    final commandToken = lower.split(RegExp(r'\s+')).first;
+
+    final matches = all
         .where((cmd) =>
-            cmd.name.toLowerCase().startsWith(lower) ||
+            cmd.name.toLowerCase().startsWith(commandToken) ||
             cmd.description.toLowerCase().contains(lower))
         .toList();
+
+    matches.sort((a, b) {
+      final aStarts = a.name.toLowerCase().startsWith(commandToken);
+      final bStarts = b.name.toLowerCase().startsWith(commandToken);
+      if (aStarts != bStarts) return aStarts ? -1 : 1;
+      return a.name.compareTo(b.name);
+    });
+
+    return matches;
   }
 
   /// Parse une commande slash depuis le texte de l'utilisateur.
@@ -214,7 +240,26 @@ class SlashCommands {
     final trimmed = text.trim();
     if (!trimmed.startsWith('/')) return null;
 
-    final parts = trimmed.substring(1).split(RegExp(r'\s+'));
+    final raw = trimmed.substring(1).trim();
+    if (raw.isEmpty) return null;
+
+    final parts = <String>[];
+    for (final match in _argTokenizer.allMatches(raw)) {
+      final quotedDouble = match.group(1);
+      final quotedSingle = match.group(2);
+      final unquoted = match.group(3);
+      final token = quotedDouble ?? quotedSingle ?? unquoted;
+      if (token == null) continue;
+      // Conserver explicitement les tokens vides quotés (ex: /pdf "" mon_fichier)
+      if (token.isEmpty && quotedDouble == null && quotedSingle == null) continue;
+      parts.add(
+        token
+            .replaceAll(r'\"', '"')
+            .replaceAll(r"\'", "'")
+            .replaceAll(r'\\', r'\'),
+      );
+    }
+
     if (parts.isEmpty) return null;
 
     final cmdName = parts[0].toLowerCase();

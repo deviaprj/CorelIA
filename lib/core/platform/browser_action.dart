@@ -25,11 +25,12 @@ enum BrowserActionType {
   const BrowserActionType(this.value);
   final String value;
 
-  static BrowserActionType fromString(String value) =>
-      BrowserActionType.values.firstWhere(
-        (e) => e.value == value,
-        orElse: () => BrowserActionType.getPageContent,
-      );
+  static BrowserActionType fromString(String value) {
+    return BrowserActionType.values.firstWhere(
+      (e) => e.value == value,
+      orElse: () => BrowserActionType.getPageContent,
+    );
+  }
 }
 
 /// Requête d'action navigateur envoyée depuis Flutter vers l'extension.

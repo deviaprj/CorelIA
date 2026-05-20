@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:js' as js;
 import 'package:flutter/foundation.dart';
 import 'browser_action.dart';
@@ -35,8 +36,8 @@ class ExtensionBridge {
   }
 
   void _setupListeners() {
-    _addWindowListener('corely_selected_text', (js.JsObject event) {
-      final detail = event['detail'] as js.JsObject?;
+    _addWindowListener('corely_selected_text', (event) {
+      final detail = _readProp(event, 'detail');
       if (detail == null) return;
       final text = _getString(detail, 'text');
       if (text.isNotEmpty) {
@@ -45,8 +46,8 @@ class ExtensionBridge {
       }
     });
 
-    _addWindowListener('corely_page_content', (js.JsObject event) {
-      final detail = event['detail'] as js.JsObject?;
+    _addWindowListener('corely_page_content', (event) {
+      final detail = _readProp(event, 'detail');
       if (detail == null) return;
       final title = _getString(detail, 'title');
       final url = _getString(detail, 'url');
@@ -56,17 +57,30 @@ class ExtensionBridge {
       }
     });
 
-    _addWindowListener('corely_browser_action_result', (js.JsObject event) {
-      final detail = event['detail'] as js.JsObject?;
+    _addWindowListener('corely_browser_action_result', (event) {
+      final detail = _readProp(event, 'detail');
       if (detail == null) return;
 
-      final result = BrowserActionResult.fromJson({
-        'actionId': _getString(detail, 'actionId'),
-        'action': _getString(detail, 'action'),
-        'success': _getBool(detail, 'success') ?? false,
-        'data': detail['data'],
-        'error': _getString(detail, 'error'),
-      });
+      final actionId = _getString(detail, 'actionId');
+      final actionStr = _getString(detail, 'action');
+      final success = _getBool(detail, 'success') ?? false;
+      final error = _getNullableString(detail, 'error');
+
+      Map<String, dynamic>? dataMap;
+      try {
+        final data = _toDartValue(_readProp(detail, 'data'));
+        dataMap = data is Map ? Map<String, dynamic>.from(data) : null;
+      } catch (e) {
+        debugPrint('[ExtensionBridge] Error parsing action result data: $e');
+      }
+
+      final result = BrowserActionResult(
+        actionId: actionId,
+        action: BrowserActionType.fromString(actionStr),
+        success: success,
+        data: dataMap,
+        error: error,
+      );
 
       // Complete pending future
       final completer = _pendingActions.remove(result.actionId);
@@ -117,9 +131,9 @@ class ExtensionBridge {
       );
     }
 
-    // Timeout 10 secondes
+    // Timeout 15 secondes (8s JS DOM timeout + marge)
     return completer.future.timeout(
-      const Duration(seconds: 10),
+      const Duration(seconds: 15),
       onTimeout: () {
         _pendingActions.remove(action.actionId);
         return BrowserActionResult(
@@ -136,13 +150,17 @@ class ExtensionBridge {
 
   /// Ajoute un event listener via dart:js en utilisant allowInterop
   /// pour éviter les erreurs de type en mode minifié.
-  void _addWindowListener(String type, void Function(js.JsObject) callback) {
+  void _addWindowListener(String type, void Function(dynamic) callback) {
     try {
       // js.context est le contexte global (window en navigateur)
       js.context.callMethod('addEventListener', [
         type,
-        js.allowInterop((event) {
-          callback(event as js.JsObject);
+        js.allowInterop((dynamic event) {
+          try {
+            callback(event);
+          } catch (e) {
+            debugPrint('[ExtensionBridge] Error in $type listener: $e');
+          }
         }),
       ]);
     } catch (e) {
@@ -150,9 +168,19 @@ class ExtensionBridge {
     }
   }
 
-  String _getString(js.JsObject obj, String key) {
+  dynamic _readProp(dynamic obj, String key) {
     try {
-      final value = obj[key];
+      if (obj is js.JsObject) return obj[key];
+      if (obj is Map) return obj[key];
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  String _getString(dynamic obj, String key) {
+    try {
+      final value = _readProp(obj, key);
       if (value is String) return value;
       return '';
     } catch (_) {
@@ -160,9 +188,35 @@ class ExtensionBridge {
     }
   }
 
-  bool? _getBool(js.JsObject obj, String key) {
+  String? _getNullableString(dynamic obj, String key) {
     try {
-      final value = obj[key];
+      final value = _readProp(obj, key);
+      if (value == null) return null;
+      if (value is String) return value.isEmpty ? null : value;
+      return value.toString();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  dynamic _toDartValue(dynamic jsValue) {
+    if (jsValue == null) return null;
+    if (jsValue is String || jsValue is num || jsValue is bool) return jsValue;
+    if (jsValue is Map || jsValue is List) return jsValue;
+    try {
+      final jsonString = js.context['JSON'].callMethod('stringify', [jsValue]) as String?;
+      if (jsonString == null || jsonString == 'undefined' || jsonString.isEmpty) {
+        return null;
+      }
+      return jsonDecode(jsonString);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  bool? _getBool(dynamic obj, String key) {
+    try {
+      final value = _readProp(obj, key);
       if (value is bool) return value;
       return null;
     } catch (_) {

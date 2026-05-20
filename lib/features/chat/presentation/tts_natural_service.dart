@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_tts/flutter_tts.dart';
@@ -42,7 +43,7 @@ class TtsNaturalService {
   bool _isSpeaking = false;
   TtsEngine _activeEngine = TtsEngine.flutterTts;
   TtsEmotion _currentEmotion = TtsEmotion.neutral;
-  double _speechRate = 0.50;
+  double _speechRate = 0.44;
   double _pitch = 1.10;
   String _language = 'fr-FR';
 
@@ -93,7 +94,7 @@ class TtsNaturalService {
   }
 
   Future<void> setSpeed(double rate) async {
-    _speechRate = rate.clamp(0.5, 2.0);
+    _speechRate = rate.clamp(0.35, 1.30);
     if (_flutterTtsReady) {
       await _flutterTts.setSpeechRate(_speechRate);
     }
@@ -381,24 +382,79 @@ class TtsNaturalService {
       debugPrint('[TtsNaturalService] flutter_tts emotion params failed: $e');
     }
 
-    final completer = Completer<void>();
-    _flutterTts.setCompletionHandler(() {
-      if (!completer.isCompleted) completer.complete();
-    });
-
     try {
-      await _flutterTts.speak(text);
-      await completer.future;
+      final chunks = _splitForNaturalSpeech(text);
+      for (var i = 0; i < chunks.length; i++) {
+        if (!_isSpeaking) break;
+        final completer = Completer<void>();
+        _flutterTts.setCompletionHandler(() {
+          if (!completer.isCompleted) completer.complete();
+        });
+        _flutterTts.setErrorHandler((_) {
+          if (!completer.isCompleted) completer.complete();
+        });
+
+        await _flutterTts.speak(chunks[i]);
+        await completer.future.timeout(
+          const Duration(seconds: 25),
+          onTimeout: () {},
+        );
+
+        if (i < chunks.length - 1) {
+          await Future<void>.delayed(const Duration(milliseconds: 140));
+        }
+      }
     } catch (e) {
       debugPrint('[TtsNaturalService] flutter_tts error: $e');
     } finally {
       _flutterTts.setCompletionHandler(() {});
+      _flutterTts.setErrorHandler((_) {});
       // Restaurer les valeurs par défaut
       try {
         await _flutterTts.setSpeechRate(_speechRate);
         await _flutterTts.setPitch(_pitch);
       } catch (_) {}
     }
+  }
+
+  List<String> _splitForNaturalSpeech(String text) {
+    final normalized = text
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+    if (normalized.isEmpty) return const [];
+
+    const maxChunkLength = 220;
+    final sentenceChunks = normalized.split(RegExp(r'(?<=[\.!?;:])\s+'));
+    final chunks = <String>[];
+    final current = StringBuffer();
+
+    void flush() {
+      if (current.isNotEmpty) {
+        chunks.add(current.toString().trim());
+        current.clear();
+      }
+    }
+
+    for (final sentence in sentenceChunks) {
+      if (sentence.length > maxChunkLength) {
+        flush();
+        for (var i = 0; i < sentence.length; i += maxChunkLength) {
+          final end = math.min(i + maxChunkLength, sentence.length);
+          chunks.add(sentence.substring(i, end).trim());
+        }
+        continue;
+      }
+
+      final nextLength = current.length + (current.isNotEmpty ? 1 : 0) + sentence.length;
+      if (nextLength > maxChunkLength) {
+        flush();
+      }
+      if (current.isNotEmpty) current.write(' ');
+      current.write(sentence);
+    }
+
+    flush();
+    return chunks.where((c) => c.isNotEmpty).toList(growable: false);
   }
 
   Future<void> stop() async {

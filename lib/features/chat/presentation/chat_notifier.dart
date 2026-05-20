@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:share_plus/share_plus.dart';
 import '../data/ai_client.dart';
 import '../data/chat_api_service.dart';
 import '../data/firestore_chat_repository.dart';
@@ -18,6 +19,7 @@ import '../data/file_upload_service.dart';
 import '../data/search_quota_service.dart';
 import '../data/voice_quota_service.dart';
 import '../data/ollama_vision_service.dart';
+import '../data/document_generation_service.dart';
 import '../domain/conversation.dart';
 import '../domain/message.dart';
 import '../../../core/constants.dart';
@@ -61,6 +63,8 @@ final enhancedSearchServiceProvider =
     Provider((ref) => EnhancedSearchService());
 final weatherServiceProvider = Provider((ref) => WeatherService());
 final locationServiceProvider = Provider((ref) => LocationService());
+final documentGenerationServiceProvider =
+  Provider((ref) => DocumentGenerationService());
 
 // ── Chat state ─────────────────────────────────────────────────────────────
 class ChatState {
@@ -109,6 +113,9 @@ class ChatState {
 }
 
 class ChatNotifier extends FamilyNotifier<ChatState, String> {
+  List<String> _lastLinksForDownload = const [];
+  String _lastLinksFilter = 'all';
+
   @override
   ChatState build(String conversationId) {
     ref.listen(messagesStreamProvider(conversationId), (_, next) {
@@ -131,11 +138,20 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
   /// Retourne true si la commande a ete traitee (ne pas envoyer a l'IA).
   Future<bool> handleSlashCommand(String text) async {
     final parsed = SlashCommands.parse(text);
-    if (parsed == null) return false;
+    if (parsed == null) {
+      debugPrint('[ChatNotifier] Slash command parse returned null for: ${text.length > 60 ? '${text.substring(0, 60)}...' : text}');
+      return false;
+    }
+    debugPrint('[ChatNotifier] Slash command intercepted: /${parsed.command.name} (${parsed.args.length} args)');
 
     final bridge = ref.read(extensionBridgeProvider);
-    if (!bridge.isExtension) {
-      // Les commandes slash ne fonctionnent que dans l'extension
+    final isExtension = bridge.isExtension;
+
+    // Commands that work on ALL platforms (not just extension)
+    final universalCommands = {'docgen'};
+
+    if (!isExtension && !universalCommands.contains(parsed.command.name)) {
+      // Extension-only commands require the extension bridge.
       state = state.copyWith(
         error: 'Commande /${parsed.command.name} disponible uniquement dans l\'extension Chrome.',
         isStreaming: false,
@@ -222,23 +238,36 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
         return await _handleSlashTranslate(parsed, bridge);
       case 'searchpage':
         return await _handleSlashSearchPage(parsed, bridge);
+      case 'docgen':
+        return await _handleSlashDocgen(parsed, bridge);
       default:
         return false;
     }
   }
 
   Future<bool> _handleSlashDownload(ParsedSlashCommand cmd, ExtensionBridge bridge) async {
+    List<String> urlsToDownload;
+    String? filename;
+
     if (cmd.args.isEmpty) {
-      state = state.copyWith(error: 'Usage : /download <url> [filename]', isStreaming: false);
-      return true;
+      if (_lastLinksForDownload.isEmpty) {
+        state = state.copyWith(
+          error: 'Aucun lien en mémoire. Lancez d\'abord `/links`, puis `/download`.',
+          isStreaming: false,
+        );
+        return true;
+      }
+      urlsToDownload = _lastLinksForDownload;
+    } else {
+      urlsToDownload = [cmd.args[0]];
+      filename = cmd.args.length > 1 ? cmd.args[1] : null;
     }
-    final url = cmd.args[0];
-    final filename = cmd.args.length > 1 ? cmd.args[1] : null;
 
     final action = BrowserAction(
       action: BrowserActionType.download,
       params: {
-        'url': url,
+        if (urlsToDownload.length == 1) 'url': urlsToDownload.first,
+        if (urlsToDownload.length > 1) 'urls': urlsToDownload,
         if (filename != null) 'filename': filename,
       },
     );
@@ -247,7 +276,14 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
       final downloaded = result.data?['downloaded'] as List? ?? [];
       final count = downloaded.where((d) => (d as Map?)?['success'] == true).length;
       state = state.copyWith(error: null, isStreaming: false);
-      _addAssistantMessage('Téléchargement lancé pour $count fichier(s).');
+      if (cmd.args.isEmpty) {
+        _addAssistantMessage(
+          'Téléchargement lancé pour $count fichier(s) depuis le dernier `/links` '
+          '(filtre `${_lastLinksFilter}`, ${_lastLinksForDownload.length} lien(s) en mémoire).',
+        );
+      } else {
+        _addAssistantMessage('Téléchargement lancé pour $count fichier(s).');
+      }
     } else {
       state = state.copyWith(error: 'Erreur téléchargement : ${result.error}', isStreaming: false);
     }
@@ -285,7 +321,16 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
   }
 
   Future<bool> _handleSlashLinks(ParsedSlashCommand cmd, ExtensionBridge bridge) async {
-    final filter = cmd.args.isNotEmpty ? cmd.args[0] : 'all';
+    final rawFilter = cmd.args.isNotEmpty ? cmd.args[0] : 'all';
+    final aliases = <String, String>{
+      'videos': 'video',
+      'images': 'image',
+      'documents': 'document',
+      'docs': 'document',
+      'files': 'document',
+      'audios': 'audio',
+    };
+    final filter = aliases[rawFilter.toLowerCase()] ?? rawFilter.toLowerCase();
     final action = BrowserAction(
       action: BrowserActionType.extractLinks,
       params: {'filter': filter},
@@ -295,12 +340,28 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
       final links = result.data!['links'] as List? ?? [];
       final count = result.data!['count'] as int? ?? links.length;
       final appliedFilter = result.data!['filter'] as String? ?? 'all';
+      final totalMatched = result.data!['totalMatched'] as int? ?? count;
+      final pageUrl = result.data!['pageUrl'] as String? ?? '';
+      final pageTitle = result.data!['pageTitle'] as String? ?? '';
+      final rawAnchorCount = result.data!['rawAnchorCount'] as int? ?? 0;
+      final mediaSourceCount = result.data!['mediaSourceCount'] as int? ?? 0;
+      _lastLinksFilter = appliedFilter;
+      _lastLinksForDownload = links
+          .whereType<Map>()
+          .map((m) => m['href'])
+          .whereType<String>()
+          .where((u) => u.trim().isNotEmpty)
+          .toList(growable: false);
       final linksText = links.take(20).map((l) {
         final m = l as Map;
         return '- [${m['text'] ?? 'Lien'}](${m['href']})';
       }).join('\n');
       final more = count > 20 ? '\n... et ${count - 20} autres' : '';
-      _addAssistantMessage('Liens trouvés ($appliedFilter, $count au total) :\n$linksText$more');
+      final diagnostics = 'Diagnostic: page="${pageTitle.isNotEmpty ? pageTitle : 'N/A'}" '
+          'URL=$pageUrl | ancres_brutes=$rawAnchorCount | media_sources=$mediaSourceCount '
+          '| matches_total=$totalMatched | retournes=$count';
+      _addAssistantMessage('Liens trouvés ($appliedFilter, $count au total) :\n$linksText$more\n\n'
+          '$diagnostics\n\n💡 Lancez `/download` sans paramètre pour télécharger toute cette liste.');
     } else {
       state = state.copyWith(error: 'Erreur extraction liens : ${result.error}', isStreaming: false);
     }
@@ -465,26 +526,48 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
         _addAssistantMessage('Aucun formulaire trouvé sur cette page.');
       } else {
         final buffer = StringBuffer();
-        buffer.writeln('**$count formulaire(s) trouvé(s) :**\n');
-        for (var i = 0; i < forms.length; i++) {
-          final f = forms[i] as Map;
-          final inputs = (f['inputs'] as List? ?? []).cast<Map>();
-          buffer.writeln('### Formulaire ${i + 1}');
-          buffer.writeln('- Action : ${f['action'] ?? 'page courante'}');
-          buffer.writeln('- Méthode : ${f['method'] ?? 'GET'}');
-          buffer.writeln('- ${inputs.length} champ(s) :');
-          for (final input in inputs.take(15)) {
-            final required = input['required'] == true ? ' *' : '';
-            buffer.writeln('  - `${input['name']}` (${input['type']})$required');
+        final requestedIndex = cmd.args.isNotEmpty ? int.tryParse(cmd.args[0]) : null;
+
+        if (requestedIndex != null) {
+          if (requestedIndex < 0 || requestedIndex >= forms.length) {
+            state = state.copyWith(
+              error: 'Index de formulaire invalide: $requestedIndex (0..${forms.length - 1})',
+              isStreaming: false,
+            );
+            return true;
           }
-          if (inputs.length > 15) buffer.writeln('  - ... et ${inputs.length - 15} autres');
+
+          final f = forms[requestedIndex] as Map;
+          final inputs = (f['inputs'] as List? ?? []).cast<Map>();
+          buffer.writeln('**Formulaire ${requestedIndex + 1}/$count**');
+          buffer.writeln('- Action: ${f['action'] ?? 'N/A'}');
+          buffer.writeln('- Méthode: ${f['method'] ?? 'GET'}');
+          buffer.writeln('- ID: ${f['id'] ?? 'N/A'}');
+          buffer.writeln('- Champs: ${inputs.length}');
           buffer.writeln();
-        }
-        if (cmd.args.isNotEmpty) {
-          final idx = int.tryParse(cmd.args[0]) ?? 0;
-          buffer.writeln('💡 Utilisez `/autofill` pour remplir automatiquement le formulaire ${idx}.');
+          for (var i = 0; i < inputs.length && i < 20; i++) {
+            final input = inputs[i];
+            buffer.writeln(
+              '- ${input['tagName'] ?? 'INPUT'} `${input['name'] ?? ''}` '
+              '(type: ${input['type'] ?? 'text'}${input['required'] == true ? ', requis' : ''})',
+            );
+          }
+          if (inputs.length > 20) {
+            buffer.writeln('- ... et ${inputs.length - 20} autres');
+          }
+          buffer.writeln('\n💡 `/autofill` pour remplir ce formulaire automatiquement.');
         } else {
-          buffer.writeln('💡 `/forms 0` pour voir le 1er formulaire. `/autofill` pour remplissage automatique.');
+          buffer.writeln('**$count formulaire(s) trouvé(s)**\n');
+          for (var i = 0; i < forms.length; i++) {
+            final f = forms[i] as Map;
+            final method = (f['method'] ?? 'GET').toString();
+            final actionUrl = (f['action'] ?? '').toString();
+            final id = (f['id'] ?? '').toString();
+            final inputs = (f['inputs'] as List? ?? []).length;
+            buffer.writeln('- Formulaire #$i : $method ${actionUrl.isNotEmpty ? actionUrl : '(action N/A)'} '
+                '${id.isNotEmpty ? '| id=$id ' : ''}| $inputs champ(s)');
+          }
+          buffer.writeln('\n💡 `/forms 0` pour le détail d\'un formulaire. `/autofill` pour remplissage automatique.');
         }
         _addAssistantMessage(buffer.toString());
       }
@@ -502,9 +585,23 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
       if (tables.isEmpty) {
         _addAssistantMessage('Aucun tableau trouvé sur cette page.');
       } else {
+        final requestedIndex = cmd.args.isNotEmpty ? int.tryParse(cmd.args[0]) : null;
         final buffer = StringBuffer();
-        buffer.writeln('**${tables.length} tableau(x) trouvé(s)** | ${result.data!['totalRows'] ?? 0} lignes au total\n');
-        for (var i = 0; i < tables.length; i++) {
+
+        if (requestedIndex != null && (requestedIndex < 0 || requestedIndex >= tables.length)) {
+          state = state.copyWith(
+            error: 'Index de tableau invalide: $requestedIndex (0..${tables.length - 1})',
+            isStreaming: false,
+          );
+          return true;
+        }
+
+        final start = requestedIndex ?? 0;
+        final end = requestedIndex ?? (tables.length - 1);
+        final shownCount = end - start + 1;
+        buffer.writeln('**$shownCount tableau(x) affiché(s)** | ${result.data!['totalRows'] ?? 0} lignes au total\n');
+
+        for (var i = start; i <= end; i++) {
           final t = tables[i] as Map;
           buffer.writeln('### Tableau ${i + 1} : ${t['rowCount']} lignes × ${t['colCount']} colonnes');
           if (t['caption'] != null) buffer.writeln('*${t['caption']}*');
@@ -895,6 +992,207 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
     return true;
   }
 
+  Future<bool> _handleSlashDocgen(ParsedSlashCommand cmd, ExtensionBridge bridge) async {
+    if (cmd.args.length < 2) {
+      state = state.copyWith(
+        error: 'Usage : /docgen <format> <sujet> [nom_fichier]',
+        isStreaming: false,
+      );
+      return true;
+    }
+
+    final normalizedFormat = _normalizeDocFormat(cmd.args[0]);
+    final allowed = {'pdf', 'word', 'powerpoint', 'excel', 'markdown', 'text'};
+    if (!allowed.contains(normalizedFormat)) {
+      state = state.copyWith(
+        error: 'Format non supporte: ${cmd.args[0]}. Utilisez pdf, word, powerpoint, excel, markdown, text.',
+        isStreaming: false,
+      );
+      return true;
+    }
+
+    final topic = cmd.args[1];
+    final customFileName = cmd.args.length > 2 ? cmd.args[2] : null;
+
+    state = state.copyWith(error: null, isStreaming: true, isSearching: true);
+
+    try {
+      final appLang = ref.read(lang.languageProvider);
+      final searchService = ref.read(searchServiceProvider);
+      List<WebSearchResult> searchResults = [];
+      String searchContext = '';
+      try {
+        searchResults = await searchService.searchWithFallback(topic, lang: appLang.name);
+        searchContext = searchService.formatForAi(searchResults, topic);
+      } catch (e) {
+        debugPrint('[Docgen] Search failed, continuing without web context: $e');
+      }
+
+      final isPro = await ref.read(isProProvider.future).catchError((_) => false);
+      final draft = await _generateDocumentDraft(
+        topic: topic,
+        format: normalizedFormat,
+        searchContext: searchContext,
+        isPro: isPro,
+      );
+
+      final title = _extractDocumentTitle(draft, fallbackTopic: topic);
+      final sources = searchResults
+          .map((r) => '${r.title} — ${r.url}')
+          .toList(growable: false);
+
+      final generated = await ref.read(documentGenerationServiceProvider).generate(
+        format: normalizedFormat,
+        title: title,
+        body: draft,
+        sources: sources,
+        preferredFileName: customFileName,
+      );
+
+      // Download / share the generated document
+      bool downloadOk = false;
+      String? downloadError;
+
+      if (bridge.isExtension) {
+        final action = BrowserAction(
+          action: BrowserActionType.downloadData,
+          params: {
+            'contentBase64': generated.base64Content,
+            'mimeType': generated.mimeType,
+            'filename': generated.fileName,
+          },
+        );
+        final result = await bridge.executeAction(action);
+        downloadOk = result.success;
+        downloadError = result.error;
+      } else if (PlatformService.isMobile) {
+        // Mobile: share the file via system share sheet
+        try {
+          final xFile = XFile.fromData(
+            generated.bytes,
+            name: generated.fileName,
+            mimeType: generated.mimeType,
+          );
+          await Share.shareXFiles(
+            [xFile],
+            subject: generated.fileName,
+            text: 'Document genere par Corely: ${generated.fileName}',
+          );
+          downloadOk = true;
+        } catch (e) {
+          downloadError = 'Partage echoue: $e';
+          debugPrint('[Docgen] Mobile share failed: $e');
+        }
+      }
+
+      // Fallback: embed document content in chat message
+      if (!downloadOk) {
+        final shortPreview = draft.length > 800 ? '${draft.substring(0, 800)}...' : draft;
+        final downloadHint = bridge.isExtension
+            ? '\n\n_Telechargement echoue: ${downloadError ?? "inconnu"}._'
+            : PlatformService.isMobile
+                ? '\n\n_Partage echoue: ${downloadError ?? "inconnu"}._'
+                : '\n\n_Le document sera disponible via le partage._';
+        _addAssistantMessage(
+          'Document genere: **${generated.fileName}** (${generated.sizeBytes} octets)\n'
+          'Format: $normalizedFormat\n\n'
+          '---\n\n$shortPreview\n'
+          '---$downloadHint\n\n'
+          'La generation combine les connaissances IA et les resultats web recents.',
+        );
+      } else {
+        final shortPreview = draft.length > 500 ? '${draft.substring(0, 500)}...' : draft;
+        _addAssistantMessage(
+          'Document genere: ${generated.fileName} (${generated.sizeBytes} octets).\n'
+          'Format: $normalizedFormat\n\n'
+          'Apercu:\n$shortPreview\n\n'
+          'La generation combine les connaissances IA et les resultats web recents.',
+        );
+      }
+    } on AiException catch (e) {
+      state = state.copyWith(
+        error: _formatAiError(e),
+        isStreaming: false,
+        isSearching: false,
+      );
+    } catch (e) {
+      state = state.copyWith(
+        error: 'Erreur generation document: $e',
+        isStreaming: false,
+        isSearching: false,
+      );
+    } finally {
+      if (state.isStreaming || state.isSearching) {
+        state = state.copyWith(isStreaming: false, isSearching: false);
+      }
+    }
+
+    return true;
+  }
+
+  String _normalizeDocFormat(String raw) {
+    final lower = raw.toLowerCase();
+    if (lower == 'txt' || lower == 'text') return 'text';
+    if (lower == 'md' || lower == 'markdown') return 'markdown';
+    if (lower == 'doc' || lower == 'docx' || lower == 'word') return 'word';
+    if (lower == 'ppt' || lower == 'pptx' || lower == 'powerpoint') return 'powerpoint';
+    if (lower == 'xls' || lower == 'xlsx' || lower == 'excel') return 'excel';
+    if (lower == 'pdf') return 'pdf';
+    return lower;
+  }
+
+  Future<String> _generateDocumentDraft({
+    required String topic,
+    required String format,
+    required String searchContext,
+    required bool isPro,
+  }) async {
+    final system = 'Tu es un redacteur expert. Tu produis des documents finalisables '
+      'avec structure claire, sections numerotees, contenu factuel verifiable, '
+        'et un bloc "Images suggerees" qui decrit les visuels utiles.';
+
+    final user = 'Genere un document complet sur: "$topic". '
+      'Format cible: $format. '
+      'Utilise a la fois tes connaissances et le contexte web ci-dessous. '
+      'Le document doit inclure: titre, resume executif, sections detaillees, '
+      'plan d\'actions, references et images suggerees (description + utilite). '
+        'Ecris en francais sauf si le sujet impose une autre langue.\n\n'
+        'Contexte web:\n$searchContext';
+
+    final history = <Map<String, dynamic>>[
+      {'role': 'system', 'content': system},
+      {'role': 'user', 'content': user},
+    ];
+
+    final stream = _getDirectAiStream(history, isPro);
+    final buffer = StringBuffer();
+    await for (final token in stream) {
+      buffer.write(token);
+    }
+
+    final generated = buffer.toString().trim();
+    if (generated.isEmpty) {
+      throw const AiException('Generation vide');
+    }
+    return generated;
+  }
+
+  String _extractDocumentTitle(String draft, {required String fallbackTopic}) {
+    final h1 = RegExp(r'^#\s+(.+)$', multiLine: true).firstMatch(draft)?.group(1);
+    if (h1 != null && h1.trim().isNotEmpty) {
+      return h1.trim();
+    }
+
+    final firstLine = draft
+        .split('\n')
+        .map((l) => l.trim())
+        .firstWhere((l) => l.isNotEmpty, orElse: () => fallbackTopic)
+        .replaceAll(RegExp(r'^[\-\d.\s]+'), '');
+
+    final safe = firstLine.isEmpty ? fallbackTopic : firstLine;
+    return safe.length > 80 ? safe.substring(0, 80) : safe;
+  }
+
   String _jsonStr(String s) => '"${s.replaceAll('\\', '\\\\').replaceAll('"', '\\"').replaceAll('\n', '\\n')}"';
 
   /// Ajoute un message assistant au state (pour les résultats de commandes slash).
@@ -922,10 +1220,16 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
     if (trimmed.isEmpty && imageBase64 == null) return;
     if (trimmed.length > 10000 || state.isStreaming) return;
 
-    // Slash commands: intercept before AI processing (extension only)
-    if (trimmed.startsWith('/') && PlatformService.isExtension) {
+    // Slash commands: intercept before AI processing.
+    // Sur mobile, handleSlashCommand renvoie une erreur explicite.
+    if (trimmed.startsWith('/')) {
       final handled = await handleSlashCommand(trimmed);
       if (handled) return;
+      state = state.copyWith(
+        error: 'Commande slash inconnue ou non supportee: $trimmed',
+        isStreaming: false,
+      );
+      return;
     }
 
     final user = ref.read(currentUserProvider);
@@ -1012,6 +1316,15 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
       }
     }
 
+    final attachmentContext = _buildAttachmentContextForHistory(
+      text: trimmed,
+      imageBase64: imageBase64,
+      imageMimeType: imageMimeType,
+      fileName: fileName,
+      fileContent: fileContent,
+      isPro: isPro,
+    );
+
     // 1. Persister le message utilisateur dans le repo
     final userMsg = isDemoMode
         ? await mockChatRepository.addMessage(
@@ -1021,6 +1334,7 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
             imageBase64: imageBase64,
             imageMimeType: imageMimeType,
             fileName: fileName,
+            fileContext: attachmentContext,
           )
         : await ref.read(chatRepositoryProvider).addMessage(
             conversationId: arg,
@@ -1029,6 +1343,7 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
             imageBase64: imageBase64,
             imageMimeType: imageMimeType,
             fileName: fileName,
+            fileContext: attachmentContext,
           );
 
     // 2. ref.listen va sync le message utilisateur depuis le repo,
@@ -1247,6 +1562,37 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
     }
   }
 
+  String? _buildAttachmentContextForHistory({
+    required String text,
+    String? imageBase64,
+    String? imageMimeType,
+    String? fileName,
+    String? fileContent,
+    required bool isPro,
+  }) {
+    if (fileContent != null && fileContent.isNotEmpty) {
+      var doc = FileUploadService.truncateForContext(fileContent, isPro: isPro);
+      if (doc.length > 6000) {
+        doc = '${doc.substring(0, 6000)}\n\n[... contexte fichier compacté ...]';
+      }
+      final label = fileName ?? 'document';
+      if (imageBase64 != null && imageBase64.isNotEmpty) {
+        final mime = imageMimeType ?? 'image/jpeg';
+        return 'Document utilisateur: $label\n'
+            'Aperçu image extrait: $mime\n\n$doc';
+      }
+      return 'Document utilisateur: $label\n\n$doc';
+    }
+
+    if (imageBase64 != null && imageBase64.isNotEmpty) {
+      final mime = imageMimeType ?? 'image/jpeg';
+      final prompt = text.isNotEmpty ? text : 'Analyse cette image';
+      return 'Image utilisateur jointe ($mime).\nDemande associée: $prompt';
+    }
+
+    return null;
+  }
+
   Future<Stream<String>> _buildStream(
     Message userMsg,
     bool isPro, {
@@ -1282,6 +1628,24 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
       content: fullSystemPrompt,
       createdAt: DateTime.now(),
     ));
+
+    // Réinjecter un contexte fichier persistant pour les tours suivants.
+    // On ne le fait pas lorsqu'un nouveau document est déjà fourni dans ce tour.
+    if (fileContent == null || fileContent.isEmpty) {
+      final fileContexts = historyMessages
+          .where((m) => m.fileContext != null && m.fileContext!.isNotEmpty)
+          .toList();
+      for (final ctx in fileContexts.reversed.take(3).toList().reversed) {
+        historyMessages.insert(0, Message(
+          id: 'file_ctx_hist_${ctx.id}',
+          conversationId: arg,
+          role: Role.system,
+          content: 'Contexte fichier deja partage plus tot dans cette conversation. '
+              'Utilise-le si la question courante y fait reference.\n\n${ctx.fileContext!}',
+          createdAt: DateTime.now(),
+        ));
+      }
+    }
 
     // ── 2. Injecter le contexte fichier ────────────────────────────────
     if (fileContent != null && fileContent.isNotEmpty) {
@@ -1390,7 +1754,7 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
   }
 
   /// Route une requete avec image vers un modele vision.
-  /// Priorite : Ollama (si configuré) > OpenRouter GPT-4o-mini > DeepSeek chat.
+  /// Priorite : Ollama (si configure) > OpenRouter GPT-4o-mini > DeepSeek chat.
   Stream<String> _getVisionStream(List<Map<String, dynamic>> history) async* {
     // 0. Ollama vision locale (si configuré et disponible)
     final ollama = ref.read(ollamaVisionServiceProvider);
@@ -1451,16 +1815,22 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
     final deepSeekKey = AppConstants.deepSeekApiKey;
     if (deepSeekKey.isNotEmpty) {
       debugPrint('[ChatNotifier] Vision via DeepSeek chat');
-      yield* DeepSeekClient(apiKey: deepSeekKey).streamChat(
-        messages: history,
-        model: AppConstants.deepSeekVisionModel,
-        enableSearch: true,
-      );
-      return;
+      try {
+        yield* DeepSeekClient(apiKey: deepSeekKey).streamChat(
+          messages: history,
+          model: AppConstants.deepSeekVisionModel,
+          // Plusieurs APIs vision refusent la recherche web en mode image.
+          enableSearch: false,
+        );
+        return;
+      } on AiException catch (e) {
+        debugPrint('[ChatNotifier] DeepSeek vision error: ${e.message}');
+      }
     }
 
     throw const AiException(
-      'Analyse d\'image non disponible. Ajoutez une cle API OpenRouter.',
+      'Analyse d\'image indisponible. Verifiez la cle DeepSeek (vision) '
+      'ou ajoutez une cle OpenRouter.',
       statusCode: 400,
     );
   }
@@ -1481,8 +1851,8 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
   String _formatAiError(AiException e) {
     final msg = e.message;
     if (msg.contains('image') || msg.contains('image_url')) {
-      return 'Ce modele ne supporte pas l\'analyse d\'images. '
-          'Ajoutez une cle OpenRouter dans les parametres.';
+      return 'Analyse d\'image indisponible avec le fournisseur actuel. '
+          'Verifiez d\'abord la cle DeepSeek, puis OpenRouter si besoin.';
     }
     if (msg.contains('Clé API')) return msg;
     if (msg.contains('429') || msg.contains('Trop de requêtes')) {
@@ -1618,31 +1988,34 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
     final service = ref.read(enhancedSearchServiceProvider);
     switch (intent) {
       case 'products':
-        var products = await service.searchProducts(searchQuery,
+        final productQuery = _buildProductSearchQuery(searchQuery, params);
+        var products = await service.searchProducts(productQuery,
             hl: language.serpApiHl, gl: language.serpApiGl);
         if (products.isEmpty) {
-          products = await service.searchGoogleShopping(searchQuery,
+          products = await service.searchGoogleShopping(productQuery,
               hl: language.serpApiHl, gl: language.serpApiGl);
         }
         if (products.isNotEmpty) {
-          return EnhancedSearchService.formatProducts(products, searchQuery);
+          return EnhancedSearchService.formatProducts(products, productQuery);
         }
         return null;
 
       case 'bestdeal':
-        final dealProducts = await service.searchBestDeal(searchQuery,
+        final dealQuery = _buildProductSearchQuery(searchQuery, params);
+        final dealProducts = await service.searchBestDeal(dealQuery,
             hl: language.serpApiHl, gl: language.serpApiGl);
         if (dealProducts.isNotEmpty) {
-          return EnhancedSearchService.formatBestDeal(dealProducts, searchQuery);
+          return EnhancedSearchService.formatBestDeal(dealProducts, dealQuery);
         }
         return null;
 
       case 'secondhand':
         final condition = params?.condition ?? 'used';
-        final usedProducts = await service.searchSecondHand(searchQuery,
+        final usedQuery = _buildProductSearchQuery(searchQuery, params);
+        final usedProducts = await service.searchSecondHand(usedQuery,
             hl: language.serpApiHl, gl: language.serpApiGl, condition: condition);
         if (usedProducts.isNotEmpty) {
-          return EnhancedSearchService.formatSecondHand(usedProducts, searchQuery);
+          return EnhancedSearchService.formatSecondHand(usedProducts, usedQuery);
         }
         return null;
 
@@ -1678,10 +2051,19 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
         return null;
 
       case 'hotels':
-        final hotels = await service.searchHotels(searchQuery,
-            hl: language.serpApiHl, gl: language.serpApiGl);
+        final hotelQuery = params?.location?.isNotEmpty == true
+            ? params!.location!
+            : searchQuery;
+        final hotels = await service.searchHotels(
+          hotelQuery,
+          hl: language.serpApiHl,
+          gl: language.serpApiGl,
+          checkIn: params?.checkIn,
+          checkOut: params?.checkOut,
+          guests: params?.guests,
+        );
         if (hotels.isNotEmpty) {
-          return EnhancedSearchService.formatHotels(hotels, searchQuery);
+          return EnhancedSearchService.formatHotels(hotels, hotelQuery);
         }
         return null;
 
@@ -1744,6 +2126,25 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
       default:
         return null;
     }
+  }
+
+  static String _buildProductSearchQuery(String searchQuery, SearchParams? params) {
+    final tokens = <String>[searchQuery.trim()];
+    void add(String? value) {
+      if (value == null || value.trim().isEmpty) return;
+      final v = value.trim();
+      if (!tokens.any((t) => t.toLowerCase().contains(v.toLowerCase()))) {
+        tokens.add(v);
+      }
+    }
+
+    add(params?.category);
+    add(params?.color);
+    if (params?.condition == 'refurbished') add('reconditionné');
+    if (params?.condition == 'used') add('occasion');
+    if (params?.priceRange == 'cheapest') add('meilleur prix');
+
+    return tokens.join(' ').replaceAll(RegExp(r'\s+'), ' ').trim();
   }
 
   // ── Flight/Weather parameter parsers ──────────────────────────────────────

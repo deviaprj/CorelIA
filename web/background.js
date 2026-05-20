@@ -65,6 +65,47 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   return false;
 });
 
+function normalizeExternalUrl(inputUrl) {
+  if (!inputUrl || typeof inputUrl !== 'string') return null;
+  const raw = inputUrl.trim();
+  if (!raw) return null;
+
+  const shortcuts = {
+    google: 'google.com',
+    youtube: 'youtube.com',
+    gmail: 'gmail.com',
+    github: 'github.com',
+    wikipedia: 'wikipedia.org',
+    x: 'x.com',
+    twitter: 'x.com',
+  };
+
+  const completeHostname = (hostname) => {
+    const lower = hostname.toLowerCase();
+    if (lower.includes('.')) return hostname;
+    return shortcuts[lower] || `${lower}.com`;
+  };
+
+  if (/^(mailto|tel):/i.test(raw)) return raw;
+  if (/\s/.test(raw) && !raw.includes('/') && !raw.includes('.')) {
+    return `https://${completeHostname(raw)}`;
+  }
+
+  let candidate = raw;
+  if (candidate.startsWith('//')) candidate = `https:${candidate}`;
+  if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(candidate)) {
+    candidate = `https://${candidate.replace(/^\/+/, '')}`;
+  }
+
+  try {
+    const parsed = new URL(candidate);
+    parsed.hostname = completeHostname(parsed.hostname);
+    return parsed.toString();
+  } catch (_) {
+    return null;
+  }
+}
+
 // ── Browser action handler ─────────────────────────────────────────────────
 async function handleBrowserAction(message, _sender, sendResponse) {
   var actionId = message.actionId;
@@ -76,8 +117,20 @@ async function handleBrowserAction(message, _sender, sendResponse) {
     switch (action) {
       // ── Navigation actions (chrome.tabs API) ──────────────────────────────
       case 'OPEN_URL': {
-        var tab = await chrome.tabs.create({ url: params.url });
-        sendResponse({ success: true, data: { tabId: tab.id, url: tab.url || params.url } });
+        const normalizedUrl = normalizeExternalUrl(params.url);
+        if (!normalizedUrl) {
+          sendResponse({ success: false, error: 'Invalid URL' });
+          break;
+        }
+        try {
+          var tab = await Promise.race([
+            chrome.tabs.create({ url: normalizedUrl }),
+            new Promise((_, rej) => setTimeout(() => rej(new Error('Tab creation timed out (8s)')), 8000)),
+          ]);
+          sendResponse({ success: true, data: { tabId: tab.id, url: tab.url || normalizedUrl } });
+        } catch (urlErr) {
+          sendResponse({ success: false, error: urlErr.message || String(urlErr) });
+        }
         break;
       }
 
@@ -168,8 +221,8 @@ async function handleBrowserAction(message, _sender, sendResponse) {
               target: { tabId: domTabId },
               files: ['dom_actions.js'],
             });
-            // Small delay for script initialization
-            await new Promise(function (r) { setTimeout(r, 200); });
+            // Wait for script initialization (listener setup)
+            await new Promise(function (r) { setTimeout(r, 500); });
             domResults = await sendDomMessage(domTabId);
           } catch (injectErr) {
             domResults = { success: false, error: 'Script injection failed: ' + (injectErr.message || String(injectErr)) };
@@ -224,6 +277,46 @@ async function handleBrowserAction(message, _sender, sendResponse) {
         break;
       }
 
+      // ── Binary document download (base64 payload) ───────────────────────
+      case 'DOWNLOAD_DATA': {
+        var contentBase64 = (params.contentBase64 || '').trim();
+        var mimeType = (params.mimeType || 'application/octet-stream').trim();
+        var filename = (params.filename || 'corely_document').trim();
+
+        if (!contentBase64) {
+          sendResponse({ success: false, error: 'Missing contentBase64 payload' });
+          break;
+        }
+
+        try {
+          // Decode base64 → binary → Blob → blob URL (avoids Chrome's ~2MB data URL limit)
+          var binaryStr = atob(contentBase64);
+          var bytes = new Uint8Array(binaryStr.length);
+          for (var bi = 0; bi < binaryStr.length; bi++) {
+            bytes[bi] = binaryStr.charCodeAt(bi);
+          }
+          var blob = new Blob([bytes], { type: mimeType });
+          var blobUrl = URL.createObjectURL(blob);
+
+          var id = await Promise.race([
+            chrome.downloads.download({
+              url: blobUrl,
+              filename: filename,
+              saveAs: false,
+            }),
+            new Promise((_, rej) => setTimeout(() => rej(new Error('Download timed out (10s)')), 10000)),
+          ]);
+
+          // Clean up blob URL after download starts
+          setTimeout(function () { URL.revokeObjectURL(blobUrl); }, 5000);
+
+          sendResponse({ success: true, data: { id: id, filename: filename } });
+        } catch (dlErr) {
+          sendResponse({ success: false, error: dlErr.message || String(dlErr) });
+        }
+        break;
+      }
+
       // ── PDF generation ─────────────────────────────────────────────────────
       case 'SAVE_AS_PDF': {
         var pdfTabId = tabId || await getActiveTabId();
@@ -231,19 +324,18 @@ async function handleBrowserAction(message, _sender, sendResponse) {
           sendResponse({ success: false, error: 'No active tab' });
           break;
         }
-        // Use chrome.printing.submitJob if available (Chrome 116+),
-        // otherwise fall back to injecting window.print() in the page
         try {
-          await chrome.scripting.executeScript({
-            target: { tabId: pdfTabId },
-            func: function (opts) {
-              // Create a minimal print dialog that auto-saves as PDF
-              // Most users have "Save as PDF" in their print dialog
-              window.print();
-              return { printed: true };
-            },
-            args: [{ filename: params.filename || 'page' }],
-          });
+          var pdfResult = await Promise.race([
+            chrome.scripting.executeScript({
+              target: { tabId: pdfTabId },
+              func: function (opts) {
+                window.print();
+                return { printed: true };
+              },
+              args: [{ filename: params.filename || 'page' }],
+            }),
+            new Promise((_, rej) => setTimeout(() => rej(new Error('PDF print timed out (8s)')), 8000)),
+          ]);
           sendResponse({ success: true, data: { message: 'Print dialog opened' } });
         } catch (pdfErr) {
           sendResponse({ success: false, error: pdfErr.message || String(pdfErr) });

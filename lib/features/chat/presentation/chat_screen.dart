@@ -6,6 +6,7 @@ import 'chat_notifier.dart';
 import 'chat_bubble.dart';
 import 'input_bar.dart';
 import 'slash_commands.dart';
+import '../domain/message.dart';
 import 'voice_conversation_service.dart';
 import 'aurora_splash.dart';
 import '../data/image_upload_service.dart';
@@ -238,8 +239,19 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                             );
                           }
                           final msgIdx = state.canLoadMore ? i - 1 : i;
+                          final msg = state.displayedMessages[msgIdx];
                           return ChatBubble(
-                            message: state.displayedMessages[msgIdx],
+                            message: msg,
+                            onEdit: msg.role == Role.user && msg.content.isNotEmpty
+                                ? () {
+                                    _inputBarController.text = msg.content;
+                                    _inputBarController.selection =
+                                        TextSelection.fromPosition(
+                                      TextPosition(offset: _inputBarController.text.length),
+                                    );
+                                    _inputBarKey.currentState?.requestFocus();
+                                  }
+                                : null,
                           );
                         },
                       ),
@@ -261,8 +273,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                   }
                 },
               ),
-              // Slash command palette (extension only)
-              if (isExtension && _slashFilter != null)
+              // Slash command palette (all platforms)
+              if (_slashFilter != null)
                 SlashCommandPalette(
                   filter: _slashFilter!,
                   onSelected: (cmd) {
@@ -278,9 +290,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                 isLoading: state.isStreaming,
                 attachment: _pendingAttachment,
                 onCancelAttachment: () => setState(() => _pendingAttachment = null),
-                onSlashTextChanged: isExtension ? (filter) {
+                onSlashTextChanged: (filter) {
                   setState(() => _slashFilter = filter);
-                } : null,
+                },
                 onSend: (text, {imageBase64, imageMimeType, fileName, fileContent}) {
                   notifier.sendMessage(
                     text,

@@ -177,13 +177,13 @@
 
   // Mapping émotion → paramètres voix
   const emotionConfig = {
-    neutral:   { rate: 1.0,  pitch: 1.0,  voice: null },
-    joyful:    { rate: 1.15, pitch: 1.25, voice: null },
-    sad:       { rate: 0.85, pitch: 0.85, voice: null },
-    serious:   { rate: 0.9,  pitch: 0.9,  voice: null },
-    excited:   { rate: 1.25, pitch: 1.35, voice: null },
-    cheerful:  { rate: 1.1,  pitch: 1.2,  voice: null },
-    friendly:  { rate: 1.05, pitch: 1.1,  voice: null },
+    neutral:   { rate: 0.85,  pitch: 1.0,  voice: null },
+    joyful:    { rate: 0.98,  pitch: 1.25, voice: null },
+    sad:       { rate: 0.72,  pitch: 0.85, voice: null },
+    serious:   { rate: 0.77,  pitch: 0.9,  voice: null },
+    excited:   { rate: 1.06,  pitch: 1.35, voice: null },
+    cheerful:  { rate: 0.94,  pitch: 1.2,  voice: null },
+    friendly:  { rate: 0.89,  pitch: 1.1,  voice: null },
   };
 
   function getBestVoice(lang) {

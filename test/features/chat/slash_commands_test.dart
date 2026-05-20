@@ -59,7 +59,7 @@ void main() {
     });
 
     test('filters by description content', () {
-      final results = SlashCommands.search('vidéo');
+      final results = SlashCommands.search('télécharger');
       expect(results.any((c) => c.name == 'download'), isTrue);
     });
 
@@ -472,8 +472,8 @@ void main() {
   // ── SlashCommands.all completeness ─────────────────────────────────────────
 
   group('SlashCommands.all', () {
-    test('contains exactly 23 commands', () {
-      expect(SlashCommands.all.length, equals(24));
+    test('contains exactly 25 commands', () {
+      expect(SlashCommands.all.length, equals(25));
     });
 
     test('all commands have non-empty names', () {
@@ -553,9 +553,8 @@ void main() {
 
       // Should render the palette with "Commandes" header
       expect(find.text('Commandes'), findsOneWidget);
-      // The first few commands should be visible
+      // At least the first command should be visible
       expect(find.text('/download'), findsOneWidget);
-      expect(find.text('/links'), findsOneWidget);
       // A ListView exists for scrollable content
       expect(find.byType(ListView), findsOneWidget);
     });

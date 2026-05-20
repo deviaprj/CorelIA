@@ -93,7 +93,11 @@
 
       chrome.runtime.sendMessage(message).then((response) => {
         // Réponse du background SW — forwarder au Dart via CustomEvent
-        console.info('[ExtensionBridge] Réponse action:', detail.actionId, 'success:', response?.success);
+        if (response && !response.success && response.error) {
+          console.warn('[ExtensionBridge] Réponse action:', detail.actionId, 'success: false, error:', response.error);
+        } else {
+          console.info('[ExtensionBridge] Réponse action:', detail.actionId, 'success:', response?.success);
+        }
         window.dispatchEvent(new CustomEvent('corely_browser_action_result', {
           detail: {
             actionId: detail.actionId,
