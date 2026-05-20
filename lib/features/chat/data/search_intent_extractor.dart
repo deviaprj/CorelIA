@@ -14,6 +14,7 @@ class SearchParams {
   final String? checkOut;
   final int? guests;
   final String? priceRange; // 'cheapest', 'budget', 'mid', 'luxury'
+  final String? color; // 'noir', 'bleu', etc.
   final String? condition; // 'new', 'used', 'refurbished', 'any'
   final String? sortBy; // 'price_asc', 'price_desc', 'rating', 'distance'
   final String? domain; // Specific domain hint (e.g., 'concerts', 'musées')
@@ -31,6 +32,7 @@ class SearchParams {
     this.checkOut,
     this.guests,
     this.priceRange,
+    this.color,
     this.condition,
     this.sortBy,
     this.domain,
@@ -49,6 +51,7 @@ class SearchParams {
     if (checkOut != null) m['checkOut'] = checkOut!;
     if (guests != null) m['guests'] = guests.toString();
     if (priceRange != null) m['priceRange'] = priceRange!;
+    if (color != null) m['color'] = color!;
     if (condition != null) m['condition'] = condition!;
     if (sortBy != null) m['sortBy'] = sortBy!;
     if (domain != null) m['domain'] = domain!;

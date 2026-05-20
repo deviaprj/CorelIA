@@ -16,6 +16,9 @@ class Message {
   final String? imageBase64;
   // Support fichiers
   final String? fileName;
+  final String? fileContent;
+  // Contexte de fichier injecté dans le prompt IA
+  final String? fileContext;
   final List<String>? searchSources;
 
   const Message({
@@ -30,6 +33,8 @@ class Message {
     this.imageMimeType,
     this.imageBase64,
     this.fileName,
+    this.fileContent,
+    this.fileContext,
     this.searchSources,
   });
 

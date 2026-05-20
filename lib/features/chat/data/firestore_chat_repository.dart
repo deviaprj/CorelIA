@@ -132,6 +132,8 @@ class FirestoreChatRepository {
     String? imageBase64,
     String? imageMimeType,
     String? fileName,
+    String? fileContent,
+    String? fileContext,
     List<String>? searchSources,
   }) async {
     if (_db == null) {
@@ -143,6 +145,8 @@ class FirestoreChatRepository {
         imageBase64: imageBase64,
         imageMimeType: imageMimeType,
         fileName: fileName,
+        fileContent: fileContent,
+        fileContext: fileContext,
         searchSources: searchSources,
       );
     }
@@ -156,6 +160,8 @@ class FirestoreChatRepository {
       imageBase64: imageBase64,
       imageMimeType: imageMimeType,
       fileName: fileName,
+      fileContent: fileContent,
+      fileContext: fileContext,
       searchSources: searchSources,
     );
     await _db!

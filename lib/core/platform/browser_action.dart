@@ -20,6 +20,7 @@ enum BrowserActionType {
   waitForSelector('WAIT_FOR_SELECTOR'),
   getElementInfo('GET_ELEMENT_INFO'),
   download('DOWNLOAD'),
+  downloadData('DOWNLOAD_DATA'),
   saveAsPdf('SAVE_AS_PDF');
 
   const BrowserActionType(this.value);

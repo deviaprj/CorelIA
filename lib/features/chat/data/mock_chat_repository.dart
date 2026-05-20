@@ -106,6 +106,8 @@ class MockChatRepository {
     String? imageBase64,
     String? imageMimeType,
     String? fileName,
+    String? fileContent,
+    String? fileContext,
     List<String>? searchSources,
   }) async {
     final msg = Message(
@@ -118,6 +120,8 @@ class MockChatRepository {
       imageBase64: imageBase64,
       imageMimeType: imageMimeType,
       fileName: fileName,
+      fileContent: fileContent,
+      fileContext: fileContext,
       searchSources: searchSources,
     );
 
