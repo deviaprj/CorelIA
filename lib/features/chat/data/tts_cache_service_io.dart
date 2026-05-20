@@ -76,6 +76,26 @@ class TtsCacheService {
     return file.path;
   }
 
+  /// Stocke des bytes audio directement en cache. Retourne le chemin du fichier cache.
+  Future<String?> putBytes(String text, List<int> bytes, {required String voice, required double rate, required double pitch, String format = 'mp3'}) async {
+    if (_cacheDir == null) await init();
+    if (_cacheDir == null) return null;
+
+    try {
+      final key = _cacheKey(text, voice, rate, pitch, format);
+      final destFile = File('${_cacheDir!.path}/$key.mp3');
+      await destFile.writeAsBytes(bytes);
+
+      await _enforceMaxEntries();
+
+      debugPrint('[TtsCache] Cached (bytes): "${text.length > 30 ? '${text.substring(0, 30)}...' : text}"');
+      return destFile.path;
+    } catch (e) {
+      debugPrint('[TtsCache] Erreur mise en cache bytes : $e');
+      return null;
+    }
+  }
+
   /// Stocke un fichier audio en cache. Retourne le chemin du fichier cache.
   Future<String?> put(String text, String sourcePath, {required String voice, required double rate, required double pitch, String format = 'audio-24khz-48kbitrate-mono-mp3'}) async {
     if (_cacheDir == null) await init();

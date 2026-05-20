@@ -7,6 +7,7 @@ import 'package:uuid/uuid.dart';
 import '../domain/app_user.dart';
 import '../../../core/constants.dart';
 import '../../../core/providers/firebase_providers.dart';
+import '../../../main.dart' show isDemoMode;
 
 abstract class AuthRepository {
   Stream<User?> get authStateChanges;
@@ -122,6 +123,11 @@ class FirebaseAuthRepository implements AuthRepository {
 
 // ── Provider ──────────────────────────────────────────────────────────────────
 final authRepositoryProvider = Provider<AuthRepository>((ref) {
+  // En mode DEMO, ne pas creer FirebaseAuthRepository (Firebase non initialise)
+  if (isDemoMode) {
+    // Retourne un stub qui delegue toujours au mock
+    throw StateError('Firebase non disponible en mode DEMO');
+  }
   return FirebaseAuthRepository(
     auth: ref.watch(firebaseAuthProvider),
     firestore: ref.watch(firestoreProvider),

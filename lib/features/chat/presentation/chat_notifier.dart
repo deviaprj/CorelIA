@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:share_plus/share_plus.dart';
 import '../data/ai_client.dart';
 import '../data/chat_api_service.dart';
+import '../data/model_router.dart';
 import '../data/firestore_chat_repository.dart';
 import '../data/mock_chat_repository.dart';
 import '../data/quota_service.dart';
@@ -74,6 +75,7 @@ class ChatState {
   final int? remainingRequests;
   final bool isSearching;
   final bool useSearch;
+  final String selectedModel;
   final int displayCount;
 
   const ChatState({
@@ -83,6 +85,7 @@ class ChatState {
     this.remainingRequests,
     this.isSearching = false,
     this.useSearch = false,
+    this.selectedModel = 'auto',
     this.displayCount = 30,
   });
 
@@ -93,6 +96,7 @@ class ChatState {
     int? remainingRequests,
     bool? isSearching,
     bool? useSearch,
+    String? selectedModel,
     int? displayCount,
   }) =>
       ChatState(
@@ -102,6 +106,7 @@ class ChatState {
         remainingRequests: remainingRequests ?? this.remainingRequests,
         isSearching: isSearching ?? this.isSearching,
         useSearch: useSearch ?? this.useSearch,
+        selectedModel: selectedModel ?? this.selectedModel,
         displayCount: displayCount ?? this.displayCount,
       );
 
@@ -115,6 +120,7 @@ class ChatState {
 class ChatNotifier extends FamilyNotifier<ChatState, String> {
   List<String> _lastLinksForDownload = const [];
   String _lastLinksFilter = 'all';
+  String? _lastUsedModelId;
 
   @override
   ChatState build(String conversationId) {
@@ -393,11 +399,28 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
       params: {'selector': selector},
     );
     final result = await bridge.executeAction(action);
-    if (result.success && result.data != null) {
-      final text = result.data!['text'] as String? ?? '';
-      _addAssistantMessage('Texte extrait de "$selector" (${text.length} caractères) :\n\n${text.substring(0, text.length > 3000 ? 3000 : text.length)}');
-    } else {
+    if (!result.success || result.data == null) {
       state = state.copyWith(error: 'Erreur extraction : ${result.error}', isStreaming: false);
+      return true;
+    }
+
+    final text = result.data!['text'] as String? ?? '';
+    if (text.isEmpty) {
+      _addAssistantMessage('Aucun texte extrait de "$selector".');
+      return true;
+    }
+
+    final rawPreview = text.length > 3000 ? '${text.substring(0, 3000)}...' : text;
+
+    // LLM : nettoyage et structuration du texte
+    final truncatedForLlm = text.length > 6000 ? '${text.substring(0, 6000)}\n[... contenu tronqué ...]' : text;
+    final llmPrompt = 'Nettoie et structure le texte extrait suivant (sélecteur CSS: "$selector"). '
+        'Supprime le bruit (menus, publicités, scripts). '
+        'Organise en sections claires. Conserve les informations utiles.\n\n$truncatedForLlm';
+    try {
+      await sendMessage(llmPrompt);
+    } catch (e) {
+      _addAssistantMessage('Texte extrait de "$selector" (${text.length} caractères) :\n\n$rawPreview');
     }
     return true;
   }
@@ -686,47 +709,150 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
   Future<bool> _handleSlashMetadata(ParsedSlashCommand cmd, ExtensionBridge bridge) async {
     final action = BrowserAction(action: BrowserActionType.pageMetadata, params: {});
     final result = await bridge.executeAction(action);
-    if (result.success && result.data != null) {
-      final d = result.data!;
-      final buffer = StringBuffer();
-      buffer.writeln('**Métadonnées de la page**\n');
-      buffer.writeln('| Propriété | Valeur |');
-      buffer.writeln('|-----------|--------|');
-      void row(String k, dynamic v) {
-        final val = v?.toString().replaceAll('\n', ' ').trim() ?? 'N/A';
-        buffer.writeln('| $k | ${val.length > 100 ? '${val.substring(0, 100)}...' : val} |');
-      }
-      row('Titre', d['title']);
-      row('URL', d['url']);
-      row('Description', d['description']);
-      row('Auteur', d['author']);
-      row('Date publication', d['publishDate']);
-      row('Langue', d['language']);
-      row('Mots', d['wordCount']);
-      row('OpenGraph Title', d['ogTitle']);
-      row('OpenGraph Image', d['ogImage']);
-      buffer.writeln('\n**Titres principaux :**');
-      final headings = (d['headings'] as List? ?? []).cast<Map>();
-      for (final h in headings.take(15)) {
-        buffer.writeln('- ${h['level']} : ${h['text']}');
-      }
-      buffer.writeln('\n💡 `/summarize` pour résumer. `/export json` pour exporter. `/links` pour les liens.');
-      _addAssistantMessage(buffer.toString());
-    } else {
+    if (!result.success || result.data == null) {
       state = state.copyWith(error: 'Erreur métadonnées : ${result.error}', isStreaming: false);
+      return true;
+    }
+
+    final d = result.data!;
+    final buffer = StringBuffer();
+    buffer.writeln('**Métadonnées de la page**\n');
+    buffer.writeln('| Propriété | Valeur |');
+    buffer.writeln('|-----------|--------|');
+    void row(String k, dynamic v) {
+      final val = v?.toString().replaceAll('\n', ' ').trim() ?? 'N/A';
+      buffer.writeln('| $k | ${val.length > 100 ? '${val.substring(0, 100)}...' : val} |');
+    }
+    row('Titre', d['title']);
+    row('URL', d['url']);
+    row('Description', d['description']);
+    row('Auteur', d['author']);
+    row('Date publication', d['publishDate']);
+    row('Langue', d['language']);
+    row('Mots', d['wordCount']);
+    row('OpenGraph Title', d['ogTitle']);
+    row('OpenGraph Image', d['ogImage']);
+    buffer.writeln('\n**Titres principaux :**');
+    final headings = (d['headings'] as List? ?? []).cast<Map>();
+    for (final h in headings.take(15)) {
+      buffer.writeln('- ${h['level']} : ${h['text']}');
+    }
+    final rawMeta = buffer.toString();
+
+    // LLM : interprétation SEO et suggestions
+    final llmPrompt = 'Analyse les métadonnées suivantes d\'une page web. '
+        'Identifie le thème principal, évalue le SEO (titre, description, OpenGraph), '
+        'signale les métadonnées manquantes importantes, suggère des améliorations. '
+        'Réponds en français en 3-4 phrases.\n\n$rawMeta';
+    try {
+      await sendMessage(llmPrompt);
+    } catch (e) {
+      _addAssistantMessage('$rawMeta\n\n/summarize pour résumer. /export json pour exporter. /links pour les liens.');
     }
     return true;
   }
 
   Future<bool> _handleSlashAutofill(ParsedSlashCommand cmd, ExtensionBridge bridge) async {
+    // Étape 1 : Extraire la structure du formulaire
+    final formAction = BrowserAction(action: BrowserActionType.extractForms, params: {});
+    final formResult = await bridge.executeAction(formAction);
+
+    if (!formResult.success || formResult.data == null) {
+      return await _handleSlashAutofillFallback(bridge);
+    }
+
+    final forms = formResult.data!['forms'] as List? ?? [];
+    if (forms.isEmpty) {
+      _addAssistantMessage('Aucun formulaire trouvé sur cette page.');
+      return true;
+    }
+
+    // Étape 2 : Décrire la structure pour le LLM
+    final structureBuffer = StringBuffer();
+    for (var fi = 0; fi < forms.length; fi++) {
+      final f = forms[fi] as Map;
+      final inputs = (f['inputs'] as List? ?? []).cast<Map>();
+      structureBuffer.writeln('\nFormulaire $fi:');
+      for (final input in inputs.take(30)) {
+        final name = (input['name'] ?? '').toString();
+        final type = (input['type'] ?? 'text').toString();
+        final placeholder = (input['placeholder'] ?? '').toString();
+        final label = (input['label'] ?? '').toString();
+        final required = input['required'] == true ? ' [requis]' : '';
+        if (name.isNotEmpty) {
+          structureBuffer.writeln('- name="$name" type="$type" placeholder="$placeholder" label="$label"$required');
+        }
+      }
+    }
+    final formStructure = structureBuffer.toString();
+    if (formStructure.trim().isEmpty) {
+      return await _handleSlashAutofillFallback(bridge);
+    }
+
+    // Étape 3 : Demander au LLM des valeurs cohérentes
+    String? llmJson;
+    try {
+      final history = <Map<String, dynamic>>[
+        {'role': 'system', 'content': 'Tu génères des données de test pour des formulaires web. '
+            'Réponds UNIQUEMENT en JSON : {"name1": "valeur1", "name2": "valeur2"}. '
+            'Adapte les valeurs au contexte. Pas de markdown, pas d\'explication.'},
+        {'role': 'user', 'content': 'Génère des données de test cohérentes pour ce formulaire:\n$formStructure'},
+      ];
+      final isPro = await ref.read(isProProvider.future).catchError((_) => false);
+      final stream = _getDirectAiStream(history, isPro);
+      final buf = StringBuffer();
+      await for (final token in stream) {
+        buf.write(token);
+      }
+      llmJson = buf.toString().trim();
+    } catch (e) {
+      debugPrint('[Autofill] LLM failed: $e');
+    }
+
+    // Étape 4 : Parser et remplir
+    Map<String, String>? fieldValues;
+    if (llmJson != null) {
+      try {
+        final jsonMatch = RegExp(r'```(?:json)?\s*([\s\S]*?)```').firstMatch(llmJson);
+        final jsonStr = jsonMatch?.group(1)?.trim() ?? llmJson;
+        final parsed = jsonDecode(jsonStr);
+        if (parsed is Map<String, dynamic>) {
+          fieldValues = parsed.map((k, v) => MapEntry(k, v.toString()));
+        }
+      } catch (e) {
+        debugPrint('[Autofill] JSON parse failed: $e');
+      }
+    }
+
+    if (fieldValues != null && fieldValues.isNotEmpty) {
+      var filledCount = 0;
+      for (final entry in fieldValues.entries) {
+        final selector = 'input[name="${entry.key}"], textarea[name="${entry.key}"], select[name="${entry.key}"]';
+        final fillAction = BrowserAction(
+          action: BrowserActionType.fillForm,
+          params: {'selector': selector, 'value': entry.value},
+        );
+        final fillResult = await bridge.executeAction(fillAction);
+        if (fillResult.success) filledCount++;
+      }
+      _addAssistantMessage('Formulaire rempli intelligemment : **$filledCount / ${fieldValues.length}** champ(s).\n\n'
+          'Valeurs générées par IA selon le contexte de la page.\n'
+          '/fill <sélecteur> <valeur> pour modifier un champ. /forms pour voir les formulaires.');
+    } else {
+      return await _handleSlashAutofillFallback(bridge);
+    }
+    return true;
+  }
+
+  Future<bool> _handleSlashAutofillFallback(ExtensionBridge bridge) async {
     final action = BrowserAction(action: BrowserActionType.autoFillPage, params: {});
     final result = await bridge.executeAction(action);
     if (result.success && result.data != null) {
       final filled = result.data!['filledCount'] as int? ?? 0;
       final total = result.data!['totalInputs'] as int? ?? 0;
       _addAssistantMessage('Formulaire rempli automatiquement : **$filled / $total** champ(s).\n\n'
-          '⚠️ Données de test utilisées (Jean Dupont). Modifiez les champs si nécessaire.\n'
-          '💡 `/fill <sélecteur> <valeur>` pour modifier un champ spécifique. `/forms` pour voir les formulaires.');
+          'Données de test utilisées (Jean Dupont). Modifiez les champs si nécessaire.\n'
+          '/fill <sélecteur> <valeur> pour modifier un champ spécifique. /forms pour voir les formulaires.');
     } else {
       state = state.copyWith(error: 'Erreur autofill : ${result.error}', isStreaming: false);
     }
@@ -970,22 +1096,34 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
 
     if (occurrences.isEmpty) {
       _addAssistantMessage('Terme **"$searchTerm"** non trouvé dans la page.\n'
-          '💡 Essayez `/summarize` pour un résumé, ou `/metadata` pour les mots-clés de la page.');
-    } else {
-      final buffer = StringBuffer();
-      buffer.writeln('**"$searchTerm"** trouvé **${occurrences.length} fois** dans la page :\n');
-      for (var i = 0; i < occurrences.length && i < 10; i++) {
-        final pos = occurrences[i];
-        final start = pos > 80 ? pos - 80 : 0;
-        final end = pos + searchTerm.length + 80 < content.length ? pos + searchTerm.length + 80 : content.length;
-        final context = content.substring(start, end).replaceAll('\n', ' ');
-        final prefix = start > 0 ? '...' : '';
-        final suffix = end < content.length ? '...' : '';
-        buffer.writeln('${i + 1}. $prefix${context}${suffix}');
-      }
-      if (occurrences.length > 10) buffer.writeln('\net ${occurrences.length - 10} autres occurrences...');
-      buffer.writeln('\n💡 `/extract` pour extraire une section spécifique. `/summarize` pour un résumé complet.');
-      _addAssistantMessage(buffer.toString());
+          'Essayez `/summarize` pour un résumé, ou `/metadata` pour les mots-clés de la page.');
+      return true;
+    }
+
+    // Construire les snippets de contexte
+    final buffer = StringBuffer();
+    buffer.writeln('**"$searchTerm"** trouvé **${occurrences.length} fois** :\n');
+    for (var i = 0; i < occurrences.length && i < 10; i++) {
+      final pos = occurrences[i];
+      final start = pos > 80 ? pos - 80 : 0;
+      final end = pos + searchTerm.length + 80 < content.length ? pos + searchTerm.length + 80 : content.length;
+      final context = content.substring(start, end).replaceAll('\n', ' ');
+      final prefix = start > 0 ? '...' : '';
+      final suffix = end < content.length ? '...' : '';
+      buffer.writeln('${i + 1}. $prefix$context$suffix');
+    }
+    if (occurrences.length > 10) buffer.writeln('\net ${occurrences.length - 10} autres occurrences...');
+    final rawResult = buffer.toString();
+
+    // LLM : analyse sémantique des occurrences
+    final snippet = rawResult.length > 3000 ? rawResult.substring(0, 3000) : rawResult;
+    final llmPrompt = 'Analyse les occurrences du terme "$searchTerm" trouvées dans cette page. '
+        'Donne un résumé sémantique : de quoi la page parle quand elle mentionne ce terme ? '
+        'Quels sont les contextes principaux ? Réponds en 2-3 phrases.\n\nOccurrences:\n$snippet';
+    try {
+      await sendMessage(llmPrompt);
+    } catch (e) {
+      _addAssistantMessage('$rawResult\n\n/extract pour extraire une section. /summarize pour un résumé.');
     }
     return true;
   }
@@ -1213,10 +1351,16 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
     String? fileName,
     String? fileContent,
     bool isVoiceConversation = false,
+    String? modelOverride,
   }) async {
     final trimmed = text.trim();
-    if (trimmed.isEmpty && imageBase64 == null) return;
+    if (trimmed.isEmpty && imageBase64 == null && fileContent == null) return;
     if (trimmed.length > 10000 || state.isStreaming) return;
+
+    // Message par défaut pour les pièces jointes sans texte
+    final effectiveText = trimmed.isEmpty && (imageBase64 != null || fileContent != null)
+        ? 'Analyse ce document'
+        : trimmed;
 
     // Slash commands: intercept before AI processing.
     // Sur mobile, handleSlashCommand renvoie une erreur explicite.
@@ -1315,7 +1459,7 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
     }
 
     final attachmentContext = _buildAttachmentContextForHistory(
-      text: trimmed,
+      text: effectiveText,
       imageBase64: imageBase64,
       imageMimeType: imageMimeType,
       fileName: fileName,
@@ -1328,7 +1472,7 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
         ? await mockChatRepository.addMessage(
             conversationId: arg,
             role: Role.user,
-            content: trimmed,
+            content: effectiveText,
             imageBase64: imageBase64,
             imageMimeType: imageMimeType,
             fileName: fileName,
@@ -1337,7 +1481,7 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
         : await ref.read(chatRepositoryProvider).addMessage(
             conversationId: arg,
             role: Role.user,
-            content: trimmed,
+            content: effectiveText,
             imageBase64: imageBase64,
             imageMimeType: imageMimeType,
             fileName: fileName,
@@ -1452,6 +1596,8 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
             fileContent: fileContent,
             fileName: fileName,
             enhancedContext: enhancedResultMarkdown,
+            modelOverride: modelOverride,
+            isVoiceConversation: isVoiceConversation,
           );
 
           await for (final token in stream) {
@@ -1467,6 +1613,10 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
           }
           break; // Stream reussi, sortir de la boucle retry
         } on AiException catch (e) {
+          // Marquer le modèle comme rate-limited sur 429
+          if (e.statusCode == 429) {
+            ModelRouter.markRateLimited(_lastUsedModelId ?? 'unknown');
+          }
           if (retries < maxRetries &&
               (e.statusCode == null || e.statusCode! >= 500 || e.statusCode == 429)) {
             retries++;
@@ -1489,7 +1639,7 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
         finalContent = '$enhancedResultMarkdown\n\n$finalContent';
       }
 
-      final model = isPro ? AppConstants.mistralModel : AppConstants.deepSeekModel;
+      final model = _lastUsedModelId ?? AppConstants.deepSeekModel;
 
       // Parser et exécuter les actions navigateur (extension Chrome uniquement)
       // puis supprimer les balises [CORELY_ACTION] du texte affiché
@@ -1569,10 +1719,7 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
     required bool isPro,
   }) {
     if (fileContent != null && fileContent.isNotEmpty) {
-      var doc = FileUploadService.truncateForContext(fileContent, isPro: isPro);
-      if (doc.length > 6000) {
-        doc = '${doc.substring(0, 6000)}\n\n[... contexte fichier compacté ...]';
-      }
+      final doc = FileUploadService.truncateForContext(fileContent, isPro: isPro);
       final label = fileName ?? 'document';
       if (imageBase64 != null && imageBase64.isNotEmpty) {
         final mime = imageMimeType ?? 'image/jpeg';
@@ -1599,14 +1746,25 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
     String? fileContent,
     String? fileName,
     String? enhancedContext,
+    String? modelOverride,
+    bool isVoiceConversation = false,
   }) async {
     // ── 0. Prompt système Corely ───────────────────────────────────────────
     final corelySystemPrompt = ref.read(systemPromptProvider);
 
-    // Ajouter le contexte des actions navigateur si on est en extension Chrome
-    final fullSystemPrompt = PlatformService.isExtension
+    var fullSystemPrompt = PlatformService.isExtension
         ? '$corelySystemPrompt\n\n$_browserActionSystemContext'
         : corelySystemPrompt;
+
+    // Prompt jovial pour les conversations vocales
+    if (isVoiceConversation) {
+      fullSystemPrompt =
+          '$fullSystemPrompt\n\n'
+          'MODE VOCAL ACTIF — Réponds comme un ami au téléphone : '
+          'jovial, naturel, concis (2-3 phrases max), pas de listes, pas de markdown. '
+          'Tutoie, sois chaleureux et dynamique. Pas de "En tant qu\'IA" ni d\'excuses inutiles. '
+          'Va droit au but avec le sourire.';
+    }
 
     // ── 1. Construire l'historique ───────────────────────────────────────
     final historyMessages = state.messages
@@ -1716,43 +1874,73 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
     final historyMaps = historyMessages.map((m) => m.toApiMap()).toList();
 
     // ── 4. DeepSeek / OpenRouter direct (100% autonome) ───────────────
-    return _getDirectAiStream(historyMaps, isPro);
+    return _getDirectAiStream(historyMaps, isPro, modelOverride: modelOverride, isVoiceConversation: isVoiceConversation);
   }
 
   Stream<String> _getDirectAiStream(
     List<Map<String, dynamic>> history,
-    bool isPro,
-  ) {
-    // 1. Les images passent TOUJOURS par un modele vision,
-    //    independamment du statut Pro/Free.
+    bool isPro, {
+    String? modelOverride,
+    bool isVoiceConversation = false,
+  }) {
+    // 1. Les images passent TOUJOURS par un modele vision
     final hasImage = history.any((m) => m['content'] is List);
     if (hasImage) {
       return _getVisionStream(history);
     }
 
-    // 2. Pro sans image → OpenRouter (Mistral)
-    if (isPro) {
-      final key = AppConstants.openRouterApiKey;
-      if (key.isNotEmpty) {
-        return OpenRouterClient(apiKey: key).streamChat(
-          messages: history,
-          model: AppConstants.mistralModel,
-          maxTokens: AppConstants.proMaxTokens,
-        );
-      }
-    }
+    // 2. Classifer la tâche et résoudre le modèle via ModelRouter
+    final lastUserContent = history.lastWhere(
+      (m) => m['role'] == 'user',
+      orElse: () => {'content': ''},
+    )['content'];
+    final userText = (lastUserContent is String) ? lastUserContent : '';
+    final taskType = ModelRouter.classifyTask(userText);
+    final effectiveOverride = modelOverride ?? state.selectedModel;
+    final entry = ModelRouter.resolveModel(taskType, userOverride: effectiveOverride);
 
-    // 3. Free (ou Pro sans OpenRouter) → DeepSeek texte
-    final deepSeekKey = AppConstants.deepSeekApiKey;
-    if (deepSeekKey.isEmpty) {
+    if (entry == null) {
       return _mockResponseStream();
     }
-    return DeepSeekClient(apiKey: deepSeekKey)
-        .streamChat(messages: history, enableSearch: false);
+
+    debugPrint('[ChatNotifier] ${taskType.name} → ${entry.modelId} (${entry.provider})');
+    _lastUsedModelId = entry.modelId;
+    return _buildStreamForModel(entry, history, isVoiceConversation: isVoiceConversation);
+  }
+
+  /// Construit le stream pour un modèle donné selon son provider.
+  Stream<String> _buildStreamForModel(
+    ModelEntry entry,
+    List<Map<String, dynamic>> history, {
+    String? systemPrompt,
+    bool isVoiceConversation = false,
+  }) {
+    if (entry.provider == 'deepseek') {
+      final key = AppConstants.deepSeekApiKey;
+      if (key.isEmpty) return _mockResponseStream();
+      return DeepSeekClient(apiKey: key).streamChat(
+        messages: history,
+        model: entry.modelId,
+        systemPrompt: systemPrompt,
+        enableSearch: entry.supportsSearch,
+      );
+    }
+
+    // OpenRouter
+    final key = AppConstants.openRouterApiKey;
+    if (key.isEmpty) return _mockResponseStream();
+    return OpenRouterClient(apiKey: key).streamChat(
+      messages: history,
+      model: entry.modelId,
+      systemPrompt: systemPrompt,
+      temperature: isVoiceConversation ? 0.95 : null,
+      topP: isVoiceConversation ? 0.95 : null,
+      frequencyPenalty: isVoiceConversation ? 0.2 : null,
+    );
   }
 
   /// Route une requete avec image vers un modele vision.
-  /// Priorite : Ollama (si configure) > OpenRouter GPT-4o-mini > DeepSeek chat.
+  /// Priorite : Ollama (si configure) > ModelRouter vision chain.
   Stream<String> _getVisionStream(List<Map<String, dynamic>> history) async* {
     // 0. Ollama vision locale (si configuré et disponible)
     final ollama = ref.read(ollamaVisionServiceProvider);
@@ -1762,7 +1950,6 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
       if (available) {
         debugPrint('[ChatNotifier] Vision via Ollama');
         try {
-          // Extraire l'image base64 du dernier message utilisateur
           final lastUserMsg = history.lastWhere(
             (m) => m['role'] == 'user',
             orElse: () => {},
@@ -1797,39 +1984,17 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
       }
     }
 
-    // 1. OpenRouter GPT-4o-mini
-    final openRouterKey = AppConstants.openRouterApiKey;
-    if (openRouterKey.isNotEmpty) {
-      debugPrint('[ChatNotifier] Vision via OpenRouter');
-      yield* OpenRouterClient(apiKey: openRouterKey).streamChat(
-        messages: history,
-        model: AppConstants.visionModel,
-        maxTokens: AppConstants.proMaxTokens,
-      );
+    // 1. ModelRouter vision chain (gemini-flash → deepseek-chat → gpt-4o-mini)
+    final entry = ModelRouter.resolveModel(TaskType.vision);
+    if (entry != null) {
+      debugPrint('[ChatNotifier] Vision via ${entry.modelId}');
+      _lastUsedModelId = entry.modelId;
+      yield* _buildStreamForModel(entry, history);
       return;
     }
 
-    // 2. DeepSeek chat (supporte vision)
-    final deepSeekKey = AppConstants.deepSeekApiKey;
-    if (deepSeekKey.isNotEmpty) {
-      debugPrint('[ChatNotifier] Vision via DeepSeek chat');
-      try {
-        yield* DeepSeekClient(apiKey: deepSeekKey).streamChat(
-          messages: history,
-          model: AppConstants.deepSeekVisionModel,
-          // Plusieurs APIs vision refusent la recherche web en mode image.
-          enableSearch: false,
-        );
-        return;
-      } on AiException catch (e) {
-        debugPrint('[ChatNotifier] DeepSeek vision error: ${e.message}');
-      }
-    }
-
     throw const AiException(
-      'Analyse d\'image indisponible. Verifiez la cle DeepSeek (vision) '
-      'ou ajoutez une cle OpenRouter.',
-      statusCode: 400,
+      'Analyse d\'image indisponible. Verifiez vos cles API (DeepSeek ou OpenRouter).',
     );
   }
 
@@ -1861,6 +2026,10 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
 
   void toggleSearch() {
     state = state.copyWith(useSearch: !state.useSearch);
+  }
+
+  void selectModel(String model) {
+    state = state.copyWith(selectedModel: model);
   }
 
   void clearError() => state = state.copyWith(error: null);

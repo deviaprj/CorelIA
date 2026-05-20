@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import '../../../core/constants.dart';
 import 'chat_notifier.dart';
 import 'chat_bubble.dart';
 import 'input_bar.dart';
@@ -263,6 +264,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                 useSearch: state.useSearch,
                 isStreaming: state.isStreaming,
                 isVoiceActive: isVoiceActive,
+                selectedModel: state.selectedModel,
                 onToggleSearch: notifier.toggleSearch,
                 onAttachment: () => _showAttachmentSheet(notifier),
                 onToggleVoiceConv: () async {
@@ -272,6 +274,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                     voiceConvNotifier.startConversation();
                   }
                 },
+                onSelectModel: notifier.selectModel,
               ),
               // Slash command palette (all platforms)
               if (_slashFilter != null)
@@ -442,90 +445,173 @@ class _ChatToolbar extends StatelessWidget {
     required this.useSearch,
     required this.isStreaming,
     required this.isVoiceActive,
+    required this.selectedModel,
     required this.onToggleSearch,
     required this.onAttachment,
     required this.onToggleVoiceConv,
+    required this.onSelectModel,
   });
 
   final bool useSearch;
   final bool isStreaming;
   final bool isVoiceActive;
+  final String selectedModel;
   final VoidCallback onToggleSearch;
   final VoidCallback onAttachment;
   final VoidCallback onToggleVoiceConv;
+  final ValueChanged<String> onSelectModel;
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        // Ligne 1 : actions
+        Container(
+          padding: const EdgeInsets.fromLTRB(12, 4, 12, 2),
+          child: Row(
+            children: [
+              // Toggle recherche web
+              ActionChip(
+                avatar: Icon(
+                  useSearch ? Icons.travel_explore : Icons.travel_explore_outlined,
+                  size: 18,
+                  color: useSearch ? colorScheme.onPrimaryContainer : colorScheme.outline,
+                ),
+                label: Text(
+                  useSearch ? 'Web ON' : 'Web OFF',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: useSearch ? colorScheme.onPrimaryContainer : colorScheme.outline,
+                  ),
+                ),
+                backgroundColor:
+                    useSearch ? colorScheme.primaryContainer : colorScheme.surfaceContainerHighest,
+                side: BorderSide(
+                  color: useSearch ? colorScheme.primary : colorScheme.outlineVariant,
+                ),
+                visualDensity: VisualDensity.compact,
+                onPressed: onToggleSearch,
+              ),
+              const SizedBox(width: 8),
+              // Piece jointe
+              ActionChip(
+                avatar: Icon(
+                  Icons.attach_file_outlined,
+                  size: 18,
+                  color: colorScheme.outline,
+                ),
+                label: Text(
+                  'Fichier',
+                  style: TextStyle(fontSize: 12, color: colorScheme.outline),
+                ),
+                backgroundColor: colorScheme.surfaceContainerHighest,
+                side: BorderSide(color: colorScheme.outlineVariant),
+                visualDensity: VisualDensity.compact,
+                onPressed: onAttachment,
+              ),
+              const SizedBox(width: 8),
+              // Conversation vocale
+              ActionChip(
+                avatar: Icon(
+                  isVoiceActive ? Icons.mic : Icons.mic_none_outlined,
+                  size: 18,
+                  color: isVoiceActive ? colorScheme.onErrorContainer : colorScheme.outline,
+                ),
+                label: Text(
+                  isVoiceActive ? 'Vocal ON' : 'Vocal OFF',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: isVoiceActive ? colorScheme.onErrorContainer : colorScheme.outline,
+                  ),
+                ),
+                backgroundColor:
+                    isVoiceActive ? colorScheme.errorContainer : colorScheme.surfaceContainerHighest,
+                side: BorderSide(
+                  color: isVoiceActive ? colorScheme.error : colorScheme.outlineVariant,
+                ),
+                visualDensity: VisualDensity.compact,
+                onPressed: onToggleVoiceConv,
+              ),
+              const Spacer(),
+            ],
+          ),
+        ),
+        // Ligne 2 : selecteur de modele
+        _ModelSelectorBar(
+          selectedModel: selectedModel,
+          onSelectModel: onSelectModel,
+        ),
+      ],
+    );
+  }
+}
+
+class _ModelSelectorBar extends StatelessWidget {
+  const _ModelSelectorBar({
+    required this.selectedModel,
+    required this.onSelectModel,
+  });
+
+  final String selectedModel;
+  final ValueChanged<String> onSelectModel;
+
+  static const _categories = [
+    (name: 'Auto',  model: 'auto',                             icon: Icons.auto_awesome),
+    (name: 'Flash', model: AppConstants.deepSeekModel,          icon: Icons.bolt),
+    (name: 'Pro',   model: AppConstants.deepSeekProModel,        icon: Icons.auto_awesome),
+    (name: 'Raison',model: AppConstants.deepSeekReasonerModel,  icon: Icons.psychology),
+    (name: 'Code',  model: 'task:code',                        icon: Icons.code),
+    (name: 'Vision',model: 'task:vision',                      icon: Icons.visibility),
+  ];
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
 
     return Container(
-      padding: const EdgeInsets.fromLTRB(12, 4, 12, 2),
-      child: Row(
-        children: [
-          // Toggle recherche web — texte + icone visible
-          ActionChip(
-            avatar: Icon(
-              useSearch ? Icons.travel_explore : Icons.travel_explore_outlined,
-              size: 18,
-              color: useSearch ? colorScheme.onPrimaryContainer : colorScheme.outline,
-            ),
-            label: Text(
-              useSearch ? 'Web ON' : 'Web OFF',
-              style: TextStyle(
-                fontSize: 12,
-                color: useSearch ? colorScheme.onPrimaryContainer : colorScheme.outline,
+      padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(
+          children: _categories.map((m) {
+            final isSelected = m.model == selectedModel;
+            final isAuto = m.model == 'auto';
+            return Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: ChoiceChip(
+                avatar: Icon(
+                  m.icon,
+                  size: 18,
+                  color: isSelected ? colorScheme.onPrimaryContainer : colorScheme.outline,
+                ),
+                label: Text(
+                  m.name,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: isSelected ? colorScheme.onPrimaryContainer : colorScheme.outline,
+                  ),
+                ),
+                selected: isSelected,
+                backgroundColor: isAuto && isSelected
+                    ? colorScheme.tertiaryContainer
+                    : colorScheme.surfaceContainerHighest,
+                selectedColor: isAuto
+                    ? colorScheme.tertiaryContainer
+                    : colorScheme.primaryContainer,
+                side: BorderSide(
+                  color: isSelected
+                      ? (isAuto ? colorScheme.tertiary : colorScheme.primary)
+                      : colorScheme.outlineVariant,
+                ),
+                visualDensity: VisualDensity.compact,
+                onSelected: (_) => onSelectModel(m.model),
               ),
-            ),
-            backgroundColor:
-                useSearch ? colorScheme.primaryContainer : colorScheme.surfaceContainerHighest,
-            side: BorderSide(
-              color: useSearch ? colorScheme.primary : colorScheme.outlineVariant,
-            ),
-            visualDensity: VisualDensity.compact,
-            onPressed: onToggleSearch,
-          ),
-          const SizedBox(width: 8),
-          // Piece jointe (image + fichier)
-          ActionChip(
-            avatar: Icon(
-              Icons.attach_file_outlined,
-              size: 18,
-              color: colorScheme.outline,
-            ),
-            label: Text(
-              'Fichier',
-              style: TextStyle(fontSize: 12, color: colorScheme.outline),
-            ),
-            backgroundColor: colorScheme.surfaceContainerHighest,
-            side: BorderSide(color: colorScheme.outlineVariant),
-            visualDensity: VisualDensity.compact,
-            onPressed: onAttachment,
-          ),
-          const SizedBox(width: 8),
-          // Conversation vocale
-          ActionChip(
-            avatar: Icon(
-              isVoiceActive ? Icons.mic : Icons.mic_none_outlined,
-              size: 18,
-              color: isVoiceActive ? colorScheme.onErrorContainer : colorScheme.outline,
-            ),
-            label: Text(
-              isVoiceActive ? 'Vocal ON' : 'Vocal OFF',
-              style: TextStyle(
-                fontSize: 12,
-                color: isVoiceActive ? colorScheme.onErrorContainer : colorScheme.outline,
-              ),
-            ),
-            backgroundColor:
-                isVoiceActive ? colorScheme.errorContainer : colorScheme.surfaceContainerHighest,
-            side: BorderSide(
-              color: isVoiceActive ? colorScheme.error : colorScheme.outlineVariant,
-            ),
-            visualDensity: VisualDensity.compact,
-            onPressed: onToggleVoiceConv,
-          ),
-          const Spacer(),
-        ],
+            );
+          }).toList(),
+        ),
       ),
     );
   }

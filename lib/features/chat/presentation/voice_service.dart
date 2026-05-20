@@ -293,6 +293,11 @@ class VoiceServiceNotifier extends Notifier<VoiceState> {
     state = const VoiceState();
   }
 
+  /// Clear transcript only (keep listening/speaking state).
+  void clearTranscript() {
+    state = state.copyWith(transcript: '');
+  }
+
   TtsNaturalService get ttsService => _tts;
 }
 

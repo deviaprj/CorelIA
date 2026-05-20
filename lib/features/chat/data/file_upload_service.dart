@@ -365,7 +365,7 @@ class FileUploadService {
     final lower = path.toLowerCase();
     if (lower.endsWith('.pdf')) return 'application/pdf';
     if (lower.endsWith('.docx')) {
-      return 'application/vnd.openxmlformats-offancedocument.wordprocessingml.document';
+      return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
     }
     if (lower.endsWith('.xlsx')) {
       return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';

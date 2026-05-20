@@ -13,6 +13,8 @@ class TtsCacheService {
 
   Future<String?> get(String text, {required String voice, required double rate, required double pitch, String format = 'audio-24khz-48kbitrate-mono-mp3'}) async => null;
 
+  Future<String?> putBytes(String text, List<int> bytes, {required String voice, required double rate, required double pitch, String format = 'mp3'}) async => null;
+
   Future<String?> put(String text, String sourcePath, {required String voice, required double rate, required double pitch, String format = 'audio-24khz-48kbitrate-mono-mp3'}) async => null;
 
   Future<void> clear() async {}

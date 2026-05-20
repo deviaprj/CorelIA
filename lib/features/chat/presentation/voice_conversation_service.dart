@@ -167,7 +167,7 @@ class VoiceConversationNotifier
 
       try {
         final chatNotifier = ref.read(chatNotifierProvider(arg).notifier);
-        await chatNotifier.sendMessage(transcript, isVoiceConversation: true);
+        await chatNotifier.sendMessage(transcript, isVoiceConversation: true, modelOverride: 'task:vocal');
       } catch (e) {
         debugPrint('[VoiceConversation] Erreur envoi chat : $e');
         state = VoiceConversationStatus(
@@ -266,7 +266,7 @@ class VoiceConversationNotifier
 
       try {
         final chatNotifier = ref.read(chatNotifierProvider(arg).notifier);
-        await chatNotifier.sendMessage(_bargeInTranscript, isVoiceConversation: true);
+        await chatNotifier.sendMessage(_bargeInTranscript, isVoiceConversation: true, modelOverride: 'task:vocal');
       } catch (e) {
         debugPrint('[VoiceConversation] Erreur envoi barge-in : $e');
       }

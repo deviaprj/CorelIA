@@ -33,7 +33,6 @@ class DeepSeekClient {
 
     final bodyMap = <String, dynamic>{
       'model': model ?? AppConstants.deepSeekModel,
-      'max_tokens': maxTokens,
       'stream': true,
       'messages': [
         if (systemPrompt != null && systemPrompt.isNotEmpty)
@@ -41,6 +40,14 @@ class DeepSeekClient {
         ...messages,
       ],
     };
+
+    // DeepSeek Reasoner uses max_completion_tokens instead of max_tokens
+    final effectiveModel = model ?? AppConstants.deepSeekModel;
+    if (effectiveModel == AppConstants.deepSeekReasonerModel) {
+      bodyMap['max_completion_tokens'] = maxTokens;
+    } else {
+      bodyMap['max_tokens'] = maxTokens;
+    }
 
     if (enableSearch) {
       bodyMap['enable_search'] = true;
@@ -86,15 +93,18 @@ class DeepSeekClient {
       if (data == '[DONE]') break;
       try {
         final json = jsonDecode(data) as Map<String, dynamic>;
-        final content = (json['choices'] as List?)
-            ?.firstOrNull?['delta']?['content'] as String?;
+        final delta = (json['choices'] as List?)?.firstOrNull?['delta'];
+        if (delta == null) continue;
+        // DeepSeek Reasoner: skip reasoning_content (chain-of-thought)
+        // Only yield the final 'content' output
+        final content = delta['content'] as String?;
         if (content != null && content.isNotEmpty) yield content;
       } catch (_) {}
     }
   }
 }
 
-/// Client OpenRouter pour modèles Pro (Mistral / Groq)
+/// Client OpenRouter pour modèles Pro et gratuits
 class OpenRouterClient {
   final String apiKey;
   OpenRouterClient({required this.apiKey});
@@ -104,8 +114,11 @@ class OpenRouterClient {
     required String model,
     String? systemPrompt,
     int maxTokens = AppConstants.proMaxTokens,
+    double? temperature,
+    double? topP,
+    double? frequencyPenalty,
   }) async* {
-    final body = jsonEncode({
+    final bodyMap = <String, dynamic>{
       'model': model,
       'max_tokens': maxTokens,
       'stream': true,
@@ -114,7 +127,12 @@ class OpenRouterClient {
           {'role': 'system', 'content': systemPrompt},
         ...messages,
       ],
-    });
+    };
+    if (temperature != null) bodyMap['temperature'] = temperature;
+    if (topP != null) bodyMap['top_p'] = topP;
+    if (frequencyPenalty != null) bodyMap['frequency_penalty'] = frequencyPenalty;
+
+    final body = jsonEncode(bodyMap);
 
     final request =
         http.Request('POST', Uri.parse(AppConstants.openRouterBaseUrl))
@@ -131,6 +149,9 @@ class OpenRouterClient {
       response = await _httpClient.send(request);
     } catch (e) {
       throw AiException('Erreur réseau OpenRouter : $e');
+    }
+    if (response.statusCode == 429) {
+      throw const AiException('OpenRouter limite de requetes atteinte', statusCode: 429);
     }
     if (response.statusCode != 200) {
       final err = await response.stream.bytesToString();

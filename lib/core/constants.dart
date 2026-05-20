@@ -41,14 +41,33 @@ abstract class AppConstants {
   // ── IA ──────────────────────────────────────────────────────────────────────
   static String get deepSeekApiKey => _env('DEEPSEEK_API_KEY') ?? '';
   static String get openRouterApiKey => _env('OPENROUTER_API_KEY') ?? '';
-  static const deepSeekBaseUrl = 'https://api.deepseek.com/v1/chat/completions';
+  static const deepSeekBaseUrl = 'https://api.deepseek.com/chat/completions';
   static const openRouterBaseUrl = 'https://openrouter.ai/api/v1/chat/completions';
 
+  // DeepSeek direct API models
   static const deepSeekModel = 'deepseek-v4-flash';
+  static const deepSeekProModel = 'deepseek-v4-pro';
+  static const deepSeekReasonerModel = 'deepseek-reasoner';
   static const deepSeekVisionModel = 'deepseek-chat';
+
+  // OpenRouter models (free / cheap)
+  static const deepseekR1Free = 'deepseek/deepseek-r1:free';
+  static const qwen3CoderFree = 'qwen/qwen3-coder:free';
+  static const mistral7bFree = 'mistral/mistral-7b-instruct:free';
+  static const geminiFlash = 'google/gemini-flash-1.5';
+
+  // OpenRouter vocal models
+  static const arceeTrinityFree = 'arcee/trinity';
+  static const ringFastFree = 'neversleep/ring-2.6-1t';
+
+  // OpenRouter TTS models
+  static const ttsModel = 'openai/gpt-4o-mini-tts';
+  static const ttsModelFallback = 'sillytavern/kokoro-82m';
+  static const openRouterTtsUrl = 'https://openrouter.ai/api/v1/audio/speech';
+
+  // Legacy / Pro models
   static const mistralModel = 'mistralai/mistral-large-2407';
-  static const groqModel = 'meta-llama/llama-3.3-70b-instruct';
-  static const visionModel = 'openai/gpt-4o-mini';
+  static const visionModel = 'google/gemini-flash-1.5';
 
   // ── Quotas ──────────────────────────────────────────────────────────────────
   static const freeRequestsPerDay = 20;
@@ -121,7 +140,8 @@ abstract class AppConstants {
   static const shareTagline = '— Genere par Corely\nhttps://aironbot.app';
 
   // ── Backend ─────────────────────────────────────────────────────────────────
-  static String get backendBaseUrl => _env('BACKEND_URL') ?? 'https://api.aironbot.app';
+  // Backend cloud optionnel — si BACKEND_URL n'est pas configure, on ne tente pas l'appel
+  static String get backendBaseUrl => _env('BACKEND_URL') ?? '';
 
   // ── Firestore collections ───────────────────────────────────────────────────
   static const colUsers = 'users';

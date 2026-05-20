@@ -1,6 +1,43 @@
 # TASKS.md — Suivi Corely
 
-Dernière mise à jour : 2026-05-15 — Session V10 : Search-First, Parsing Généralisé, IATA, Fix Micro Extension
+Dernière mise à jour : 2026-05-20 — Session complète : TTS, /docgen, Extension, Tests
+
+## Terminé — Session 2026-05-20 — Bug Fixes ✅
+
+### TTS -15% ✅
+- `_speechRate` : 0.52 → 0.44 (flutter_tts)
+- Edge TTS emotion rates : ×0.85 (neutral 0.90→0.77, etc.)
+- speech_bridge.js : emotion rates ×0.85 (neutral 1.0→0.85, etc.)
+
+### Extension bridge crash fix ✅
+- **Cause racine** : `js.allowInterop` callback non wrappé dans try-catch → crash "Uncaught Error" quand `corely_browser_action_result` arrive
+- **Fix** : `_addWindowListener` wrappe le callback dans try-catch
+- Data parsing dans `corely_browser_action_result` aussi wrappé
+- Timeout Dart : 10s → 15s (marge pour 8s JS DOM timeout)
+
+### background.js timeouts ✅
+- OPEN_URL : `Promise.race` avec 8s timeout
+- SAVE_AS_PDF : `Promise.race` avec 8s timeout
+- DOWNLOAD_DATA : `Promise.race` avec 10s timeout
+- Injection delay : 200ms → 500ms
+- extension_bridge.js : meilleur logging erreurs
+
+### Slash command autocomplete ✅
+- Palette disponible sur TOUTES les plateformes (pas juste extension)
+- `_suppressSlashFilter` : empêche la palette de réapparaître après sélection
+- `handleSlashCommand` : debug logging ajouté pour diagnostic
+
+### /docgen universel ✅
+- Fonctionne sur mobile ET extension (commande universelle)
+- Fallback gracieux si download échoue : document intégré dans le chat
+- Search errors gérées sans bloquer la génération
+
+### Copier/Modifier prompt ✅
+- `_UserActionRow` : boutons Copier + Modifier sur messages utilisateur
+- Modifier pré-remplit la barre de saisie avec le texte du message
+- `requestFocus()` ajouté à `InputBarState`
+
+---
 
 ## Terminé — Session V10 (2026-05-15) — Search-First & Parsing Généralisé
 
@@ -55,8 +92,8 @@ Dernière mise à jour : 2026-05-15 — Session V10 : Search-First, Parsing Gén
 
 ### Priorité HAUTE
 - [ ] **Tester le parsing vols en conditions réelles** : "trouve un billet paris-londre direct du 29/05", "vol aller-retour nice-barcelone le 10 juin retour le 15", etc.
-- [ ] **Fix `_performEnhancedSearch` hôtels** : ne passe pas checkIn/checkOut/guests → la méthode `searchHotels` les accepte mais ne les reçoit pas
-- [ ] **Vérifier OPEN_URL timeout** dans l'extension après le fix de parsing (les URLs devraient être propres maintenant)
+- [x] **Fix `_performEnhancedSearch` hôtels** : checkIn/checkOut/guests sont bien passés à `searchHotels` — vérifié, le code est correct
+- [x] **Vérifier OPEN_URL timeout** : `background.js` a `Promise.race` avec 8s timeout + `normalizeExternalUrl` pour les URLs malformées
 
 ### Priorité MOYENNE
 - [ ] **TTS audio dans l'extension** : speech_bridge.js v2 a le support, tester avec une vraie réponse IA

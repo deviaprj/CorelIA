@@ -119,6 +119,9 @@ class InputBarState extends ConsumerState<InputBar> {
 
     final att = widget.attachment;
     _controller.clear();
+    // Clear voice transcript so it doesn't re-fill the input
+    final voiceNotifier = ref.read(voiceServiceProvider.notifier);
+    voiceNotifier.clearTranscript();
     // Clear slash command filter after sending
     widget.onSlashTextChanged?.call(null);
     widget.onSend(

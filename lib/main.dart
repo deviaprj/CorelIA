@@ -20,10 +20,10 @@ import 'features/auth/data/mock_auth_repository.dart';
 import 'features/chat/data/search_cache_service.dart';
 
 // Global flag pour le mode demo local (sans Firebase)
-// true par defaut pour le developpement : auth mock + IA reelle (DeepSeek via .env)
+// false par defaut : l'app tente Firebase normalement, fallback DEMO si echec
 // Extension Chrome : toujours true (CSP bloque Google Sign-In, Firebase indisponible)
-// Forcer false avec : --dart-define=DEMO_MODE=false
-bool isDemoMode = const bool.fromEnvironment('DEMO_MODE', defaultValue: true);
+// Forcer true avec : --dart-define=DEMO_MODE=true
+bool isDemoMode = const bool.fromEnvironment('DEMO_MODE', defaultValue: false);
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
