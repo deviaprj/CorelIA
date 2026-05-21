@@ -1,6 +1,6 @@
 # TASKS.md — Suivi Corely
 
-Dernière mise à jour : 2026-05-21 — Session V14 : Vocal UX (bips, latence, qualité, full-duplex)
+Dernière mise à jour : 2026-05-21 — Session V14 : Vocal UX + Scraping Intelligent + Slash Commands Cross-Platform
 
 ## Termine — Session V14 (2026-05-21) — Vocal UX : Bips, Latence, Qualité, Full-Duplex ✅
 
@@ -17,6 +17,30 @@ Dernière mise à jour : 2026-05-21 — Session V14 : Vocal UX (bips, latence, q
 - `lib/features/chat/presentation/tts_natural_service.dart` : `_selectBestVoice` dynamique, préchauffage TTS, speed adaptatif, chunks 120 chars, `hasPremiumVoice` detection
 - `lib/features/chat/presentation/tts_emotion.dart` : suppression du champ `voice` invalide (dépendance Azure), configs rate/pitch uniquement
 - `lib/features/chat/presentation/chat_notifier.dart` : prompt vocal enrichi avec balises émotion `[joyeux]`, `[triste]`, etc. pour sélection dynamique de voix TTS
+
+## Terminé — Session V14 (2026-05-21) — Scraping Intelligent + Slash Commands Cross-Platform ✅
+
+### Problèmes résolus
+1. **Recherche sans résultats concrets** : le backend `/search_smart` scrape désormais les comparateurs (Skyscanner, Booking, Back Market, etc.) pour extraire vrais prix, cartes produits, liens directs — pas seulement des liens génériques.
+2. **Slash commands limitées à l'extension** : `/summarize`, `/extract`, `/links`, `/metadata` acceptent maintenant une URL optionnelle et fonctionnent sur mobile/web via le backend `/scrape`.
+3. **Nouvelle commande `/scrape`** : scraper n'importe quelle URL avec sélecteurs CSS personnalisés, cross-plateforme.
+4. **Formatters markdown intelligents** : `SearchServiceGlobal.formatMarkdown()` produit des tableaux et listes selon l'intent (vols ✈️, hôtels 🏨, produits 🛒, restaurants 🍽️, événements 🎭, météo ☀️).
+
+### Fichiers créés
+- `backend/agents/search_smart.py` — orchestrateur LLM intent + parallel scraping + selectors learnés
+- `backend/Dockerfile` — image Python 3.12 slim avec BS4/lxml
+- `backend/scripts/deploy_backend.sh` — build + push Docker vers `api.aironbot.app`
+- `lib/features/chat/data/search_service_global.dart` — client Dart unifié (`search()`, `scrape()`, `formatMarkdown()`)
+- `docs/API_CONFIGURATION.md` — référence clés API, endpoints, `.env`
+- `AGENTS.md` + `CODEX_AGENT.md` — stratégies agents Claude/Codex
+
+### Fichiers modifiés
+- `backend/agents/search_engine.py` : `scrape_url()` avec auto-extraction metadata, prix, cartes, liens
+- `backend/main.py` : endpoints `/search_smart` et `/scrape`
+- `lib/features/chat/presentation/slash_commands.dart` : commande `/scrape` + 4 commandes universelles (summarize/extract/links/metadata avec URL)
+- `lib/features/chat/presentation/chat_notifier.dart` : handlers `_handleSlashScrape`, `_handleSlashSummarize` (URL-aware), `_handleSlashExtract` (URL-aware), `_handleSlashLinks` (URL-aware), `_handleSlashMetadata` (URL-aware)
+- `docs/GUIDE_COMMANDES_SLASH.md` : v2.1 avec section Scraping Intelligent et table plateformes
+- `docs/GUIDE_COMBOS.md` : v2.1 avec combos 25-28 cross-plateforme (`/scrape` + `/summarize`)
 
 ## Termine — Session Vocal OpenRouter (2026-05-21) — Module Vocal TTS + LLM Routing ✅
 
@@ -245,7 +269,17 @@ Dernière mise à jour : 2026-05-21 — Session V14 : Vocal UX (bips, latence, q
 
 ## À faire — Prochaine session
 
+### Priorité CRITIQUE — Vocal Turn-Talking (Mode conversation fluide)
+Le mode vocal actuel fonctionne mais manque de **fluidité humaine**. L'IA doit savoir exactement quand parler sans couper la parole, avec une latence quasi nulle et une voix qui respire.
+
+- [ ] **Détection de fin de phrase** : VAD intelligent qui distingue une pause respiratoire d'une fin de phrase (prosodie, punctuation implicite). Ne pas interrompre l'utilisateur en plein milieu d'une phrase.
+- [ ] **Latence quasi nulle** : préchargement du premier chunk TTS dès que l'IA commence à générer la réponse (streaming TTS), pas d'attente de la fin complète du texte. Target < 300ms entre la fin de phrase utilisateur et le début du son IA.
+- [ ] **Voix qui respire** : intégrer des hésitations naturelles ("euh", " hmm", pauses), des intonations montantes/descendantes, des variations de débit. Les modèles **StyleTTS 2** ou **ElevenLabs** savent gérer cela nativement — évaluer leur intégration vs OpenRouter TTS actuel.
+- [ ] **Barge-in intelligent** : ne pas couper l'utilisateur si le TTS est en cours, mais détecter un "stop" ou un changement de sujet explicite. Sinon, laisser l'IA finir sa phrase.
+- [ ] **Évaluation modèles TTS avancés** : comparer ElevenLabs (multilingue, émotion, low-latency) vs StyleTTS 2 (open-source, fine-grained style control) vs gpt-4o-mini-tts actuel. Documenter coûts, latence, qualité.
+
 ### Priorité HAUTE
+- [ ] **Déployer le backend** : `bash scripts/deploy_backend.sh` depuis la machine de l'utilisateur (Docker a besoin d'internet pour `apt-get`). Cible : `api.aironbot.app`.
 - [ ] **Tester le parsing vols en conditions réelles** : "trouve un billet paris-londre direct du 29/05", "vol aller-retour nice-barcelone le 10 juin retour le 15", etc.
 - [x] **Fix `_performEnhancedSearch` hôtels** : checkIn/checkOut/guests sont bien passés à `searchHotels` — vérifié, le code est correct
 - [x] **Vérifier OPEN_URL timeout** : `background.js` a `Promise.race` avec 8s timeout + `normalizeExternalUrl` pour les URLs malformées

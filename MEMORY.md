@@ -326,3 +326,68 @@ Permettre d'ajouter plusieurs images et fichiers dans un meme message, avec limi
 #### Compilation
 - APK Android (Xiaomi 12 & Xiaomi 8 Pro) : en cours (nécessite escalation sandbox)
 - Extension Chrome : en cours (nécessite escalation sandbox)
+
+### Session 2026-05-21 — Scraping Intelligent Cross-Plateforme (V14)
+
+#### Objectif
+Rendre la recherche avancée réellement utile en scrapant les comparateurs pour obtenir des prix/offres concrets, et rendre les commandes slash universelles (mobile/web/extension) via le backend cloud.
+
+#### Fichiers créés
+- `backend/agents/search_smart.py` — Orchestrateur LLM intent + parallel multi-source scraping + learned selectors
+- `backend/Dockerfile` — Python 3.12 slim + BS4/lxml + uvicorn 4 workers
+- `scripts/deploy_backend.sh` — Build Docker → tar.gz → scp → docker compose up
+- `lib/features/chat/data/search_service_global.dart` — Client Dart unifié `search()`, `scrape()`, `formatMarkdown()`
+- `docs/API_CONFIGURATION.md` — Référence complète clés API, endpoints, `.env`
+- `AGENTS.md` + `CODEX_AGENT.md` — Stratégies agents Claude Code et Codex
+
+#### Fichiers modifiés
+- `backend/agents/search_engine.py` : `scrape_url()` avec auto-extraction metadata, prix (regex currency), cartes (class heuristiques), liens. Support sélecteurs CSS custom.
+- `backend/main.py` : endpoints `/search_smart` (GET `q`) et `/scrape` (GET `url`, `selectors`)
+- `lib/features/chat/presentation/slash_commands.dart` : commande `/scrape` + universalCommandNames (`docgen`, `scrape`, `summarize`, `extract`, `links`, `metadata`)
+- `lib/features/chat/presentation/chat_notifier.dart` : 5 handlers URL-aware (`_handleSlashScrape`, `_handleSlashSummarize`, `_handleSlashExtract`, `_handleSlashLinks`, `_handleSlashMetadata`). Si arg commence par `http` → backend `/scrape`.
+- `docs/GUIDE_COMMANDES_SLASH.md` : v2.1 (2026-05-21) avec section "Scraping intelligent" et table des plateformes (Extension vs Universel)
+- `docs/GUIDE_COMBOS.md` : v2.1 (2026-05-21) avec combos 25-28 cross-plateforme (`/scrape` + `/summarize`)
+
+#### Architecture `/search_smart`
+1. **Intent classification** : DeepSeek/OpenRouter LLM analyse la requête → intent (flights, hotels, products, secondhand, restaurants, events, weather, general) + paramètres structurés
+2. **URL building** : comparateurs avec params pré-remplis (Skyscanner, Booking, Back Market, eBay, Leboncoin, etc.)
+3. **Parallel scraping** : `asyncio.gather` sur ~5 URLs max, timeout 8s par source
+4. **Learned selectors** : `_LEARNED_SELECTORS` en mémoire mappe les domaines vers les sélecteurs CSS prix/titre
+5. **Auto-extraction fallback** : si pas de sélecteur connu, BS4 cherche les patterns communs (`.price`, `[class*='result']`, etc.)
+6. **Résultat** : `SmartSearchResponse` avec `SmartSearchResult` (type: price/card/link) + sources
+
+#### Formatters markdown
+- `flights` : ✈️ Vols trouvés → prix détectés + résultats + liens
+- `hotels` : 🏨 Hébergements → tableau | Établissement | Prix |
+- `products/secondhand` : 🛒/🔄 → tableau | Produit | Prix | Source |
+- `restaurants` : 🍽️ Restaurants → liste avec snippets
+- `events` : 🎭 Événements → liste avec snippets
+- `weather` : ☀️ Météo → cartes
+- `general` : 🔍 Résultats → liste + sources
+
+#### Slash commands universels — comportement
+| Commande | Extension (sans URL) | Mobile/Web (avec URL) |
+|----------|---------------------|----------------------|
+| `/summarize` | Résume la page active | Scrape l'URL + résume |
+| `/extract [selector]` | Extrait le DOM local | Scrape l'URL + extrait sélecteur |
+| `/links [filter]` | Liens de la page active | Liens scrapés de l'URL |
+| `/metadata` | Meta tags de la page active | Meta tags scrapés de l'URL |
+| `/scrape <url>` | N/A (nécessite URL) | Scrape complet prix/cartes/liens |
+
+#### Backend deployment
+- Dockerfile buildée localement mais `apt-get` échoue sans internet (DNS Docker local).
+- **Action requise** : exécuter `bash scripts/deploy_backend.sh` depuis la machine de l'utilisateur où Docker a internet.
+- Cible : `api.aironbot.app` (FastAPI + uvicorn 4 workers + Docker).
+
+#### Notes pour la prochaine session
+- **Vocal turn-taking** : priorité CRITIQUE. L'IA doit savoir exactement quand parler sans couper la parole. Cela passe par :
+  1. Détection de fin de phrase intelligente (prosodie, pas juste silence)
+  2. Latence quasi nulle entre la fin de phrase utilisateur et le début du son IA (<300ms)
+  3. Voix qui respire : hésitations naturelles ("euh", "hmm"), intonations, pauses
+  4. Modèles à évaluer : **StyleTTS 2** (open-source, fine-grained style control) et **ElevenLabs** (multilingue, low-latency, émotion)
+  5. Barge-in intelligent : ne pas interrompre l'utilisateur sauf "stop" explicite ou changement de sujet clair
+- **Tests parsing vols** : tester en conditions réelles avec requêtes lowercase + mots parasites
+
+---
+
+*Dernière mise à jour : 2026-05-21*

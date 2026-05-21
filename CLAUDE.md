@@ -328,6 +328,40 @@ flutter build web --dart-define=DEEPSEEK_API_KEY=sk-xxx --dart-define=OPENROUTER
 - Instruction explicite : "Ne dis JAMAIS que tu n'as pas accès aux systèmes de réservation"
 - Pattern à suivre pour tout nouveau type : intent → extraction params → fallback → injection → markdown
 
+## Scraping Intelligent (Nouveau — Session V14)
+
+**Backend `/search_smart`** (`backend/agents/search_smart.py`):
+1. **Intent classification** : LLM (DeepSeek/OpenRouter) classifie la requête utilisateur en intents : `flights`, `hotels`, `products`, `secondhand`, `restaurants`, `events`, `weather`, `general`
+2. **Extraction de paramètres** : villes, dates, condition (reconditionné/occasion), prix max, tri
+3. **Construction d'URLs** : comparateurs avec paramètres pré-remplis (Skyscanner, Booking, Back Market, etc.)
+4. **Parallel scraping** : BeautifulSoup scrape chaque comparateur en parallèle (~5 sources max)
+5. **Agrégation** : résultats structurés (`SmartSearchResult` type: price/card/link) retournés en JSON
+
+**Backend `/scrape`** (`backend/agents/search_engine.py:scrape_url()`):
+- Auto-extraction : metadata (title, OG tags), prix (regex `\d[\.,]\d{2}\s?[€$£]`), cartes produits (class heuristiques), liens
+- Sélecteurs CSS personnalisés via paramètre `selectors` : `{"prix": ".price", "titre": "h1"}`
+- Nettoyage : suppression script/style/nav/footer/header avant parsing
+- User-Agent desktop + follow redirects
+
+**Dart `SearchServiceGlobal`** (`lib/features/chat/data/search_service_global.dart`):
+- `search(query)` → appelle `/search_smart` → `SmartSearchResponse`
+- `scrape(url, selectors)` → appelle `/scrape` → `Map<String, dynamic>`
+- `formatMarkdown(response, query)` → formatte selon l'intent :
+  - `flights` : tableaux prix + résultats + liens
+  - `hotels` : tableau | Établissement | Prix |
+  - `products` / `secondhand` : tableau | Produit | Prix | Source |
+  - `restaurants` / `events` : listes avec snippets
+  - `weather` : 3 cartes météo
+  - `general` : liste résultats + sources
+
+**Slash commands universels** (`lib/features/chat/presentation/chat_notifier.dart`):
+- `/scrape <url> [selectors_json]` — scrape n'importe quelle URL
+- `/summarize <url>` — scrape + résume le contenu extrait
+- `/extract <url> [selector]` — extrait un sélecteur CSS spécifique
+- `/links <url> [type]` — liste les liens trouvés (filtrable par video/image/audio/document)
+- `/metadata <url>` — extrait les balises meta (title, description, OG, auteur)
+- **Règle** : si l'argument commence par `http`, le backend `/scrape` est appelé. Sinon, comportement DOM local (extension uniquement).
+
 ## Multilingue
 
 **LanguageService** (`lib/core/language/language_service.dart`):
@@ -421,42 +455,46 @@ flutter build web --dart-define=DEEPSEEK_API_KEY=sk-xxx --dart-define=OPENROUTER
 
 ## Known Limitations / TODO
 
+### ✅ Résolus — Sessions récentes
 - [x] Extension Chrome : démarrage cassé (13 bugs corrigés, conditional imports, CSP, base href, SW)
 - [x] Extension Chrome : 3 bugs CSP critiques (inline scripts → corely_init.js, CanvasKit CDN → useLocalCanvasKit:true, SW registration neutralisée)
-- [x] Extension Chrome : crash ConsentBanner (Navigator.of sur context hors MaterialApp) → rootNavigatorKey
-- [x] Extension Chrome : crash VoiceServiceNotifier (state=copyWith dans build() → réentrance Riverpod)
-- [x] Extension Chrome : crash AsyncValue.value! null → remplacé par valueOrNull + null check
+- [x] Extension Chrome : crash ConsentBanner / VoiceServiceNotifier / AsyncValue.value! — tous corrigés
 - [x] Logos/icons : remplacés par logo Corely "C" (toutes tailles)
 - [x] Comportement conversationnel : recherche web seulement sur questions factuelles/temporelles
 - [x] Settings : prompt système personnalisable avec sauvegarde
 - [x] Cache recherche web : LRU + SHA-256 + TTL 15 min
-- [ ] Analyse fichiers TXT/MD : tester l'injection comme contexte conversationnel
-- [ ] Vision DeepSeek : `deepseek-chat` peut rejeter `image_url` selon version API
-- [ ] Documents volumineux : tronqués à 15000 caractères dans le contexte system
-- [ ] Pas de upload Firebase Storage pour les images (base64 consommé directement)
-- [ ] PDF scannés/image : extraction texte uniquement, pas d'OCR
-- [ ] Pas de support HEIC/HEIF pour les images
-- [ ] Extension Chrome : pas de TTS audio, pas de résumé de page, pas d'extraction média
 - [x] Interruption vocale (barge-in) pendant le TTS (500ms anti-echo)
-- [x] Extension Chrome : commandes slash (/download, /links, etc.) fonctionnent — corrigé session V8
-- [x] Recherche enrichie : vols, hôtels, produits, météo fonctionnels sans clés API — fallback DuckDuckGo + liens directs
+- [x] Extension Chrome : commandes slash (/download, /links, etc.) fonctionnent
+- [x] Recherche enrichie : vols, hôtels, produits, météo fonctionnels sans clés API
 - [x] Intégration multilingue : 6 langues, patterns de recherche localisés, noms de mois traduits
 - [x] Liens cliquables dans le chat : `onTapLink` → `url_launcher`
-- [x] TTS vitesse : 0.65 → 0.50 → OpenRouter TTS 0.65, flutter_tts 0.45
-- [x] Bug extension : `sender is not defined` dans background.js
-- [ ] Pas de synchronisation temps réel des préférences entre mobile et extension
-- [x] Généralisation parsing paramètres : concerts, musées, restaurants, locations, occasions, forfaits (SearchIntentExtractor + SearchMemory + ranking top3)
+- [x] TTS vitesse ajustée (OpenRouter 1.0, flutter_tts adaptatif)
+- [x] Généralisation parsing paramètres : concerts, musées, restaurants, locations, occasions, forfaits
 - [x] Mapping codes IATA pour recherches de vols (~300 aéroports, fuzzy matching)
-- [x] Extension Chrome : microphone en mode vocal (speech_bridge.js v2 multi-langue + continuous + retry)
-- [x] Architecture search-first : liens directs comparateurs avec paramètres pré-remplis (Skyscanner, Kayak, Google Flights, Booking, Expedia, etc.)
-- [ ] **Bug critique** : extraction des villes de vol sur requêtes lowercase + mots parasites ("trouve un billet paris-londre direct du 29/05") — fix appliqué (sanitize+capitalize+validation) mais à tester en conditions réelles
-- [ ] **Bug** : Extension Chrome OPEN_URL timeout — probablement lié aux URLs malformées, à revérifier après fix du parsing
-- [ ] Extension Chrome : TTS audio — speech_bridge.js v2 a le support TTS multi-langue, OpenRouter TTS non supporté (Manifest V3 pas d'offscreen audio)
+- [x] Extension Chrome : microphone en mode vocal (speech_bridge.js v2)
+- [x] Architecture search-first : liens directs comparateurs avec paramètres pré-remplis
+- [x] **CRITIQUE V13** : Recherche avancée robuste — SearchService multi-endpoint + patterns fallback
+- [x] **CRITIQUE V12** : Commandes slash fonctionnelles — extension_bridge filtre + flux DOM complet
+- [x] **CRITIQUE V12** : Images + PDFs chargés correctement
+- [x] **CRITIQUE V14** : Scraping intelligent cross-plateforme — `/scrape`, `/summarize <url>`, `/extract <url>`, `/links <url>`, `/metadata <url>` fonctionnent sur mobile/web/extension via backend `/scrape` et `/search_smart`
+
+### 🔴 À faire — Priorité CRITIQUE (prochaine session)
+- [ ] **Vocal Turn-Taking** : détection de fin de phrase intelligente, latence <300ms, voix avec hésitations/respirations. Évaluer StyleTTS 2 / ElevenLabs.
+- [ ] **Déployer le backend** : `bash scripts/deploy_backend.sh` depuis la machine utilisateur (Docker nécessite internet). Cible `api.aironbot.app`.
+- [ ] **Tester parsing vols réel** : "trouve un billet paris-londre direct du 29/05", requêtes lowercase + mots parasites
+
+### 🟡 À faire — Priorité moyenne
+- [ ] Analyse fichiers TXT/MD : tester l'injection comme contexte conversationnel
+- [ ] Vision DeepSeek : `deepseek-chat` peut rejeter `image_url` selon version API
+- [ ] Extension Chrome : TTS audio — speech_bridge.js v2 a le support, OpenRouter TTS non supporté (Manifest V3 sans offscreen)
 - [ ] Extension Chrome : résumé de page, extraction média — actions navigateur existent mais non testées
-- [ ] Tests de non-régression : ajouter des tests pour `_tryParseFlightParamsGeneric` avec requêtes lowercase, `_isValidCityPair`, IATA fuzzy per-word matching
-- [ ] Recherche hôtels : `searchHotels` n'utilise pas checkIn/checkOut/guests depuis les params → `_performEnhancedSearch` ne les passe pas
-- [x] **CRITIQUE** : Recherche avancée (vols, hôtels, restaurants, produits) — Fixed V13 : SearchService multi-endpoint (3 URLs) + patterns fallback robustes + `_decodeDdgUrl` pour `uddg`. EnhancedSearchService (liens directs comparateurs) fonctionnel sans scraping.
-- [x] **CRITIQUE** : Commandes slash ne fonctionnent pas — Fixed V12 : extension_bridge filtre tabs `chrome-extension://`, flux complet Dart→JS→DOM testé.
-- [x] **CRITIQUE** : Images impossibles à charger dans la conversation — Fixed V12 : `Message.toFirestore()` stocke `imageBase64` avec limite 700KB.
-- [x] **CRITIQUE** : PDFs impossibles à lire — Fixed V12 : extraction 2 étapes (raw strings + streams FlateDecode décompressés).
+- [ ] Tests non-régression : `_tryParseFlightParamsGeneric`, `_isValidCityPair`, IATA fuzzy per-word
+- [ ] Recherche hôtels : `searchHotels` n'utilise pas checkIn/checkOut/guests depuis les params → vérifier passage dans `_performEnhancedSearch`
+
+### 🟢 À faire — Priorité basse
+- [ ] Synchronisation temps réel des préférences entre mobile et extension
+- [ ] Support HEIC/HEIF pour les images
+- [ ] OCR pour PDF scannés
+- [ ] Firebase Storage pour les images (au lieu de base64)
+- [ ] Documents volumineux : tronqués à 15000 caractères dans le contexte system
 - [x] **HAUTE** : Autres types de fichiers (DOCX, XLSX, PPTX) : Fixed V13 : extraction namespace-agnostic (`localName` + `namespaceUri`) sans dépendance au préfixe XML. Fallback texte brut + gestion erreurs XML/ZIP.

@@ -410,4 +410,35 @@ Remplacer la recherche par préfixe par une recherche par **localName + namespac
 
 ---
 
+## ADR-016 : Scraping Intelligent Cross-Plateforme via Backend Cloud
+
+**Date** : 2026-05-21
+**Statut** : Accepté
+
+### Contexte
+Les commandes slash (`/summarize`, `/extract`, `/links`, `/metadata`) ne fonctionnaient que sur l'extension Chrome car elles dépendaient de `ExtensionBridge` + `dom_actions.js` injecté dans l'onglet navigateur. Sur mobile/web, ces commandes retournaient une erreur ou un résultat vide. De plus, la recherche enrichie (vols, hôtels, produits) générait uniquement des liens vers des comparateurs sans scraper les prix/offres réels.
+
+### Décision
+**Architecture backend-first pour le scraping et la recherche structurée** :
+1. **Backend `/scrape`** : endpoint FastAPI qui scrape n'importe quelle URL avec BeautifulSoup. Supporte les sélecteurs CSS personnalisés ou l'auto-extraction (metadata, prix, cartes, liens).
+2. **Backend `/search_smart`** : orchestrateur qui (a) classifie l'intent avec un LLM, (b) construit des URLs de comparateurs, (c) scrape en parallèle plusieurs sources, (d) agrège les résultats structurés.
+3. **Dart `SearchServiceGlobal`** : client unifié qui appelle `/search_smart` et `/scrape`, puis formate les résultats en markdown selon l'intent (vols, hôtels, produits, restaurants, événements, météo).
+4. **Slash commands universels** : `/summarize <url>`, `/extract <url> [selector]`, `/links <url>`, `/metadata <url>`, `/scrape <url>` fonctionnent sur toutes les plateformes. Si une URL est fournie, le backend est appelé. Si aucune URL n'est fournie (extension uniquement), le comportement DOM local est conservé.
+5. **Sélecteurs "learned"** : dictionnaire `_LEARNED_SELECTORS` en mémoire Python qui mappe les domaines connus (backmarket.fr, booking.com, skyscanner.fr, etc.) vers les sélecteurs CSS pertinents pour l'extraction de prix et titres.
+
+### Alternatives Considérées
+- Scraping côté client avec `dio` + `html` package (bloqué par CORS sur web, fragile sur mobile)
+- APIs tierces uniquement (SerpAPI) — coûteux et couverture limitée
+- Pas de support mobile pour les commandes slash DOM — expérience dégradée
+
+### Conséquences
+- ✅ Commandes slash fonctionnent sur mobile, web, extension
+- ✅ Résultats de recherche avec vrais prix et offres extraits des comparateurs
+- ✅ Pas de dépendance CORS côté client
+- ⚠️ Dépendance au backend cloud `api.aironbot.app` (mais le fallback "liens directs" reste disponible côté client si le backend est down)
+- ⚠️ Latence réseau ajoutée (~1-3s pour le scraping multi-source)
+- ⚠️ Les sélecteurs CSS des sites peuvent changer — nécessite un mécanisme de mise à jour des `_LEARNED_SELECTORS`
+
+---
+
 *Dernière mise à jour : 2026-05-21*
