@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'voice_service.dart';
+import '../domain/attachment.dart';
 
 /// Donnees d'une piece jointe en attente d'envoi.
 class AttachmentData {
@@ -22,13 +23,14 @@ class AttachmentData {
   bool get isFile => fileName != null;
 }
 
-/// Callback d'envoi avec texte + piece jointe optionnelle.
+/// Callback d'envoi avec texte + pieces jointes optionnelles.
 typedef SendCallback = void Function(
   String text, {
   String? imageBase64,
   String? imageMimeType,
   String? fileName,
   String? fileContent,
+  List<Attachment> attachments,
 });
 
 /// Barre de saisie avec support piece jointe, micro compact et envoi.
@@ -37,14 +39,14 @@ class InputBar extends ConsumerStatefulWidget {
     super.key,
     required this.onSend,
     this.isLoading = false,
-    this.attachment,
+    this.attachments = const [],
     this.onCancelAttachment,
     this.onSlashTextChanged,
   });
 
   final SendCallback onSend;
   final bool isLoading;
-  final AttachmentData? attachment;
+  final List<AttachmentData> attachments;
   final VoidCallback? onCancelAttachment;
   final ValueChanged<String?>? onSlashTextChanged;
 
@@ -105,7 +107,7 @@ class InputBarState extends ConsumerState<InputBar> {
     super.dispose();
   }
 
-  bool get _canSend => _hasText || widget.attachment != null;
+  bool get _canSend => _hasText || widget.attachments.isNotEmpty;
 
   void _send() {
     final text = _controller.text.trim();
@@ -117,19 +119,38 @@ class InputBarState extends ConsumerState<InputBar> {
     }
     _lastSentAt = now;
 
-    final att = widget.attachment;
+    final atts = widget.attachments;
+    final attachments = <Attachment>[];
+    for (final att in atts) {
+      if (att.imageBase64 != null && att.imageBase64!.isNotEmpty) {
+        attachments.add(Attachment(
+          type: AttachmentType.image,
+          name: att.previewLabel,
+          mimeType: att.imageMimeType ?? 'image/jpeg',
+          sizeBytes: att.imageBase64!.length,
+          imageBase64: att.imageBase64,
+        ));
+      } else if (att.fileContent != null && att.fileContent!.isNotEmpty) {
+        attachments.add(Attachment(
+          type: Attachment.detectType(att.fileName ?? 'document.txt'),
+          name: att.fileName ?? 'document.txt',
+          mimeType: 'application/octet-stream',
+          sizeBytes: att.fileContent!.length,
+          extractedText: att.fileContent,
+        ));
+      }
+    }
     _controller.clear();
-    // Clear voice transcript so it doesn't re-fill the input
     final voiceNotifier = ref.read(voiceServiceProvider.notifier);
     voiceNotifier.clearTranscript();
-    // Clear slash command filter after sending
     widget.onSlashTextChanged?.call(null);
     widget.onSend(
       text,
-      imageBase64: att?.imageBase64,
-      imageMimeType: att?.imageMimeType,
-      fileName: att?.fileName,
-      fileContent: att?.fileContent,
+      imageBase64: atts.isNotEmpty ? atts.first.imageBase64 : null,
+      imageMimeType: atts.isNotEmpty ? atts.first.imageMimeType : null,
+      fileName: atts.isNotEmpty ? atts.first.fileName : null,
+      fileContent: atts.isNotEmpty ? atts.first.fileContent : null,
+      attachments: attachments,
     );
     widget.onCancelAttachment?.call();
     _focusNode.requestFocus();
@@ -138,7 +159,9 @@ class InputBarState extends ConsumerState<InputBar> {
   @override
   Widget build(BuildContext context) {
     ref.listen(voiceServiceProvider, (_, next) {
-      if (next.transcript.isNotEmpty) {
+      // Ne remettre le transcript que s'il est vraiment different du texte actuel
+      // et non vide. Evite d'ecraser le controller apres _controller.clear().
+      if (next.transcript.isNotEmpty && next.transcript != _controller.text) {
         _controller.text = next.transcript;
         _controller.selection = TextSelection.fromPosition(
           TextPosition(offset: _controller.text.length),
@@ -149,7 +172,7 @@ class InputBarState extends ConsumerState<InputBar> {
     final colorScheme = Theme.of(context).colorScheme;
     final voiceState = ref.watch(voiceServiceProvider);
     final voiceNotifier = ref.read(voiceServiceProvider.notifier);
-    final att = widget.attachment;
+    final attachments = widget.attachments;
 
     return SafeArea(
       child: Padding(
@@ -157,8 +180,8 @@ class InputBarState extends ConsumerState<InputBar> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // Apercu de la piece jointe
-            if (att != null)
+            // Apercu des pieces jointes
+            if (attachments.isNotEmpty)
               Container(
                 margin: const EdgeInsets.only(bottom: 6),
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
@@ -166,34 +189,39 @@ class InputBarState extends ConsumerState<InputBar> {
                   color: colorScheme.primaryContainer.withOpacity(0.4),
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: Row(
-                  children: [
-                    Icon(
-                      att.isImage ? Icons.image : Icons.insert_drive_file,
-                      size: 18,
-                      color: colorScheme.primary,
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        att.previewLabel,
-                        style: TextStyle(
-                          fontSize: 13,
-                          color: colorScheme.onSurface,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: attachments.map((att) {
+                    return Row(
+                      children: [
+                        Icon(
+                          att.isImage ? Icons.image : Icons.insert_drive_file,
+                          size: 18,
+                          color: colorScheme.primary,
                         ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                    InkWell(
-                      onTap: widget.onCancelAttachment,
-                      borderRadius: BorderRadius.circular(12),
-                      child: Padding(
-                        padding: const EdgeInsets.all(4),
-                        child: Icon(Icons.close, size: 18, color: colorScheme.onSurfaceVariant),
-                      ),
-                    ),
-                  ],
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            att.previewLabel,
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: colorScheme.onSurface,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        InkWell(
+                          onTap: widget.onCancelAttachment,
+                          borderRadius: BorderRadius.circular(12),
+                          child: Padding(
+                            padding: const EdgeInsets.all(4),
+                            child: Icon(Icons.close, size: 18, color: colorScheme.onSurfaceVariant),
+                          ),
+                        ),
+                      ],
+                    );
+                  }).toList(),
                 ),
               ),
             // Champ texte + micro + envoi
@@ -216,7 +244,7 @@ class InputBarState extends ConsumerState<InputBar> {
                             minLines: 1,
                             textCapitalization: TextCapitalization.sentences,
                             decoration: InputDecoration(
-                              hintText: att != null ? 'Ajoutez votre question...' : 'Posez une question...',
+                              hintText: attachments.isNotEmpty ? 'Ajoutez votre question...' : 'Posez une question...',
                               border: InputBorder.none,
                               isDense: true,
                               contentPadding: const EdgeInsets.symmetric(vertical: 12),

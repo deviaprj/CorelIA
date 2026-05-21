@@ -81,7 +81,9 @@
 
     // Récupérer le tabId actif pour les actions qui en ont besoin
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-      const tabId = (tabs && tabs[0] && tabs[0].id) ? tabs[0].id : null;
+      // Exclude chrome-extension:// tabs (side panel itself) to get the real active page
+      const realTab = (tabs || []).find(t => t.id && !(t.url || '').startsWith('chrome-extension://'));
+      const tabId = realTab ? realTab.id : (tabs && tabs[0] && tabs[0].id ? tabs[0].id : null);
 
       const message = {
         type: 'BROWSER_ACTION',

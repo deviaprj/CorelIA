@@ -175,7 +175,17 @@ class ModelRouter {
     bool hasImage = false,
     bool hasFile = false,
     bool isDocGen = false,
+    List<String>? attachmentTypes,
   }) {
+    // Routage prioritaire par type de pièce jointe
+    if (attachmentTypes != null && attachmentTypes.isNotEmpty) {
+      if (attachmentTypes.any((t) => t == 'image')) return TaskType.vision;
+      if (attachmentTypes.any((t) => t == 'pdf' || t == 'document' || t == 'spreadsheet' || t == 'presentation')) {
+        return TaskType.document;
+      }
+      if (attachmentTypes.any((t) => t == 'text')) return TaskType.longFile;
+    }
+
     if (hasImage) return TaskType.vision;
     if (isDocGen) return TaskType.document;
     if (hasFile) return TaskType.longFile;

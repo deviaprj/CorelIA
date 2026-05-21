@@ -1,4 +1,6 @@
+import 'dart:convert';
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import '../../../core/constants.dart';
 import 'search_service.dart';
 import 'iata_codes.dart';
@@ -69,12 +71,13 @@ class HotelResult {
 /// Enhanced search service.
 ///
 /// Strategy:
-/// 1. SerpAPI for structured data when API key is available
-/// 2. Direct links to comparators/reservation platforms with pre-filled parameters
-///    (no DuckDuckGo scraping — that produces generic results)
+/// 1. Backend /scrape endpoint for structured data extraction
+/// 2. SerpAPI for structured data when API key is available
+/// 3. DuckDuckGo/Google direct scraping for real prices/offers
+/// 4. Direct links to comparators as fallback
 ///
-/// Every search method ALWAYS returns direct comparator links as the primary
-/// result, supplemented by SerpAPI data when available.
+/// The service now attempts real extraction of prices, availability,
+/// and concrete offers rather than just generating search links.
 class EnhancedSearchService {
   final Dio _dio;
 
@@ -84,6 +87,100 @@ class EnhancedSearchService {
   ));
 
   String? get _serpApiKey => AppConstants.serpApiKey;
+
+  String get _backendUrl => AppConstants.backendBaseUrl;
+
+  // ── Backend Scraping ─────────────────────────────────────────────────────
+
+  /// Scrape a URL via the backend /scrape endpoint.
+  /// Returns structured data (prices, cards, links) extracted from the page.
+  Future<Map<String, dynamic>?> scrapeBackend(String url,
+      {Map<String, String>? selectors}) async {
+    if (_backendUrl.isEmpty || _backendUrl.contains('localhost')) return null;
+    try {
+      final params = <String, dynamic>{'url': url};
+      if (selectors != null && selectors.isNotEmpty) {
+        params['selectors'] = jsonEncode(selectors);
+      }
+      final resp = await _dio.get<Map<String, dynamic>>(
+        '$_backendUrl/scrape',
+        queryParameters: params,
+        options: Options(
+          sendTimeout: const Duration(seconds: 10),
+          receiveTimeout: const Duration(seconds: 15),
+        ),
+      );
+      if (resp.statusCode == 200 && resp.data != null) {
+        return resp.data;
+      }
+    } catch (e) {
+      debugPrint('[EnhancedSearch] Backend scrape failed: $e');
+    }
+    return null;
+  }
+
+  /// Search Google for [query] and scrape the result snippets for prices/offers.
+  Future<List<Map<String, String>>> _scrapeGoogleForPrices(String query,
+      {int numResults = 8}) async {
+    final results = <Map<String, String>>[];
+    try {
+      final encoded = Uri.encodeComponent(query);
+      final url = 'https://www.google.com/search?q=$encoded&num=$numResults';
+      final scraped = await scrapeBackend(url, selectors: {
+        'snippet': 'div[data-sokoban-container] .VwiC3b, .g .VwiC3b, .g span.emphasize',
+        'title': 'h3, div[data-sokoban-container] h3',
+        'link': 'a[href^="http"]',
+        'price': 'span, div, b',
+      });
+      if (scraped == null) return results;
+
+      final data = scraped['data'] as List<dynamic>? ?? [];
+      for (final item in data) {
+        if (item is! Map<String, dynamic>) continue;
+        if (item['field'] == 'cards') {
+          final values = item['values'] as List<dynamic>? ?? [];
+          for (final v in values) {
+            if (v is! Map<String, dynamic>) continue;
+            final text = v['text'] as String? ?? '';
+            final price = _extractPrice(text);
+            if (price != null || text.length > 40) {
+              results.add({
+                'title': text.split('\n').first.trim(),
+                'snippet': text,
+                'price': price ?? '',
+                'source': 'Google',
+              });
+            }
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('[EnhancedSearch] Google price scraping failed: $e');
+    }
+    return results;
+  }
+
+  /// Search DuckDuckGo and extract prices/offers from result snippets.
+  Future<List<Map<String, String>>> _scrapeDdgForPrices(String query,
+      {int numResults = 8}) async {
+    final results = <Map<String, String>>[];
+    try {
+      final searchService = SearchService();
+      final webResults = await searchService.searchDirect(query, numResults: numResults);
+      for (final r in webResults) {
+        final price = _extractPrice('${r.title} ${r.snippet}');
+        results.add({
+          'title': r.title,
+          'snippet': r.snippet,
+          'price': price ?? '',
+          'source': 'Web',
+        });
+      }
+    } catch (e) {
+      debugPrint('[EnhancedSearch] DDG price scraping failed: $e');
+    }
+    return results;
+  }
 
   // ── Helpers ─────────────────────────────────────────────────────────────
 
@@ -179,6 +276,24 @@ class EnhancedSearchService {
                 link: _s(r['link'], _s(r['product_link'])),
                 imageUrl: _ns(r['thumbnail']),
               )));
+        }
+      } catch (_) {}
+    }
+
+    // ── Tier 1.5: Scrape Google for real product prices ──
+    if (results.isEmpty || results.every((r) => r.price == 'Rechercher')) {
+      try {
+        final scraped = await _scrapeGoogleForPrices('$query prix', numResults: 8);
+        for (final item in scraped) {
+          final price = item['price'];
+          if (price != null && price.isNotEmpty && price != '') {
+            results.add(ProductResult(
+              title: item['title'] ?? query,
+              price: price,
+              source: item['source'] ?? 'Recherche',
+              link: '',
+            ));
+          }
         }
       } catch (_) {}
     }
@@ -282,6 +397,29 @@ class EnhancedSearchService {
                   : 0,
               link: _s(f['link']),
               source: 'Google Flights',
+            ));
+          }
+        }
+      } catch (_) {}
+    }
+
+    // ── Tier 1.5: Scrape Google search results for real flight prices ──
+    if (results.isEmpty || results.every((r) => r.price == 'Comparer')) {
+      try {
+        final searchQuery =
+            'vol $from $to $depart${retour != null ? ' retour $retour' : ''} prix';
+        final scraped = await _scrapeGoogleForPrices(searchQuery, numResults: 6);
+        for (final item in scraped) {
+          final price = item['price'];
+          if (price != null && price.isNotEmpty && price != '') {
+            results.add(FlightResult(
+              departure: from,
+              arrival: to,
+              date: depart,
+              price: price,
+              airline: item['source'] ?? 'Compagnie',
+              link: '',
+              source: item['source'] ?? 'Recherche',
             ));
           }
         }
@@ -470,6 +608,26 @@ class EnhancedSearchService {
     final ci = checkIn ?? '';
     final co = checkOut ?? '';
     final g = guests ?? 2;
+
+    // ── Tier 1.5: Scrape Google for real hotel prices ──
+    if (results.isEmpty || results.every((r) => r.pricePerNight == 'Rechercher')) {
+      try {
+        final searchQuery = 'hotel $city${ci.isNotEmpty ? ' du $ci' : ''}${co.isNotEmpty ? ' au $co' : ''} prix';
+        final scraped = await _scrapeGoogleForPrices(searchQuery, numResults: 6);
+        for (final item in scraped) {
+          final price = item['price'];
+          if (price != null && price.isNotEmpty && price != '') {
+            results.add(HotelResult(
+              name: item['title'] ?? 'Hébergement $city',
+              location: city,
+              pricePerNight: price,
+              link: '',
+              source: item['source'] ?? 'Recherche',
+            ));
+          }
+        }
+      } catch (_) {}
+    }
 
     // Booking.com
     final bookingUrl = StringBuffer(
@@ -774,6 +932,24 @@ class EnhancedSearchService {
               price: _extractPrice(_s(r['snippet'])) ?? 'Voir prix',
               source: _extractDomain(_s(r['link'])),
               link: _s(r['link']),
+            ));
+          }
+        }
+      } catch (_) {}
+    }
+
+    // ── Tier 1.5: Scrape Google for real second-hand/refurbished prices ──
+    if (results.isEmpty || results.every((r) => r.price == 'Rechercher')) {
+      try {
+        final scraped = await _scrapeGoogleForPrices(fullQuery, numResults: 8);
+        for (final item in scraped) {
+          final price = item['price'];
+          if (price != null && price.isNotEmpty && price != '') {
+            results.add(ProductResult(
+              title: item['title'] ?? query,
+              price: price,
+              source: item['source'] ?? 'Recherche',
+              link: '',
             ));
           }
         }

@@ -8,6 +8,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../domain/message.dart';
 import '../../../core/constants.dart';
 import 'voice_service.dart';
+import 'emotion_parser.dart';
 
 class ChatBubble extends StatelessWidget {
   const ChatBubble({
@@ -114,7 +115,7 @@ class ChatBubble extends StatelessWidget {
                                     ),
                                   if (message.content.isNotEmpty)
                                     Text(
-                                      message.content,
+                                      EmotionParser.stripEmotionTags(message.content),
                                       style: TextStyle(
                                         color: colorScheme.onPrimary,
                                       ),
@@ -126,7 +127,7 @@ class ChatBubble extends StatelessWidget {
                               padding: const EdgeInsets.symmetric(
                                   horizontal: 14, vertical: 10),
                               child: MarkdownBody(
-                                data: message.content,
+                                data: EmotionParser.stripEmotionTags(message.content),
                                 selectable: true,
                                 onTapLink: (text, href, title) async {
                                   if (href == null) return;

@@ -87,5 +87,42 @@ async def search_endpoint(request: Request, q: str) -> SearchResponse:
     return await search(q, num_results=5)
 
 
+@app.get("/scrape")
+@_limiter.limit(settings.rate_limit)
+async def scrape_endpoint(
+    request: Request,
+    url: str,
+    selectors: str | None = None,
+) -> dict[str, Any]:
+    """Scrape a URL and return structured data.
+
+    - url: target URL to scrape
+    - selectors: optional JSON dict of CSS selectors, e.g. {"price": ".price"}
+    """
+    from backend.agents.search_engine import scrape_url
+
+    parsed_selectors: dict[str, str] | None = None
+    if selectors:
+        import json as _json
+        try:
+            parsed_selectors = _json.loads(selectors)
+        except Exception:
+            pass
+
+    return await scrape_url(url, selectors=parsed_selectors)
+
+
+@app.get("/search_smart")
+@_limiter.limit(settings.rate_limit)
+async def search_smart_endpoint(request: Request, q: str) -> dict[str, Any]:
+    """Unified smart search endpoint.
+
+    Analyzes the natural-language query, classifies intent, scrapes
+    multiple sources in parallel, and returns structured results.
+    """
+    from backend.agents.search_smart import search_smart
+    return await search_smart(q)
+
+
 # Include routers
 app.include_router(chat_router)

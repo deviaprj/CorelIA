@@ -35,7 +35,7 @@ class ChatScreen extends ConsumerStatefulWidget {
 
 class _ChatScreenState extends ConsumerState<ChatScreen> {
   final _scrollController = ScrollController();
-  AttachmentData? _pendingAttachment;
+  List<AttachmentData> _pendingAttachments = [];
   final _inputBarController = TextEditingController();
   final _inputBarKey = GlobalKey<InputBarState>();
   String? _slashFilter;
@@ -291,19 +291,21 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
               InputBar(
                 key: _inputBarKey,
                 isLoading: state.isStreaming,
-                attachment: _pendingAttachment,
-                onCancelAttachment: () => setState(() => _pendingAttachment = null),
+                attachments: _pendingAttachments,
+                onCancelAttachment: () => setState(() => _pendingAttachments = []),
                 onSlashTextChanged: (filter) {
                   setState(() => _slashFilter = filter);
                 },
-                onSend: (text, {imageBase64, imageMimeType, fileName, fileContent}) {
+                onSend: (text, {imageBase64, imageMimeType, fileName, fileContent, attachments = const []}) {
                   notifier.sendMessage(
                     text,
                     imageBase64: imageBase64,
                     imageMimeType: imageMimeType,
                     fileName: fileName,
                     fileContent: fileContent,
+                    attachments: attachments,
                   );
+                  setState(() => _pendingAttachments = []);
                 },
               ),
             ],
@@ -339,38 +341,82 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
 
   Future<void> _handleImagePick(ChatNotifier notifier, {required bool fromCamera}) async {
     final service = ImageUploadService();
-    final result = fromCamera
+    final results = fromCamera
         ? await service.pickFromCamera()
         : await service.pickFromGallery();
-    if (result == null || !mounted) return;
+    if (results.isEmpty || !mounted) return;
 
-    final sizeKB = (result.sizeBytes / 1024).toStringAsFixed(0);
-    setState(() {
-      _pendingAttachment = AttachmentData(
-        imageBase64: result.base64,
-        imageMimeType: result.mimeType,
-        previewLabel: 'Image ($sizeKB Ko) — tapez votre question',
-      );
+    // Vérification limite agrégée 5MB
+    var currentTotal = _pendingAttachments.fold<int>(0, (sum, a) {
+      if (a.imageBase64 != null) return sum + a.imageBase64!.length;
+      if (a.fileContent != null) return sum + a.fileContent!.length;
+      return sum;
     });
+
+    for (final result in results) {
+      final addedSize = result.imageBase64?.length ?? result.extractedText?.length ?? 0;
+      if (currentTotal + addedSize > maxAttachmentsTotalBytes) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Taille limite dépassée (5MB par message). Vous pouvez ajouter plusieurs fichiers, mais la taille totale ne doit pas dépasser 5MB.'),
+              duration: Duration(seconds: 4),
+            ),
+          );
+        }
+        break;
+      }
+      final sizeKB = (result.sizeBytes / 1024).toStringAsFixed(0);
+      setState(() {
+        _pendingAttachments.add(AttachmentData(
+          imageBase64: result.imageBase64,
+          imageMimeType: result.mimeType,
+          previewLabel: '${result.name} ($sizeKB Ko)',
+        ));
+      });
+      currentTotal += addedSize;
+    }
   }
 
   Future<void> _handleFilePick(ChatNotifier notifier) async {
     final isPro = await notifier.ref.read(isProProvider.future).catchError((_) => false);
     final service = FileUploadService();
     try {
-      final result = await service.pickAndExtract(isPro: isPro);
-      if (result == null || !mounted) return;
+      final results = await service.pickAndExtract();
+      if (results.isEmpty || !mounted) return;
 
-      final preview = result.fileName.length > 40
-          ? '${result.fileName.substring(0, 40)}...'
-          : result.fileName;
-      setState(() {
-        _pendingAttachment = AttachmentData(
-          fileName: result.fileName,
-          fileContent: result.extractedText,
-          previewLabel: '$preview — tapez votre question',
-        );
+      // Vérification limite agrégée 5MB
+      var currentTotal = _pendingAttachments.fold<int>(0, (sum, a) {
+        if (a.imageBase64 != null) return sum + a.imageBase64!.length;
+        if (a.fileContent != null) return sum + a.fileContent!.length;
+        return sum;
       });
+
+      for (final result in results) {
+        final addedSize = result.sizeBytes;
+        if (currentTotal + addedSize > maxAttachmentsTotalBytes) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Taille limite dépassée (5MB par message). Vous pouvez ajouter plusieurs fichiers, mais la taille totale ne doit pas dépasser 5MB.'),
+                duration: Duration(seconds: 4),
+              ),
+            );
+          }
+          break;
+        }
+        final preview = result.name.length > 40
+            ? '${result.name.substring(0, 40)}...'
+            : result.name;
+        setState(() {
+          _pendingAttachments.add(AttachmentData(
+            fileName: result.name,
+            fileContent: result.extractedText,
+            previewLabel: '$preview (${(result.sizeBytes / 1024).toStringAsFixed(0)} Ko)',
+          ));
+        });
+        currentTotal += addedSize;
+      }
     } on FileUploadException catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

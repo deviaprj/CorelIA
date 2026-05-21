@@ -35,7 +35,7 @@ class TtsNaturalService {
   final TtsCacheService _cache = TtsCacheService();
 
   // ── État commun ─────────────────────────────────────────────────────────
-  static const double _openRouterTtsSpeed = 0.65;
+  static const double _openRouterTtsSpeed = 1.0;
   bool _isSpeaking = false;
   TtsEngine _activeEngine = TtsEngine.flutterTts;
   TtsEmotion _currentEmotion = TtsEmotion.neutral;
@@ -47,6 +47,10 @@ class TtsNaturalService {
   TtsEngine get activeEngine => _activeEngine;
   TtsEmotion get currentEmotion => _currentEmotion;
 
+  /// True si une voix premium (neural/premium/enhanced) a été détectée.
+  bool get hasPremiumVoice => _hasPremiumVoice;
+  bool _hasPremiumVoice = false;
+
   Future<void> init() async {
     await _initFlutterTts();
     await _cache.init();
@@ -54,17 +58,85 @@ class TtsNaturalService {
     if (PlatformService.isMobile) {
       _audioPlayer ??= AudioPlayerFactory.create();
     }
+
+    // Préchauffer le moteur TTS pour réduire la latence de la première phrase
+    if (_flutterTtsReady) {
+      try {
+        await _flutterTts.speak('');
+      } catch (_) {}
+    }
   }
 
   Future<void> _initFlutterTts() async {
     try {
       await _flutterTts.setLanguage(_language);
+      await _selectBestVoice();
       await _flutterTts.setSpeechRate(_speechRate);
       await _flutterTts.setPitch(_pitch);
       await _flutterTts.setVolume(1.0);
       _flutterTtsReady = true;
     } catch (e) {
       debugPrint('[TtsNaturalService] flutter_tts init failed: $e');
+    }
+  }
+
+  /// Sélectionne dynamiquement la meilleure voix fr-FR disponible.
+  Future<void> _selectBestVoice() async {
+    try {
+      final voices = await _flutterTts.getVoices;
+      if (voices is! List) return;
+
+      final frVoices = voices.where((v) {
+        final map = v as Map<dynamic, dynamic>? ?? {};
+        final locale = (map['locale'] ?? map['language'] ?? '').toString();
+        return locale.toLowerCase().startsWith('fr');
+      }).toList();
+
+      if (frVoices.isEmpty) return;
+
+      final premiumPatterns = ['neural', 'premium', 'enhanced', 'siri'];
+      final fallbackPatterns = ['local', 'c1', 'c2', 'c3', 'network'];
+      String? bestName;
+      // Chercher d'abord une voix premium
+      for (final pattern in premiumPatterns) {
+        for (final v in frVoices) {
+          final map = v as Map<dynamic, dynamic>? ?? {};
+          final name = (map['name'] ?? '').toString().toLowerCase();
+          if (name.contains(pattern)) {
+            bestName = map['name'] as String?;
+            _hasPremiumVoice = true;
+            break;
+          }
+        }
+        if (bestName != null) break;
+      }
+      // Fallback sur les voix standard
+      if (bestName == null) {
+        for (final pattern in fallbackPatterns) {
+          for (final v in frVoices) {
+            final map = v as Map<dynamic, dynamic>? ?? {};
+            final name = (map['name'] ?? '').toString().toLowerCase();
+            if (name.contains(pattern)) {
+              bestName = map['name'] as String?;
+              break;
+            }
+          }
+          if (bestName != null) break;
+        }
+      }
+      bestName ??= ((frVoices.first as Map<dynamic, dynamic>)['name'] as String?);
+
+      if (bestName != null) {
+        await _flutterTts.setVoice({'name': bestName, 'locale': 'fr-FR'});
+        if (_hasPremiumVoice) {
+          debugPrint('[TtsNaturalService] Premium voice selected: $bestName');
+        } else {
+          debugPrint('[TtsNaturalService] ⚠️ Basic voice selected: $bestName — '
+              'For human-like TTS, switch to Google Speech Services or Samsung Neural in system settings.');
+        }
+      }
+    } catch (e) {
+      debugPrint('[TtsNaturalService] Voice selection failed: $e');
     }
   }
 
@@ -290,8 +362,13 @@ class TtsNaturalService {
     }
 
     final config = emotionTtsConfigs[_currentEmotion] ?? emotionTtsConfigs[TtsEmotion.neutral]!;
+    // Pas de ratio magique — les valeurs emotionTtsConfigs sont deja calibrees
+    // pour Google TTS. Leger ajustement : courts = +5%, longs = -5% pour la clarte.
+    final adaptiveRate = text.length < 150
+        ? config.rate * 1.05
+        : config.rate * 0.95;
     try {
-      await _flutterTts.setSpeechRate(config.rate * _speechRate / 0.65);
+      await _flutterTts.setSpeechRate(adaptiveRate.clamp(0.35, 1.00));
       await _flutterTts.setPitch(config.pitch * _pitch / 1.10);
     } catch (e) {
       debugPrint('[TtsNaturalService] flutter_tts emotion params failed: $e');
@@ -337,7 +414,7 @@ class TtsNaturalService {
         .trim();
     if (normalized.isEmpty) return const [];
 
-    const maxChunkLength = 220;
+    const maxChunkLength = 120;
     final sentenceChunks = normalized.split(RegExp(r'(?<=[\.!?;:])\s+'));
     final chunks = <String>[];
     final current = StringBuffer();

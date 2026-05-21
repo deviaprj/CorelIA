@@ -191,41 +191,108 @@ class SearchService {
   /// Parse le HTML de DuckDuckGo lite pour extraire les resultats.
   /// Fonctionne sur mobile avec n'importe quelle connexion internet.
   /// Timeout : 8 secondes max.
+  ///
+  /// **Robustesse** : essaie 3 endpoints en cascade, limite la taille HTML,
+  /// patterns fallback multiples pour s'adapter aux changements de markup.
   Future<List<WebSearchResult>> searchDirect(String query, {int numResults = 5}) async {
-    try {
-      final dio = Dio(BaseOptions(
-        connectTimeout: const Duration(seconds: 8),
-        receiveTimeout: const Duration(seconds: 8),
-        headers: {
-          if (!kIsWeb) 'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36',
-          'Accept': 'text/html',
-        },
-      ));
+    const endpoints = [
+      'https://html.duckduckgo.com/html/',
+      'https://lite.duckduckgo.com/lite/',
+      'https://duckduckgo.com/html/',
+    ];
 
-      final response = await dio.get<dynamic>(
-        'https://html.duckduckgo.com/html/',
-        queryParameters: {'q': query},
-      );
+    const userAgents = [
+      'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
+      'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    ];
 
-      if (response.statusCode == 200) {
-        final results = _parseDuckDuckGoHtml(response.data as String, numResults);
-        if (results.isNotEmpty) return results;
-        // Si aucun resultat, essayer le parsing alternatif
-        return _parseDuckDuckGoHtmlFallback(response.data as String, numResults);
+    var endpointIndex = 0;
+    var lastError = '';
+
+    for (final endpoint in endpoints) {
+      try {
+        final dio = Dio(BaseOptions(
+          connectTimeout: const Duration(seconds: 8),
+          receiveTimeout: const Duration(seconds: 8),
+          headers: {
+            if (!kIsWeb) 'User-Agent': userAgents[endpointIndex % userAgents.length],
+            'Accept': 'text/html,application/xhtml+xml',
+          },
+        ));
+
+        final response = await dio.get<dynamic>(
+          endpoint,
+          queryParameters: {'q': query},
+        );
+
+        if (response.statusCode == 200) {
+          final rawHtml = response.data as String;
+          // Protection contre les réponses HTML gigantesques (limite ~500KB)
+          final html = rawHtml.length > 500000 ? rawHtml.substring(0, 500000) : rawHtml;
+
+          var results = _parseDuckDuckGoHtml(html, numResults);
+          if (results.isEmpty) {
+            results = _parseDuckDuckGoHtmlFallback(html, numResults);
+          }
+          if (results.isNotEmpty) {
+            debugPrint('[SearchService] searchDirect OK via $endpoint (${results.length} résultats)');
+            return results;
+          }
+          debugPrint('[SearchService] Endpoint $endpoint : 0 résultats, passage au suivant');
+        }
+      } on DioException catch (e) {
+        lastError = 'DioException $endpoint : ${e.message}';
+        debugPrint('[SearchService] $lastError');
+      } catch (e) {
+        lastError = 'Exception $endpoint : $e';
+        debugPrint('[SearchService] $lastError');
       }
-      throw SearchException('HTTP ${response.statusCode}');
-    } on DioException catch (e) {
-      throw SearchException('Reseau DuckDuckGo : ${e.message}');
-    } catch (e) {
-      throw SearchException(e.toString());
+      endpointIndex++;
     }
+
+    throw SearchException('Tous les endpoints DuckDuckGo ont échoué. Dernier : $lastError');
+  }
+
+  // ── URL Decoding ───────────────────────────────────────────────────────────
+
+  /// Décode une URL de redirection DuckDuckGo.
+  /// Supporte les formats : /l/?u=URL, /l/?uddg=URL, /l/?kh=...&u=URL
+  static String? decodeDdgUrl(String rawUrl) {
+    if (rawUrl.isEmpty) return null;
+    // Déjà une URL absolue
+    if (rawUrl.startsWith('http')) return rawUrl;
+
+    // Format : /l/?uddg=https%3A%2F%2F...
+    final uddg = RegExp(r'[?&]uddg=([^&]+)').firstMatch(rawUrl);
+    if (uddg != null) {
+      try {
+        return Uri.decodeComponent(uddg.group(1)!);
+      } catch (_) {}
+    }
+
+    // Format : /l/?u=https%3A%2F%2F... ou /l/?kh=...&u=URL
+    final uMatch = RegExp(r'[?&]u=([^&]+)').firstMatch(rawUrl);
+    if (uMatch != null) {
+      try {
+        return Uri.decodeComponent(uMatch.group(1)!);
+      } catch (_) {}
+    }
+
+    // Format : //duckduckgo.com/l/?uddg=...
+    if (rawUrl.startsWith('//')) {
+      return decodeDdgUrl('/' + rawUrl.substring(2));
+    }
+
+    return null;
   }
 
   /// Parse le HTML DuckDuckGo pour extraire les resultats.
+  /// Architecture multi-pattern : teste plusieurs structures HTML courantes.
   List<WebSearchResult> _parseDuckDuckGoHtml(String html, int maxResults) {
     final results = <WebSearchResult>[];
 
-    // Pattern 1 : resultats avec lien encode /l/?kh=...&u=URL
+    // Pattern 1 : resultats avec lien encode /l/?kh=...&u=URL (ancien layout)
     final pattern1 = RegExp(
       r'<div class="result[^"]*"[^>]*>.*?'
       r'<a[^>]*class="result__a"[^>]*href="/l/\?[^"]*&u=([^"]+)"[^>]*>(.*?)</a>.*?'
@@ -244,6 +311,41 @@ class SearchService {
       results.add(WebSearchResult(title: title, url: url, snippet: snippet));
     }
 
+    // Pattern 2 : liens directs sans encodage
+    if (results.isEmpty) {
+      final pattern2 = RegExp(
+        r'<a[^>]*class="result__a"[^>]*href="(https?://[^"]+)"[^>]*>(.*?)</a>.*?'
+        r'<a[^>]*class="result__snippet"[^>]*>(.*?)</a>',
+        caseSensitive: false,
+        dotAll: true,
+      );
+      for (final match in pattern2.allMatches(html)) {
+        if (results.length >= maxResults) break;
+        final url = match.group(1) ?? '';
+        final title = _cleanHtml(match.group(2) ?? 'Sans titre');
+        final snippet = _cleanHtml(match.group(3) ?? '');
+        results.add(WebSearchResult(title: title, url: url, snippet: snippet));
+      }
+    }
+
+    // Pattern 3 : DuckDuckGo uddg redirect (nouveau layout)
+    if (results.isEmpty) {
+      final pattern3 = RegExp(
+        r'<a[^>]*class="result__a"[^>]*href="(/l/\?[^"]*uddg=[^"]+)"[^>]*>(.*?)</a>.*?'
+        r'<a[^>]*class="result__snippet"[^>]*>(.*?)</a>',
+        caseSensitive: false,
+        dotAll: true,
+      );
+      for (final match in pattern3.allMatches(html)) {
+        if (results.length >= maxResults) break;
+        final rawUrl = match.group(1) ?? '';
+        final title = _cleanHtml(match.group(2) ?? 'Sans titre');
+        final snippet = _cleanHtml(match.group(3) ?? '');
+        final url = decodeDdgUrl(rawUrl) ?? rawUrl;
+        results.add(WebSearchResult(title: title, url: url, snippet: snippet));
+      }
+    }
+
     return results;
   }
 
@@ -251,6 +353,7 @@ class SearchService {
   List<WebSearchResult> _parseDuckDuckGoHtmlFallback(String html, int maxResults) {
     final results = <WebSearchResult>[];
 
+    // Fallback classique — tout lien result__a
     final fallbackPattern = RegExp(
       r'<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>(.*?)</a>.*?'
       r'<a[^>]*class="result__snippet"[^>]*>(.*?)</a>',
@@ -266,12 +369,46 @@ class SearchService {
 
       String url = rawUrl;
       if (url.startsWith('/l/?')) {
-        final uMatch = RegExp(r'[?&]u=([^&]+)').firstMatch(url);
-        if (uMatch != null) {
-          url = Uri.decodeFull(uMatch.group(1)!);
-        }
+        final decoded = decodeDdgUrl(url);
+        if (decoded != null) url = decoded;
       }
       results.add(WebSearchResult(title: title, url: url, snippet: snippet));
+    }
+
+    // Fallback avec liens absolus directs (pas de redirection DuckDuckGo)
+    if (results.isEmpty) {
+      final directPattern = RegExp(
+        r'<a[^>]*class="result__a"[^>]*href="(https?://[^"]+)"[^>]*>(.*?)</a>',
+        caseSensitive: false,
+        dotAll: true,
+      );
+      for (final match in directPattern.allMatches(html)) {
+        if (results.length >= maxResults) break;
+        final url = match.group(1) ?? '';
+        final title = _cleanHtml(match.group(2) ?? 'Sans titre');
+        if (url.isNotEmpty && !url.contains('duckduckgo.com')) {
+          results.add(WebSearchResult(title: title, url: url, snippet: ''));
+        }
+      }
+    }
+
+    // Fallback ultra-souple : tout lien avec titre + snippet proche
+    if (results.isEmpty) {
+      final ultraPattern = RegExp(
+        r'<a[^>]*href="([^"]+)"[^>]*>([^<]{10,200})</a>.*?'
+        r'<[^>]*>([^<]{20,500})</[^>]*>',
+        caseSensitive: false,
+        dotAll: true,
+      );
+      for (final match in ultraPattern.allMatches(html)) {
+        if (results.length >= maxResults) break;
+        final rawUrl = match.group(1) ?? '';
+        final title = _cleanHtml(match.group(2) ?? 'Sans titre');
+        final snippet = _cleanHtml(match.group(3) ?? '');
+        if (rawUrl.startsWith('http') && !rawUrl.contains('duckduckgo.com')) {
+          results.add(WebSearchResult(title: title, url: rawUrl, snippet: snippet));
+        }
+      }
     }
 
     return results;

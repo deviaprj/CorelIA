@@ -12,6 +12,7 @@ import '../data/mock_chat_repository.dart';
 import '../data/quota_service.dart';
 import '../data/search_service.dart';
 import '../data/enhanced_search_service.dart';
+import '../data/search_service_global.dart';
 import '../data/search_intent_extractor.dart';
 import '../data/weather_service.dart';
 import '../data/location_service.dart';
@@ -23,6 +24,7 @@ import '../data/ollama_vision_service.dart';
 import '../data/document_generation_service.dart';
 import '../domain/conversation.dart';
 import '../domain/message.dart';
+import '../domain/attachment.dart';
 import '../../../core/constants.dart';
 import '../../../core/platform/platform_service.dart';
 import '../../../core/platform/extension_providers.dart';
@@ -62,6 +64,8 @@ final chatApiServiceProvider = Provider((ref) => ChatApiService());
 final searchServiceProvider = Provider((ref) => SearchService());
 final enhancedSearchServiceProvider =
     Provider((ref) => EnhancedSearchService());
+final searchServiceGlobalProvider =
+    Provider((ref) => SearchServiceGlobal());
 final weatherServiceProvider = Provider((ref) => WeatherService());
 final locationServiceProvider = Provider((ref) => LocationService());
 final documentGenerationServiceProvider =
@@ -244,6 +248,8 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
         return await _handleSlashSearchPage(parsed, bridge);
       case 'docgen':
         return await _handleSlashDocgen(parsed, bridge);
+      case 'scrape':
+        return await _handleSlashScrape(parsed, bridge);
       default:
         return false;
     }
@@ -295,18 +301,9 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
   }
 
   Future<bool> _handleSlashPdf(ParsedSlashCommand cmd, ExtensionBridge bridge) async {
-    // /pdf [url] [filename] — PDF de la page courante ou d'une URL
-    final url = cmd.args.isNotEmpty ? cmd.args[0] : null;
-    final filename = cmd.args.length > 1 ? cmd.args[1] : null;
-
-    // Si une URL est fournie, l'ouvrir d'abord
-    if (url != null && url.startsWith('http')) {
-      final openAction = BrowserAction(
-        action: BrowserActionType.openUrl,
-        params: {'url': url},
-      );
-      await bridge.executeAction(openAction);
-    }
+    // /pdf [filename] — PDF de la page courante
+    // Combo : /open <url> attendre chargement, puis /pdf [filename]
+    final filename = cmd.args.isNotEmpty ? cmd.args[0] : null;
 
     final action = BrowserAction(
       action: BrowserActionType.saveAsPdf,
@@ -325,7 +322,50 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
   }
 
   Future<bool> _handleSlashLinks(ParsedSlashCommand cmd, ExtensionBridge bridge) async {
-    final rawFilter = cmd.args.isNotEmpty ? cmd.args[0] : 'all';
+    final firstArg = cmd.args.isNotEmpty ? cmd.args[0] : 'all';
+    final String? url = firstArg.startsWith('http') ? firstArg : null;
+    final rawFilter = url != null ? (cmd.args.length > 1 ? cmd.args[1] : 'all') : firstArg;
+
+    if (url != null) {
+      final globalService = ref.read(searchServiceGlobalProvider);
+      try {
+        final data = await globalService.scrape(url);
+        final allLinks = (data['data'] as List? ?? [])
+            .where((d) => d['field'] == 'links')
+            .expand((d) => (d['values'] as List? ?? []).cast<Map>());
+        final filtered = allLinks.where((m) {
+          final href = (m['url'] ?? '').toString();
+          switch (rawFilter.toLowerCase()) {
+            case 'video':
+              return href.contains('video') || href.endsWith('.mp4') || href.endsWith('.webm');
+            case 'image':
+              return href.contains('image') || href.endsWith('.jpg') || href.endsWith('.jpeg') || href.endsWith('.png') || href.endsWith('.gif') || href.endsWith('.webp');
+            case 'audio':
+              return href.contains('audio') || href.endsWith('.mp3') || href.endsWith('.wav');
+            case 'document':
+              return href.endsWith('.pdf') || href.endsWith('.doc') || href.endsWith('.docx') || href.endsWith('.xls') || href.endsWith('.xlsx');
+            default:
+              return true;
+          }
+        });
+        final links = filtered.map((m) => '- [${m['text'] ?? 'Lien'}](${m['url']})').join('\n');
+        if (links.isEmpty) {
+          _addAssistantMessage('Aucun lien trouvé sur $url (filtre: $rawFilter).');
+          return true;
+        }
+        _addAssistantMessage('Liens extraits de $url (filtre: $rawFilter):\n\n$links');
+        return true;
+      } catch (e) {
+        state = state.copyWith(error: 'Erreur scrape backend: $e', isStreaming: false);
+        return true;
+      }
+    }
+
+    if (!bridge.isExtension) {
+      state = state.copyWith(error: 'Usage mobile : /links <url> [filter]', isStreaming: false);
+      return true;
+    }
+
     final aliases = <String, String>{
       'videos': 'video',
       'images': 'image',
@@ -373,6 +413,36 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
   }
 
   Future<bool> _handleSlashSummarize(ParsedSlashCommand cmd, ExtensionBridge bridge) async {
+    final url = cmd.args.isNotEmpty && cmd.args[0].startsWith('http') ? cmd.args[0] : null;
+
+    if (url != null) {
+      final globalService = ref.read(searchServiceGlobalProvider);
+      try {
+        final data = await globalService.scrape(url);
+        final allTexts = (data['data'] as List? ?? [])
+            .where((d) => d['field'] == 'cards' || d['field'] == 'prices')
+            .expand((d) => (d['values'] as List? ?? []).map((v) => v is Map ? v['text'] ?? '' : v.toString()))
+            .where((t) => t.toString().isNotEmpty)
+            .join('\n');
+        final title = data['title'] as String? ?? url;
+        if (allTexts.isEmpty) {
+          _addAssistantMessage('Aucun contenu extrait de $url.');
+          return true;
+        }
+        final summarizePrompt = 'Résume le contenu suivant de la page "$title" ($url) :\n\n$allTexts';
+        await sendMessage(summarizePrompt, bypassSlashCheck: true);
+        return true;
+      } catch (e) {
+        state = state.copyWith(error: 'Erreur scrape backend: $e', isStreaming: false);
+        return true;
+      }
+    }
+
+    if (!bridge.isExtension) {
+      state = state.copyWith(error: 'Usage mobile : /summarize <url>', isStreaming: false);
+      return true;
+    }
+
     final action = BrowserAction(
       action: BrowserActionType.summarizePage,
       params: {},
@@ -384,7 +454,7 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
       // Injecter le contenu dans le message et laisser l'IA résumer
       final summarizePrompt = 'Résume le contenu suivant de la page "$title" '
           '(${content.length} caractères extraits) :\n\n${content.substring(0, content.length > 3000 ? 3000 : content.length)}';
-      await sendMessage(summarizePrompt);
+      await sendMessage(summarizePrompt, bypassSlashCheck: true);
       return true;
     } else {
       state = state.copyWith(error: 'Erreur résumé : ${result.error}', isStreaming: false);
@@ -393,7 +463,46 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
   }
 
   Future<bool> _handleSlashExtract(ParsedSlashCommand cmd, ExtensionBridge bridge) async {
-    final selector = cmd.args.isNotEmpty ? cmd.args[0] : 'body';
+    final firstArg = cmd.args.isNotEmpty ? cmd.args[0] : '';
+    final String? url = firstArg.startsWith('http') ? firstArg : null;
+    final selector = url != null
+        ? (cmd.args.length > 1 ? cmd.args[1] : 'body')
+        : (cmd.args.isNotEmpty ? cmd.args[0] : 'body');
+
+    if (url != null) {
+      final globalService = ref.read(searchServiceGlobalProvider);
+      try {
+        final selectors = selector != 'body' ? {'content': selector} : null;
+        final data = await globalService.scrape(url, selectors: selectors);
+        final contentItems = (data['data'] as List? ?? [])
+            .where((d) => d['field'] == 'content')
+            .expand((d) => (d['values'] as List? ?? []))
+            .where((t) => t.toString().isNotEmpty)
+            .join('\n');
+        final allTexts = contentItems.isNotEmpty
+            ? contentItems
+            : (data['data'] as List? ?? [])
+                .where((d) => d['field'] == 'cards' || d['field'] == 'prices')
+                .expand((d) => (d['values'] as List? ?? []).map((v) => v is Map ? v['text'] ?? '' : v.toString()))
+                .where((t) => t.toString().isNotEmpty)
+                .join('\n');
+        if (allTexts.isEmpty) {
+          _addAssistantMessage('Aucun contenu extrait de $url.');
+          return true;
+        }
+        _addAssistantMessage('Contenu extrait de $url ($selector):\n\n$allTexts');
+        return true;
+      } catch (e) {
+        state = state.copyWith(error: 'Erreur scrape backend: $e', isStreaming: false);
+        return true;
+      }
+    }
+
+    if (!bridge.isExtension) {
+      state = state.copyWith(error: 'Usage mobile : /extract <url> [selector]', isStreaming: false);
+      return true;
+    }
+
     final action = BrowserAction(
       action: BrowserActionType.extractText,
       params: {'selector': selector},
@@ -418,7 +527,7 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
         'Supprime le bruit (menus, publicités, scripts). '
         'Organise en sections claires. Conserve les informations utiles.\n\n$truncatedForLlm';
     try {
-      await sendMessage(llmPrompt);
+      await sendMessage(llmPrompt, bypassSlashCheck: true);
     } catch (e) {
       _addAssistantMessage('Texte extrait de "$selector" (${text.length} caractères) :\n\n$rawPreview');
     }
@@ -504,7 +613,22 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
     final result = await bridge.executeAction(action);
     if (result.success) {
       state = state.copyWith(error: null, isStreaming: false);
-      _addAssistantMessage('Capture d\'écran effectuée.');
+      final dataUrl = result.data?['dataUrl'] as String? ?? '';
+      if (dataUrl.isNotEmpty && dataUrl.startsWith('data:image')) {
+        final base64 = dataUrl.substring(dataUrl.indexOf(',') + 1);
+        final downloadAction = BrowserAction(
+          action: BrowserActionType.downloadData,
+          params: {
+            'contentBase64': base64,
+            'mimeType': 'image/png',
+            'filename': 'corely_screenshot_${DateTime.now().millisecondsSinceEpoch}.png',
+          },
+        );
+        await bridge.executeAction(downloadAction);
+        _addAssistantMessage('Capture d\'écran téléchargée (PNG).');
+      } else {
+        _addAssistantMessage('Capture d\'écran effectuée.');
+      }
     } else {
       state = state.copyWith(error: 'Erreur capture : ${result.error}', isStreaming: false);
     }
@@ -624,7 +748,7 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
 
         for (var i = start; i <= end; i++) {
           final t = tables[i] as Map;
-          buffer.writeln('### Tableau ${i + 1} : ${t['rowCount']} lignes × ${t['colCount']} colonnes');
+          buffer.writeln('### Tableau ${i + 1} : ${t['rowCount'] ?? '?'} lignes × ${t['colCount'] ?? '?'} colonnes');
           if (t['caption'] != null) buffer.writeln('*${t['caption']}*');
           final headers = t['headers'] as List?;
           if (headers != null && headers.isNotEmpty) {
@@ -635,7 +759,7 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
             final row = rows[j] as List;
             buffer.writeln('  ${row.join(' | ')}');
           }
-          if ((t['rowCount'] as int?)! > 10) buffer.writeln('  ... et ${t['rowCount']! - 10} autres lignes');
+          if ((t['rowCount'] as int? ?? 0) > 10) buffer.writeln('  ... et ${(t['rowCount'] as int? ?? 0) - 10} autres lignes');
           buffer.writeln();
         }
         buffer.writeln('💡 Utilisez `/export csv` pour exporter les tableaux en CSV.');
@@ -707,6 +831,36 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
   }
 
   Future<bool> _handleSlashMetadata(ParsedSlashCommand cmd, ExtensionBridge bridge) async {
+    final url = cmd.args.isNotEmpty && cmd.args[0].startsWith('http') ? cmd.args[0] : null;
+
+    if (url != null) {
+      final globalService = ref.read(searchServiceGlobalProvider);
+      try {
+        final data = await globalService.scrape(url);
+        final buffer = StringBuffer();
+        buffer.writeln('**Métadonnées de $url**\n');
+        buffer.writeln('| Propriété | Valeur |');
+        buffer.writeln('|-----------|--------|');
+        buffer.writeln('| Titre | ${data['title'] ?? 'N/A'} |');
+        buffer.writeln('| URL | $url |');
+        final metaItems = (data['data'] as List? ?? [])
+            .where((d) => d['field'] == 'metadata')
+            .expand((d) => (d['values'] as List? ?? []).cast<Map>())
+            .map((m) => '| ${m['name'] ?? ''} | ${(m['content'] ?? '').toString().replaceAll('\n', ' ').substring(0, (m['content'] ?? '').toString().length < 100 ? (m['content'] ?? '').toString().length : 100)}${(m['content'] ?? '').toString().length > 100 ? '...' : ''} |');
+        buffer.writeln(metaItems.join('\n'));
+        _addAssistantMessage(buffer.toString());
+        return true;
+      } catch (e) {
+        state = state.copyWith(error: 'Erreur scrape backend: $e', isStreaming: false);
+        return true;
+      }
+    }
+
+    if (!bridge.isExtension) {
+      state = state.copyWith(error: 'Usage mobile : /metadata <url>', isStreaming: false);
+      return true;
+    }
+
     final action = BrowserAction(action: BrowserActionType.pageMetadata, params: {});
     final result = await bridge.executeAction(action);
     if (!result.success || result.data == null) {
@@ -1013,11 +1167,11 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
     final result = await bridge.executeAction(action);
     if (result.success) {
       final text = result.data!['text'] as String? ?? '';
-      _addAssistantMessage('**Surveillance activée** : `${selector}` toutes les $clampedInterval secondes.\n\n'
+      _addAssistantMessage('**Vérification ponctuelle** : `${selector}`\n\n'
           'Valeur actuelle : "${text.substring(0, text.length > 200 ? 200 : text.length)}"\n\n'
-          '⚠️ La surveillance en continu nécessite l\'extension active. '
           'Relancez `/monitor $selector $clampedInterval` pour vérifier à nouveau.\n'
-          '💡 Idéal pour : prix, disponibilité, score, statut. Combo : `/waitfor "${selector}:contains(\'Disponible\')"`');
+          '💡 Idéal pour : prix, disponibilité, score, statut. '
+          'Combo : `/waitfor <selecteur>` puis `/click` quand prêt.');
     } else {
       state = state.copyWith(error: 'Erreur surveillance : ${result.error}', isStreaming: false);
     }
@@ -1062,7 +1216,7 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
         'Titre original : "$title"\n\n'
         'Contenu à traduire :\n\n$truncated';
 
-    await sendMessage(translatePrompt);
+    await sendMessage(translatePrompt, bypassSlashCheck: true);
     return true;
   }
 
@@ -1121,7 +1275,7 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
         'Donne un résumé sémantique : de quoi la page parle quand elle mentionne ce terme ? '
         'Quels sont les contextes principaux ? Réponds en 2-3 phrases.\n\nOccurrences:\n$snippet';
     try {
-      await sendMessage(llmPrompt);
+      await sendMessage(llmPrompt, bypassSlashCheck: true);
     } catch (e) {
       _addAssistantMessage('$rawResult\n\n/extract pour extraire une section. /summarize pour un résumé.');
     }
@@ -1266,6 +1420,52 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
     return true;
   }
 
+  Future<bool> _handleSlashScrape(ParsedSlashCommand cmd, ExtensionBridge bridge) async {
+    if (cmd.args.isEmpty) {
+      state = state.copyWith(error: 'Usage : /scrape <url> [selectors_json]', isStreaming: false);
+      return true;
+    }
+    final url = cmd.args[0];
+    Map<String, String>? selectors;
+    if (cmd.args.length > 1) {
+      try {
+        final decoded = jsonDecode(cmd.args[1]) as Map<String, dynamic>;
+        selectors = decoded.map((k, v) => MapEntry(k, v.toString()));
+      } catch (e) {
+        state = state.copyWith(error: 'JSON selectors invalide: $e', isStreaming: false);
+        return true;
+      }
+    }
+    final globalService = ref.read(searchServiceGlobalProvider);
+    try {
+      final data = await globalService.scrape(url, selectors: selectors);
+      final buffer = StringBuffer();
+      buffer.writeln('**Scraping de $url**\n');
+      buffer.writeln('Titre: ${data['title'] ?? 'N/A'}\n');
+      final dataList = data['data'] as List? ?? [];
+      for (final item in dataList) {
+        final field = item['field'] as String? ?? '';
+        final values = item['values'] as List? ?? [];
+        buffer.writeln('### $field (${values.length})');
+        for (final v in values.take(10)) {
+          if (v is Map) {
+            buffer.writeln('- ${v['text'] ?? v['value'] ?? v}');
+          } else {
+            buffer.writeln('- $v');
+          }
+        }
+        buffer.writeln();
+      }
+      if (dataList.isEmpty) {
+        buffer.writeln('_Aucune donnée structurée trouvée._');
+      }
+      _addAssistantMessage(buffer.toString());
+    } catch (e) {
+      state = state.copyWith(error: 'Erreur scrape: $e', isStreaming: false);
+    }
+    return true;
+  }
+
   String _normalizeDocFormat(String raw) {
     final lower = raw.toLowerCase();
     if (lower == 'txt' || lower == 'text') return 'text';
@@ -1350,15 +1550,29 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
     String? imageMimeType,
     String? fileName,
     String? fileContent,
+    List<Attachment>? attachments,
     bool isVoiceConversation = false,
     String? modelOverride,
+    bool bypassSlashCheck = false,
   }) async {
     final trimmed = text.trim();
-    if (trimmed.isEmpty && imageBase64 == null && fileContent == null) return;
-    if (trimmed.length > 10000 || state.isStreaming) return;
+    final hasAttachment = imageBase64 != null || fileContent != null || (attachments != null && attachments.isNotEmpty);
+    if (trimmed.isEmpty && !hasAttachment) return;
+    if (trimmed.length > 10000 || (state.isStreaming && !bypassSlashCheck)) return;
+
+    // Vérification limite 5MB agrégée
+    final attachmentList = attachments ?? [];
+    final totalSize = attachmentList.fold<int>(0, (s, a) => s + a.sizeBytes);
+    if (totalSize > maxAttachmentsTotalBytes) {
+      state = state.copyWith(
+        error: 'Taille limite dépassée (5MB par message). Vous pouvez ajouter plusieurs fichiers, mais la taille totale ne doit pas dépasser 5MB.',
+        isStreaming: false,
+      );
+      return;
+    }
 
     // Message par défaut pour les pièces jointes sans texte
-    final effectiveText = trimmed.isEmpty && (imageBase64 != null || fileContent != null)
+    final effectiveText = trimmed.isEmpty && hasAttachment
         ? 'Analyse ce document'
         : trimmed;
 
@@ -1464,6 +1678,7 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
       imageMimeType: imageMimeType,
       fileName: fileName,
       fileContent: fileContent,
+      attachments: attachments ?? attachmentList,
       isPro: isPro,
     );
 
@@ -1476,6 +1691,7 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
             imageBase64: imageBase64,
             imageMimeType: imageMimeType,
             fileName: fileName,
+            attachments: attachments ?? attachmentList,
             fileContext: attachmentContext,
           )
         : await ref.read(chatRepositoryProvider).addMessage(
@@ -1485,6 +1701,7 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
             imageBase64: imageBase64,
             imageMimeType: imageMimeType,
             fileName: fileName,
+            attachments: attachments ?? attachmentList,
             fileContext: attachmentContext,
           );
 
@@ -1547,8 +1764,19 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
 
     if (intent != 'general') {
       try {
-        enhancedResultMarkdown = await _performEnhancedSearch(
-            userMsg.content, intent, _extractSearchQuery(userMsg.content), appLang, searchParams);
+        // ── NOUVEAU : SearchServiceGlobal unifié ──────────────────────────
+        final globalService = ref.read(searchServiceGlobalProvider);
+        final smartResponse = await globalService.search(userMsg.content);
+        if (smartResponse.hasConcreteResults || smartResponse.links.isNotEmpty) {
+          enhancedResultMarkdown = SearchServiceGlobal.formatMarkdown(
+              smartResponse, userMsg.content);
+          debugPrint('[ChatNotifier] SearchServiceGlobal OK: '
+              'intent=${smartResponse.intent}, results=${smartResponse.results.length}');
+        } else {
+          // Fallback sur l'ancien système
+          enhancedResultMarkdown = await _performEnhancedSearch(
+              userMsg.content, intent, _extractSearchQuery(userMsg.content), appLang, searchParams);
+        }
         // Record successful extraction for learning
         extractor.memory.recordSuccess(intent, userMsg.content, searchParams);
       } catch (e) {
@@ -1595,6 +1823,7 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
             instantAnswer: instantAnswer,
             fileContent: fileContent,
             fileName: fileName,
+            attachments: attachments,
             enhancedContext: enhancedResultMarkdown,
             modelOverride: modelOverride,
             isVoiceConversation: isVoiceConversation,
@@ -1716,8 +1945,28 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
     String? imageMimeType,
     String? fileName,
     String? fileContent,
+    List<Attachment>? attachments,
     required bool isPro,
   }) {
+    final buffer = StringBuffer();
+
+    // Nouveau format : pièces jointes multiples
+    if (attachments != null && attachments.isNotEmpty) {
+      for (final att in attachments) {
+        if (att.isImage && att.imageBase64 != null) {
+          final prompt = text.isNotEmpty ? text : 'Analyse cette image';
+          buffer.writeln('Image utilisateur jointe (${att.mimeType}). Demande: $prompt');
+        } else if (att.extractedText != null && att.extractedText!.isNotEmpty) {
+          final doc = FileUploadService.truncateForContext(att.extractedText!, isPro: isPro);
+          buffer.writeln('Document utilisateur: ${att.name}');
+          buffer.writeln(doc);
+          buffer.writeln();
+        }
+      }
+      if (buffer.isNotEmpty) return buffer.toString().trim();
+    }
+
+    // Legacy fallback
     if (fileContent != null && fileContent.isNotEmpty) {
       final doc = FileUploadService.truncateForContext(fileContent, isPro: isPro);
       final label = fileName ?? 'document';
@@ -1745,6 +1994,7 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
     InstantAnswer? instantAnswer,
     String? fileContent,
     String? fileName,
+    List<Attachment>? attachments,
     String? enhancedContext,
     String? modelOverride,
     bool isVoiceConversation = false,
@@ -1763,7 +2013,10 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
           'MODE VOCAL ACTIF — Réponds comme un ami au téléphone : '
           'jovial, naturel, concis (2-3 phrases max), pas de listes, pas de markdown. '
           'Tutoie, sois chaleureux et dynamique. Pas de "En tant qu\'IA" ni d\'excuses inutiles. '
-          'Va droit au but avec le sourire.';
+          'Va droit au but avec le sourire.\n\n'
+          'Tu peux utiliser des balises émotionnelles au début de ta réponse pour adapter ta voix : '
+          '[joyeux], [triste], [sérieux], [excité], [neutre], [amical], [enthousiaste]. '
+          'Exemple : "[joyeux] Salut ! Ça va super aujourd\'hui ?"';
     }
 
     // ── 1. Construire l'historique ───────────────────────────────────────
@@ -1874,7 +2127,14 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
     final historyMaps = historyMessages.map((m) => m.toApiMap()).toList();
 
     // ── 4. DeepSeek / OpenRouter direct (100% autonome) ───────────────
-    return _getDirectAiStream(historyMaps, isPro, modelOverride: modelOverride, isVoiceConversation: isVoiceConversation);
+    final attTypes = attachments?.map((a) => a.type.name).toList();
+    return _getDirectAiStream(
+      historyMaps,
+      isPro,
+      modelOverride: modelOverride,
+      isVoiceConversation: isVoiceConversation,
+      attachmentTypes: attTypes,
+    );
   }
 
   Stream<String> _getDirectAiStream(
@@ -1882,9 +2142,16 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
     bool isPro, {
     String? modelOverride,
     bool isVoiceConversation = false,
+    List<String>? attachmentTypes,
   }) {
     // 1. Les images passent TOUJOURS par un modele vision
-    final hasImage = history.any((m) => m['content'] is List);
+    // Verifier UNIQUEMENT le dernier message utilisateur, pas tout l'historique
+    final lastUserMsg = history.lastWhere(
+      (m) => m['role'] == 'user',
+      orElse: () => {'content': ''},
+    );
+    final lastContent = lastUserMsg['content'];
+    final hasImage = lastContent is List;
     if (hasImage) {
       return _getVisionStream(history);
     }
@@ -1895,7 +2162,10 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
       orElse: () => {'content': ''},
     )['content'];
     final userText = (lastUserContent is String) ? lastUserContent : '';
-    final taskType = ModelRouter.classifyTask(userText);
+    final taskType = ModelRouter.classifyTask(
+      userText,
+      attachmentTypes: attachmentTypes,
+    );
     final effectiveOverride = modelOverride ?? state.selectedModel;
     final entry = ModelRouter.resolveModel(taskType, userOverride: effectiveOverride);
 

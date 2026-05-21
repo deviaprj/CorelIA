@@ -144,6 +144,38 @@ void main() {
       });
     });
 
+    group('_decodeDdgUrl', () {
+      test('décode une URL absolue directement', () {
+        const url = 'https://example.com/page';
+        expect(SearchService.decodeDdgUrl(url), equals(url));
+      });
+
+      test('décode /l/?uddg=URL', () {
+        const raw = '/l/?uddg=https%3A%2F%2Fexample.com%2Fpage';
+        expect(SearchService.decodeDdgUrl(raw), equals('https://example.com/page'));
+      });
+
+      test('décode /l/?u=URL', () {
+        const raw = '/l/?u=https%3A%2F%2Fexample.com';
+        expect(SearchService.decodeDdgUrl(raw), equals('https://example.com'));
+      });
+
+      test('décode /l/?kh=1&u=URL', () {
+        const raw = '/l/?kh=1&u=https%3A%2F%2Fexample.com';
+        expect(SearchService.decodeDdgUrl(raw), equals('https://example.com'));
+      });
+
+      test('décode //duckduckgo.com/l/?uddg=URL', () {
+        const raw = '//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com';
+        expect(SearchService.decodeDdgUrl(raw), equals('https://example.com'));
+      });
+
+      test('retourne null pour une URL non décodable', () {
+        expect(SearchService.decodeDdgUrl(''), isNull);
+        expect(SearchService.decodeDdgUrl('/random/path'), isNull);
+      });
+    });
+
     group('_cleanHtml', () {
       test('nettoie les balises HTML', () {
         final service = SearchService();

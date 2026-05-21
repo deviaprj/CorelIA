@@ -1,7 +1,7 @@
 # Guide des Combos — Corely Extension
 
-> **Version** : 2.0 | **Mise à jour** : 2026-05-14  
-> **Concept** : Enchaîner les commandes slash pour des workflows automatisés
+> **Version** : 2.1 | **Mise à jour** : 2026-05-21  
+> **Concept** : Enchaîner les commandes slash pour des workflows automatisés, y compris le scraping intelligent cross-plateforme
 
 ---
 
@@ -450,6 +450,70 @@ Commande 1 → résultat dans le chat → Commande 2 → résultat → Commande 
 
 ---
 
+## Combos scraping intelligent (cross-plateforme)
+
+Ces combos fonctionnent sur **toutes les plateformes** (mobile, web, extension) grâce à la commande `/scrape` et aux commandes universelles avec URL.
+
+### Combo 25 : Veille prix produit (mobile)
+
+**But** : Surveiller les prix d'un produit depuis le téléphone, sans extension.
+
+```bash
+/scrape https://www.backmarket.fr/search?q=iphone+15
+/summarize https://www.backmarket.fr/search?q=iphone+15
+```
+
+**Déroulé :**
+1. `/scrape` → extrait les prix, les états (reconditionné, etc.) et les liens
+2. `/summarize` → résume les résultats pour comparaison rapide
+
+---
+
+### Combo 26 : Recherche vol + hôtel (mobile)
+
+**But** : Comparer des offres de voyage sans quitter l'app mobile.
+
+```bash
+/scrape https://www.skyscanner.fr/transport/flights/paris/marseille/
+/scrape https://www.booking.com/searchresults.fr.html?ss=Marseille
+/summarize https://www.skyscanner.fr/transport/flights/paris/marseille/
+```
+
+**Déroulé :**
+1. `/scrape` sur Skyscanner → prix de vols
+2. `/scrape` sur Booking → hôtels à Marseille
+3. `/summarize` → résumé comparatif
+
+---
+
+### Combo 27 : Audit SEO cross-plateforme
+
+**But** : Auditer le SEO d'un concurrent depuis n'importe quel appareil.
+
+```bash
+/metadata https://concurrent.fr
+/links https://concurrent.fr
+/scrape https://concurrent.fr
+```
+
+**Déroulé :**
+1. `/metadata` → titre, description, OpenGraph
+2. `/links` → structure de liens internes/externes
+3. `/scrape` → prix, produits, données structurées
+
+---
+
+### Combo 28 : Collecte de données structurées (mobile)
+
+**But** : Extraire des tableaux de prix ou comparatifs depuis une URL.
+
+```bash
+/scrape https://wikipedia.org/wiki/List_of_countries_by_GDP
+/extract https://wikipedia.org/wiki/List_of_countries_by_GDP table.wikitable
+```
+
+---
+
 ## Créer vos propres combos
 
 ### Méthodologie
@@ -480,6 +544,11 @@ Commande 1 → résultat dans le chat → Commande 2 → résultat → Commande 
 #### Pattern "Naviguer → Extraire → Sauvegarder"
 ```
 /open → /extract ou /tables → /export ou /pdf ou /screenshot
+```
+
+#### Pattern "Scraper → Résumer → Exporter"
+```
+/scrape → /summarize → /export
 ```
 
 #### Pattern "Remplir → Valider → Capturer"

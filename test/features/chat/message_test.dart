@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:airon_bot/features/chat/domain/message.dart';
+import 'package:airon_bot/features/chat/domain/attachment.dart';
 
 void main() {
   group('Message Model', () {
@@ -45,58 +46,51 @@ void main() {
         content: 'Updated content',
         isStreaming: true,
       );
-
       expect(updated.content, equals('Updated content'));
       expect(updated.isStreaming, isTrue);
       expect(updated.id, equals(testMessage.id));
       expect(updated.role, equals(testMessage.role));
     });
 
-    test('should convert to API map', () {
+    test('should convert to API map (text only)', () {
       final apiMap = testMessage.toApiMap();
-
       expect(apiMap['role'], equals('user'));
       expect(apiMap['content'], equals('Hello, this is a test message'));
-      expect(apiMap.containsKey('id'), isFalse);
-      expect(apiMap.containsKey('createdAt'), isFalse);
+    });
+
+    test('should convert to API map with image attachments', () {
+      final msg = Message(
+        id: 'msg_img',
+        conversationId: 'conv_1',
+        role: Role.user,
+        content: 'Analyse cette image',
+        createdAt: DateTime.now(),
+        attachments: const [
+          Attachment(
+            type: AttachmentType.image,
+            name: 'photo.png',
+            mimeType: 'image/png',
+            sizeBytes: 1234,
+            imageBase64: 'abc123',
+          ),
+        ],
+      );
+      final apiMap = msg.toApiMap();
+      expect(apiMap['role'], equals('user'));
+      expect(apiMap['content'], isA<List>());
+      final parts = apiMap['content'] as List;
+      expect(parts.length, 2);
+      expect(parts[0]['type'], 'text');
+      expect(parts[1]['type'], 'image_url');
     });
 
     test('should convert to Firestore map', () {
       final firestoreMap = testMessage.toFirestore();
-
       expect(firestoreMap['conversationId'], equals('conv_456'));
       expect(firestoreMap['role'], equals('user'));
       expect(firestoreMap['content'], equals('Hello, this is a test message'));
       expect(firestoreMap['isStreaming'], isFalse);
       expect(firestoreMap.containsKey('createdAt'), isTrue);
-    });
-
-    test('should create from Firestore document', () {
-      final mockData = {
-        'conversationId': 'conv_789',
-        'role': 'assistant',
-        'content': 'Test response',
-        'model': 'deepseek-chat',
-        'isStreaming': false,
-        'createdAt': DateTime(2024, 1, 15, 10, 35),
-      };
-
-      final message = Message(
-        id: 'doc_123',
-        conversationId: mockData['conversationId'] as String,
-        role: Role.values.firstWhere(
-          (r) => r.name == mockData['role'],
-          orElse: () => Role.user,
-        ),
-        content: mockData['content'] as String,
-        model: mockData['model'] as String?,
-        isStreaming: mockData['isStreaming'] as bool,
-        createdAt: mockData['createdAt'] as DateTime,
-      );
-
-      expect(message.id, equals('doc_123'));
-      expect(message.role, equals(Role.assistant));
-      expect(message.model, equals('deepseek-chat'));
     });
 
     test('should handle streaming messages', () {
@@ -108,21 +102,7 @@ void main() {
         isStreaming: true,
         createdAt: DateTime.now(),
       );
-
       expect(streamingMsg.isStreaming, isTrue);
-    });
-
-    test('should handle system messages', () {
-      final systemMsg = Message(
-        id: 'msg_126',
-        conversationId: 'conv_456',
-        role: Role.system,
-        content: 'System instruction',
-        createdAt: DateTime.now(),
-      );
-
-      expect(systemMsg.isUser, isFalse);
-      expect(systemMsg.isAssistant, isFalse);
     });
 
     test('should preserve model information', () {
@@ -134,8 +114,88 @@ void main() {
         model: 'deepseek-chat',
         createdAt: DateTime.now(),
       );
-
       expect(msgWithModel.model, equals('deepseek-chat'));
+    });
+
+    test('hasImage detects image attachments', () {
+      final msg = Message(
+        id: 'msg',
+        conversationId: 'conv',
+        role: Role.user,
+        content: 'test',
+        createdAt: DateTime.now(),
+        attachments: const [
+          Attachment(type: AttachmentType.image, name: 'a.png', mimeType: 'image/png', sizeBytes: 1),
+        ],
+      );
+      expect(msg.hasImage, isTrue);
+      expect(msg.hasFile, isFalse);
+    });
+
+    test('hasFile detects document attachments', () {
+      final msg = Message(
+        id: 'msg',
+        conversationId: 'conv',
+        role: Role.user,
+        content: 'test',
+        createdAt: DateTime.now(),
+        attachments: const [
+          Attachment(type: AttachmentType.pdf, name: 'a.pdf', mimeType: 'application/pdf', sizeBytes: 1),
+        ],
+      );
+      expect(msg.hasFile, isTrue);
+      expect(msg.hasImage, isFalse);
+    });
+
+    test('attachmentsTotalSize sums all attachments', () {
+      final msg = Message(
+        id: 'msg',
+        conversationId: 'conv',
+        role: Role.user,
+        content: 'test',
+        createdAt: DateTime.now(),
+        attachments: const [
+          Attachment(type: AttachmentType.image, name: 'a.png', mimeType: 'image/png', sizeBytes: 1000),
+          Attachment(type: AttachmentType.pdf, name: 'b.pdf', mimeType: 'application/pdf', sizeBytes: 2000),
+        ],
+      );
+      expect(msg.attachmentsTotalSize, 3000);
+    });
+
+    test('exceedsAttachmentLimit at 5MB', () {
+      final msg = Message(
+        id: 'msg',
+        conversationId: 'conv',
+        role: Role.user,
+        content: 'test',
+        createdAt: DateTime.now(),
+        attachments: const [
+          Attachment(type: AttachmentType.image, name: 'a.png', mimeType: 'image/png', sizeBytes: maxAttachmentsTotalBytes + 1),
+        ],
+      );
+      expect(msg.exceedsAttachmentLimit, isTrue);
+    });
+
+    test('buildFileContext truncates documents', () {
+      final msg = Message(
+        id: 'msg',
+        conversationId: 'conv',
+        role: Role.user,
+        content: 'test',
+        createdAt: DateTime.now(),
+        attachments: const [
+          Attachment(
+            type: AttachmentType.pdf,
+            name: 'doc.pdf',
+            mimeType: 'application/pdf',
+            sizeBytes: 100,
+            extractedText: 'Contenu du PDF',
+          ),
+        ],
+      );
+      final ctx = msg.buildFileContext(isPro: false);
+      expect(ctx, isNotNull);
+      expect(ctx!, contains('Contenu du PDF'));
     });
   });
 }

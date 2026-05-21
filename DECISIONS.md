@@ -363,4 +363,51 @@ Triple protection :
 
 ---
 
-*Dernière mise à jour : 2026-05-15*
+---
+
+## ADR-014 : Robustesse DuckDuckGo — Multi-Endpoint + Patterns Fallback
+
+**Date** : 2026-05-21
+**Statut** : Accepté
+
+### Contexte
+Le scraping HTML de DuckDuckGo échouait fréquemment car DuckDuckGo change son markup HTML et bloque certaines requêtes selon l'User-Agent. Un seul endpoint (`html.duckduckgo.com/html/`) et un seul User-Agent n'étaient pas suffisants.
+
+### Décision
+Architecture multi-endpoint avec failover :
+1. **3 endpoints** tentés en cascade : `html.duckduckgo.com/html/` → `lite.duckduckgo.com/lite/` → `duckduckgo.com/html/`
+2. **Rotation User-Agent** : Android, iOS, Desktop pour éviter le blocage
+3. **Protection HTML** : tronquage à 500KB avant regex (prévention catastrophic backtracking)
+4. **Pattern `uddg`** : support du paramètre de redirection `uddg` utilisé par les nouveaux layouts DuckDuckGo
+5. **5 patterns regex** en cascade : encodé `/l/?u=` → direct → `uddg` → fallback classique → ultra-souple
+
+### Conséquences
+- ✅ Recherche web fonctionnelle même si un endpoint ou un layout change
+- ⚠️ Plus de trafic réseau potentiel (3 endpoints max)
+- ⚠️ Les patterns regex restent fragiles face à des changements majeurs de markup
+
+---
+
+## ADR-015 : Extraction XML Namespace-Agnostic pour Office Documents
+
+**Date** : 2026-05-21
+**Statut** : Accepté
+
+### Contexte
+L'extraction de texte DOCX et PPTX utilisait `findAllElements('w:p')` et `findAllElements('a:t')`, ce qui dépendait du préfixe de namespace exact (`w:`, `a:`, `p:`). Certains fichiers Office utilisent des préfixes différents ou des déclarations de namespace non standard, causant une extraction vide.
+
+### Décision
+Remplacer la recherche par préfixe par une recherche par **localName + namespaceUri** :
+- DOCX : `name.local == 'p' && namespaceUri.contains('wordprocessingml')`
+- PPTX : `name.local == 't'` (tous les nœuds texte), `name.local == 'sp'` (shapes)
+- Fallback : si extraction structurée échoue, extraire tous les nœuds `t` sans restriction
+- Gestion d'erreurs : `XmlException` et `ArchiveException` capturés avec message clair
+
+### Conséquences
+- ✅ Extraction fonctionnelle quel que soit le préfixe de namespace
+- ✅ Meilleure tolérance aux fichiers corrompus ou mal formés
+- ⚠️ Légèrement plus de code (itérateur descendants manuel)
+
+---
+
+*Dernière mise à jour : 2026-05-21*

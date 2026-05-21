@@ -97,6 +97,17 @@ class EmotionParser {
     }
     return false;
   }
+
+  /// Retire les balises émotionnelles du texte pour l'affichage UI.
+  static String stripEmotionTags(String text) {
+    return _tagPattern.allMatches(text).fold<String>(text, (acc, match) {
+      final tag = '[${match.group(1)?.toLowerCase().trim()}]';
+      if (_tagToEmotion.containsKey(tag)) {
+        return acc.replaceAll(tag, '');
+      }
+      return acc;
+    }).replaceAll(RegExp(r'\s+'), ' ').trim();
+  }
 }
 
 /// Résultat du parsing d'émotion.

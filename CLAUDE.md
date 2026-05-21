@@ -195,6 +195,12 @@ flutter build web --dart-define=DEEPSEEK_API_KEY=sk-xxx --dart-define=OPENROUTER
 
 ## Voice Mode Architecture
 
+**Qualité TTS système (critique pour le rendu)** :
+- Sur **Android** : paramètres → Accessibilité → Synthèse vocale → Moteur préféré → **Google Speech Services** (ou Samsung Neural si disponible). Éviter les moteurs basiques (pico TTS, eSpeak).
+- Sur **iOS** : paramètres → Accessibilité → Contenu vocal → Voix → **Améliorée** (Enhanced) ou **Premium**. Activer "Haute qualité" si disponible.
+- `TtsNaturalService` détecte automatiquement les voix "neural/premium/enhanced" via `getVoices()`. Si aucune n'est trouvée, un warning est loggé.
+- Pour un rendu vraiment humain, utiliser **OpenRouter TTS** (`gpt-4o-mini-tts`) — c'est la chaîne primaire sur mobile quand `OPENROUTER_API_KEY` est renseignée.
+
 **Deux modes distincts** :
 1. **Dictée** (bouton micro dans `InputBar`) → `VoiceServiceNotifier.startListening()`
 2. **Conversation vocale mains-libres** (toggle "Vocal ON/OFF" dans toolbar) → `VoiceConversationNotifier.startConversation()`
@@ -203,11 +209,14 @@ flutter build web --dart-define=DEEPSEEK_API_KEY=sk-xxx --dart-define=OPENROUTER
 - Instance `SpeechToText` fraîche créée à chaque `startListening()` via `_createAndInitStt()`
 - L'ancienne instance est détruite proprement (`stop()` puis `null`)
 - Permission micro : cache `_microphonePermissionGranted`, reset dans `forceReset()`
-- Timeout : `listenFor: 120s`, silence : `pauseFor: 10s`
+- **STT continu sans bips** : `listenFor: 30min` en mode conversation, `pauseFor: 5s`
+- **VAD adaptative** : 400ms silence si ponctuation finale détectée, 900ms sinon (au lieu de 1.5s fixe)
 - `listen_mode: ListenMode.dictation` pour écoute continue
 
 **VoiceConversationNotifier** (`lib/features/chat/presentation/voice_conversation_service.dart`):
 - Boucle : `listening → thinking → speaking → idle → listening`
+- **Full-duplex** : le micro reste ouvert pendant le TTS (pas de stop/start)
+- **Barge-in audio temps réel** : `micLevel > 0.12` détecté pendant le TTS → interruption immédiate
 - `_speakResponseAndLoop()` : stop micro → TTS → pause anti-echo 500ms → **state = idle** (CRITIQUE : débloque la boucle)
 - Max 3 échecs STT consécutifs → état `error` (pas de boucle infinie)
 - `_listenWithVad()` : retourne `null` si STT indisponible, `""` si silence
@@ -215,8 +224,11 @@ flutter build web --dart-define=DEEPSEEK_API_KEY=sk-xxx --dart-define=OPENROUTER
 
 **TTS** (`lib/features/chat/presentation/tts_natural_service.dart`):
 - **Primaire (mobile)** : OpenRouter TTS (`/audio/speech`) — voix réalistes (nova, shimmer, alloy, echo, fable, onyx)
-- **Fallback universel** : flutter_tts natif
-- OpenRouter TTS speed : 0.65, flutter_tts base : 0.45, pitch : 1.10
+- **Fallback universel** : flutter_tts natif avec **sélection dynamique de voix** (`getVoices` → meilleure fr-FR neural/premium)
+- **Préchauffage** : utterance vide dans `init()` pour réduire la latence de la première phrase
+- **Speed adaptatif** : 0.90 pour réponses courtes (<150 chars), 0.75 pour longues
+- **Chunks courts** : 120 caractères max par utterance (meilleure fluidité)
+- OpenRouter TTS speed : 1.0, flutter_tts pitch : 1.10
 - Chaîne : gpt-4o-mini-tts → kokoro-82m (fallback) → flutter_tts (dernier recours)
 - Cache TTS : `TtsCacheService` avec `putBytes()` pour audio OpenRouter
 - `AudioPlayerFactory` : just_audio (mobile) / stub (web)
@@ -443,8 +455,8 @@ flutter build web --dart-define=DEEPSEEK_API_KEY=sk-xxx --dart-define=OPENROUTER
 - [ ] Extension Chrome : résumé de page, extraction média — actions navigateur existent mais non testées
 - [ ] Tests de non-régression : ajouter des tests pour `_tryParseFlightParamsGeneric` avec requêtes lowercase, `_isValidCityPair`, IATA fuzzy per-word matching
 - [ ] Recherche hôtels : `searchHotels` n'utilise pas checkIn/checkOut/guests depuis les params → `_performEnhancedSearch` ne les passe pas
-- [ ] **CRITIQUE** : Recherche avancée (vols, hôtels, restaurants, produits) cassée — DuckDuckGo scraping + liens directs ne fonctionnent plus, nécessite modèles/scripts performants
-- [ ] **CRITIQUE** : Commandes slash ne fonctionnent pas (malgré enhancement LLM ajoutée) — flux extension_bridge → background → dom_actions à déboguer
-- [ ] **CRITIQUE** : Images impossibles à charger dans la conversation — FilePicker ou ImageUploadService à investiguer
-- [ ] **CRITIQUE** : PDFs impossibles à lire — extraction `_extractPdf()` retourne des résultats partiels/vides
-- [ ] **HAUTE** : Autres types de fichiers (DOCX, XLSX, PPTX) : extraction médiocre, résultats partiels
+- [x] **CRITIQUE** : Recherche avancée (vols, hôtels, restaurants, produits) — Fixed V13 : SearchService multi-endpoint (3 URLs) + patterns fallback robustes + `_decodeDdgUrl` pour `uddg`. EnhancedSearchService (liens directs comparateurs) fonctionnel sans scraping.
+- [x] **CRITIQUE** : Commandes slash ne fonctionnent pas — Fixed V12 : extension_bridge filtre tabs `chrome-extension://`, flux complet Dart→JS→DOM testé.
+- [x] **CRITIQUE** : Images impossibles à charger dans la conversation — Fixed V12 : `Message.toFirestore()` stocke `imageBase64` avec limite 700KB.
+- [x] **CRITIQUE** : PDFs impossibles à lire — Fixed V12 : extraction 2 étapes (raw strings + streams FlateDecode décompressés).
+- [x] **HAUTE** : Autres types de fichiers (DOCX, XLSX, PPTX) : Fixed V13 : extraction namespace-agnostic (`localName` + `namespaceUri`) sans dépendance au préfixe XML. Fallback texte brut + gestion erreurs XML/ZIP.

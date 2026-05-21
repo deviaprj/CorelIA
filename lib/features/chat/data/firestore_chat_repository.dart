@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
 import '../domain/conversation.dart';
 import '../domain/message.dart';
+import '../domain/attachment.dart';
 import '../../../core/constants.dart';
 import '../../../core/providers/firebase_providers.dart';
 import '../../../main.dart' show isDemoMode;
@@ -133,6 +134,7 @@ class FirestoreChatRepository {
     String? imageMimeType,
     String? fileName,
     String? fileContent,
+    List<Attachment>? attachments,
     String? fileContext,
     List<String>? searchSources,
   }) async {
@@ -146,6 +148,7 @@ class FirestoreChatRepository {
         imageMimeType: imageMimeType,
         fileName: fileName,
         fileContent: fileContent,
+        attachments: attachments,
         fileContext: fileContext,
         searchSources: searchSources,
       );
@@ -161,6 +164,7 @@ class FirestoreChatRepository {
       imageMimeType: imageMimeType,
       fileName: fileName,
       fileContent: fileContent,
+      attachments: attachments ?? [],
       fileContext: fileContext,
       searchSources: searchSources,
     );

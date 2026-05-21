@@ -1,7 +1,7 @@
 # Guide des Commandes Slash — Corely
 
-> **Version** : 2.0 | **Mise à jour** : 2026-05-14  
-> **Disponible sur** : Extension Chrome uniquement (nécessite l'accès aux pages web)
+> **Version** : 2.1 | **Mise à jour** : 2026-05-21  
+> **Disponible sur** : Extension Chrome (contrôle du navigateur) + Mobile/Web (avec URL directe)
 
 ---
 
@@ -11,14 +11,15 @@
 2. [Navigation](#navigation)
 3. [Extraction de contenu](#extraction-de-contenu)
 4. [Analyse de page](#analyse-de-page)
-5. [Interaction DOM](#interaction-dom)
-6. [Médias et fichiers](#médias-et-fichiers)
-7. [Automatisation](#automatisation)
-8. [Export et conversion](#export-et-conversion)
-9. [Surveillance](#surveillance)
-10. [Traduction et recherche](#traduction-et-recherche)
-11. [Combos de commandes](#combos-de-commandes)
-12. [Référence rapide](#référence-rapide)
+5. [Scraping intelligent](#scraping-intelligent)
+6. [Interaction DOM](#interaction-dom)
+7. [Médias et fichiers](#médias-et-fichiers)
+8. [Automatisation](#automatisation)
+9. [Export et conversion](#export-et-conversion)
+10. [Surveillance](#surveillance)
+11. [Traduction et recherche](#traduction-et-recherche)
+12. [Combos de commandes](#combos-de-commandes)
+13. [Référence rapide](#référence-rapide)
 
 ---
 
@@ -34,7 +35,8 @@ Les commandes slash permettent de contrôler le navigateur et d'interagir avec l
 
 ### Règles importantes
 
-- **Extension Chrome uniquement** — Les commandes slash nécessitent l'extension Corely installée
+- **Extension Chrome** — Les commandes de contrôle navigateur (`/click`, `/scroll`, `/fill`) nécessitent l'extension installée
+- **Commandes universelles** — `/scrape`, `/summarize`, `/extract`, `/links`, `/metadata` fonctionnent sur **toutes les plateformes** (mobile, web, extension) lorsqu'une URL est fournie
 - **Timeout de 10 secondes** — Si une action ne répond pas dans les 10s, elle est annulée
 - **Une commande à la fois** — Chaque commande est exécutée séquentiellement
 - **Les combos** — Enchaînez plusieurs commandes pour des workflows complexes
@@ -125,18 +127,18 @@ Fait défiler la page courante.
 
 ### `/extract` — Extraire le texte
 
-Extrait le contenu texte d'un élément HTML via un sélecteur CSS.
+Extrait le contenu texte d'un élément HTML via un sélecteur CSS, ou d'une URL distante.
 
 ```
-/extract [selector]
+/extract [url] [selector]
 ```
 
 **Exemples :**
 ```bash
-/extract article                          # Extrait le contenu de <article>
-/extract .main-content                    # Extrait le contenu de la classe main-content
-/extract #post-123                        # Extrait un post spécifique
-/extract body                             # Extrait tout le texte du body (défaut)
+/extract article                          # Extrait le contenu de <article> (extension)
+/extract .main-content                    # Extrait la classe main-content (extension)
+/extract https://example.com .article     # Scrape + extrait sélecteur (toutes plateformes)
+/extract https://example.com              # Scrape tout le contenu (toutes plateformes)
 ```
 
 **Cas d'usage :**
@@ -154,19 +156,18 @@ Extrait le contenu texte d'un élément HTML via un sélecteur CSS.
 
 ### `/links` — Extraire les liens
 
-Extrait tous les liens de la page courante, avec filtrage par type.
+Extrait tous les liens d'une page (courante ou URL), avec filtrage par type.
 
 ```
-/links [all|video|image|audio|document]
+/links [url] [all|video|image|audio|document]
 ```
 
 **Exemples :**
 ```bash
-/links                   # Tous les liens
-/links video             # Uniquement les liens vers des vidéos
-/links image             # Uniquement les liens vers des images
-/links document          # PDF, DOCX, XLSX, etc.
-/links audio             # Fichiers audio
+/links                   # Tous les liens de la page courante (extension)
+/links video             # Liens vidéo de la page courante (extension)
+/links https://example.com document  # Liens document d'une URL (toutes plateformes)
+/links https://example.com           # Tous les liens d'une URL (toutes plateformes)
 ```
 
 **Cas d'usage :**
@@ -271,7 +272,13 @@ Liste les images, vidéos et fichiers audio de la page.
 Extrait le contenu principal et demande à l'IA de le résumer.
 
 ```
-/summarize
+/summarize [url]
+```
+
+**Exemples :**
+```bash
+/summarize               # Résumer la page courante (extension uniquement)
+/summarize https://example.com/article  # Résumer une URL (toutes plateformes)
 ```
 
 **Cas d'usage :**
@@ -292,7 +299,13 @@ Extrait le contenu principal et demande à l'IA de le résumer.
 Affiche les métadonnées SEO, l'auteur, la date de publication, les titres, etc.
 
 ```
-/metadata
+/metadata [url]
+```
+
+**Exemples :**
+```bash
+/metadata                # Métadonnées de la page courante (extension)
+/metadata https://example.com  # Métadonnées d'une URL (toutes plateformes)
 ```
 
 **Cas d'usage :**
@@ -333,6 +346,39 @@ Recherche un terme dans le contenu textuel de la page.
 ```bash
 /searchpage "API key"
 /extract .api-reference          # Extraire la section trouvée
+```
+
+---
+
+## Scraping intelligent
+
+### `/scrape` — Scraper une URL
+
+Scrape n'importe quelle page web via le backend Python et extrait automatiquement les données structurées (prix, liens, cartes, métadonnées). Fonctionne sur **toutes les plateformes**.
+
+```
+/scrape <url> [selectors_json]
+```
+
+**Exemples :**
+```bash
+/scrape https://www.skyscanner.fr/transport/flights/paris/marseille/        # Extrait les prix de vols
+/scrape https://www.booking.com/searchresults.html?ss=Paris                   # Extrait les hôtels et prix
+/scrape https://www.backmarket.fr/search?q=xiaomi+15+ultra                    # Extrait les produits reconditionnés
+/scrape https://example.com '{"prix": ".price", "titre": "h1"}'            # Sélecteurs CSS personnalisés
+```
+
+**Cas d'usage :**
+- Extraire des prix en temps réel depuis n'importe quel site
+- Surveiller des disponibilités (vols, hôtels, produits)
+- Collecter des données structurées sans extension Chrome
+- Scraper avec des sélecteurs CSS personnalisés
+
+**Combo :**
+```bash
+/scrape https://amazon.fr/s?k=iphone
+/summarize https://amazon.fr/s?k=iphone     # Résumer les résultats
+/export csv                                 # Exporter les prix extraits
 ```
 
 ---
@@ -791,32 +837,33 @@ Les combos sont des enchaînements de commandes slash pour accomplir des tâches
 
 ## Référence rapide
 
-| Commande | Usage | Description |
-|---|---|---|
-| `/open` | `/open <url>` | Ouvrir une URL |
-| `/back` | `/back` | Page précédente |
-| `/forward` | `/forward` | Page suivante |
-| `/scroll` | `/scroll [up\|down] [px]` | Défiler la page |
-| `/extract` | `/extract [selector]` | Extraire le texte |
-| `/links` | `/links [all\|video\|image\|audio\|document]` | Extraire les liens |
-| `/forms` | `/forms [index]` | Lister les formulaires |
-| `/tables` | `/tables [index]` | Extraire les tableaux |
-| `/media` | `/media [images\|videos\|audio\|all]` | Extraire les médias |
-| `/summarize` | `/summarize` | Résumer la page |
-| `/metadata` | `/metadata` | Métadonnées SEO |
-| `/searchpage` | `/searchpage <terme>` | Rechercher dans la page |
-| `/click` | `/click <selector>` | Cliquer sur un élément |
-| `/fill` | `/fill <selector> <valeur>` | Remplir un champ |
-| `/inspect` | `/inspect <selector>` | Inspecter un élément |
-| `/highlight` | `/highlight <selector>` | Surligner un élément |
-| `/download` | `/download <url> [nom]` | Télécharger un fichier |
-| `/screenshot` | `/screenshot` | Capture d'écran |
-| `/pdf` | `/pdf [url] [nom]` | Imprimer en PDF |
-| `/autofill` | `/autofill` | Remplissage auto |
-| `/waitfor` | `/waitfor <selector> [ms]` | Attendre un élément |
-| `/monitor` | `/monitor <selector> [sec]` | Surveiller un élément |
-| `/export` | `/export [json\|csv\|md]` | Exporter les données |
-| `/translate` | `/translate [langue]` | Traduire la page |
+| Commande | Usage | Plateforme | Description |
+|---|---|---|---|
+| `/open` | `/open <url>` | Extension | Ouvrir une URL |
+| `/back` | `/back` | Extension | Page précédente |
+| `/forward` | `/forward` | Extension | Page suivante |
+| `/scroll` | `/scroll [up\|down] [px]` | Extension | Défiler la page |
+| `/extract` | `/extract [url] [selector]` | **Universel** | Extraire le texte |
+| `/links` | `/links [url] [all\|video\|image\|audio\|document]` | **Universel** | Extraire les liens |
+| `/forms` | `/forms [index]` | Extension | Lister les formulaires |
+| `/tables` | `/tables [index]` | Extension | Extraire les tableaux |
+| `/media` | `/media [images\|videos\|audio\|all]` | Extension | Extraire les médias |
+| `/summarize` | `/summarize [url]` | **Universel** | Résumer la page |
+| `/metadata` | `/metadata [url]` | **Universel** | Métadonnées SEO |
+| `/searchpage` | `/searchpage <terme>` | Extension | Rechercher dans la page |
+| `/click` | `/click <selector>` | Extension | Cliquer sur un élément |
+| `/fill` | `/fill <selector> <valeur>` | Extension | Remplir un champ |
+| `/inspect` | `/inspect <selector>` | Extension | Inspecter un élément |
+| `/highlight` | `/highlight <selector>` | Extension | Surligner un élément |
+| `/download` | `/download <url> [nom]` | Extension | Télécharger un fichier |
+| `/screenshot` | `/screenshot` | Extension | Capture d'écran |
+| `/pdf` | `/pdf [url] [nom]` | Extension | Imprimer en PDF |
+| `/scrape` | `/scrape <url> [selectors]` | **Universel** | Scraper une URL |
+| `/autofill` | `/autofill` | Extension | Remplissage auto |
+| `/waitfor` | `/waitfor <selector> [ms]` | Extension | Attendre un élément |
+| `/monitor` | `/monitor <selector> [sec]` | Extension | Surveiller un élément |
+| `/export` | `/export [json\|csv\|md]` | Extension | Exporter les données |
+| `/translate` | `/translate [langue]` | Extension | Traduire la page |
 
 ---
 

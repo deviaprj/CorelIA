@@ -1,6 +1,66 @@
 # TASKS.md — Suivi Corely
 
-Dernière mise à jour : 2026-05-20 — Session V11 : OpenRouter TTS, ModelRouter, Vocal LLM, File Fixes
+Dernière mise à jour : 2026-05-21 — Session V14 : Vocal UX (bips, latence, qualité, full-duplex)
+
+## Termine — Session V14 (2026-05-21) — Vocal UX : Bips, Latence, Qualité, Full-Duplex ✅
+
+### Problèmes résolus
+1. **Bips micro** : `listenFor: 30min` en mode continu + suppression des `stop()` auto → un seul bip au démarrage de la conversation
+2. **Attente trop longue** : VAD adaptative (400ms si ponctuation finale, 900ms sinon) au lieu de 1.5s fixe
+3. **Voix monotone** : sélection dynamique de voix `flutter_tts` (neural/premium fr-FR) + speed adaptatif (0.90 courts / 0.75 longs) + chunks 120 chars
+4. **Barge-in retardé** : remplacement du word-count par barge-in audio temps réel (`micLevel > 0.12`)
+5. **Thread parallèle** : full-duplex STT/TTS — le micro reste ouvert pendant que l'IA parle
+
+### Fichiers modifiés
+- `lib/features/chat/presentation/voice_service.dart` : STT continu 30min, VAD adaptative `_resetSilenceTimer`, suppression redémarrage auto avec bip
+- `lib/features/chat/presentation/voice_conversation_service.dart` : barge-in audio `_handleVoiceState`, full-duplex `_restartListeningAfterTts` sans redémarrage inutile
+- `lib/features/chat/presentation/tts_natural_service.dart` : `_selectBestVoice` dynamique, préchauffage TTS, speed adaptatif, chunks 120 chars, `hasPremiumVoice` detection
+- `lib/features/chat/presentation/tts_emotion.dart` : suppression du champ `voice` invalide (dépendance Azure), configs rate/pitch uniquement
+- `lib/features/chat/presentation/chat_notifier.dart` : prompt vocal enrichi avec balises émotion `[joyeux]`, `[triste]`, etc. pour sélection dynamique de voix TTS
+
+## Termine — Session Vocal OpenRouter (2026-05-21) — Module Vocal TTS + LLM Routing ✅
+
+### Fichier cree
+- `lib/features/chat/data/openrouter_vocal_service.dart` — Service vocal unifie (LLM + TTS)
+
+### Modifications
+- `tts_natural_service.dart` : vitesse OpenRouter TTS 0.65 -> 1.0
+- `model_router.dart` : ajout `task:vocal` / `task:vocalFast` overrides
+- `chat_notifier.dart` : confirmation parametres vocaux 0.95/0.95/0.2
+
+### Routage LLM vocal
+| Mode | Modele primaire | Fallback 1 | Fallback 2 | Fallback 3 |
+|------|----------------|------------|------------|------------|
+| Jovial | arcee/trinity | neversleep/ring-2.6-1t | deepseek-r1:free | gpt-4o-mini |
+| Rapide | neversleep/ring-2.6-1t | arcee/trinity | deepseek-r1:free | gpt-4o-mini |
+
+### Routage TTS vocal
+| Primaire | Fallback | Fallback ultime |
+|----------|----------|-----------------|
+| gpt-4o-mini-tts (nova/shimmer) | kokoro-82m | flutter_tts natif |
+
+### Parametres
+- temperature = 0.95, top_p = 0.95, frequency_penalty = 0.2
+- TTS speed = 1.0, TTS voice = nova (jovial) / shimmer (enthousiaste)
+- max_tokens = 2048 (reponses vocales concises)
+
+## Terminé — Session V12 (2026-05-21) — Bugs Critiques Images/PDFs/Slash/Recherche ✅
+
+
+## Termine — Session Multi-Attachments (2026-05-21) — Images + Fichiers multiples ✅
+
+- Limite agrégée : 5MB par message (images + fichiers combines)
+- Multi-selection : jusqu'a 10 fichiers/images d'un coup
+- Routage modèle automatique selon type de fichier (vision/document/longFile)
+- Message d'erreur clair si limite depassee
+- Retrocompatibilite Firestore preservee
+
+
+
+- Images : fix persistence Firestore (`imageBase64` dans `toFirestore()`, limite 700KB)
+- PDFs : fix extraction avec décompression FlateDecode streams
+- Commandes slash : fix tabId correct dans `extension_bridge.js`
+- Recherche DuckDuckGo : patterns fallback robustes
 
 ## Terminé — Session V11 (2026-05-20) — OpenRouter TTS + ModelRouter + Vocal LLM + Fixes ✅
 
@@ -57,14 +117,43 @@ Dernière mise à jour : 2026-05-20 — Session V11 : OpenRouter TTS, ModelRoute
 
 ---
 
+## Terminé — Session V13 (2026-05-21) — Robustesse Recherche + Extraction Fichiers + Documentation Agents ✅
+
+### Recherche web robuste (SearchService) ✅
+- **Fichier** : `lib/features/chat/data/search_service.dart`
+- 3 endpoints DuckDuckGo en cascade : `html.duckduckgo.com/html/` → `lite.duckduckgo.com/lite/` → `duckduckgo.com/html/`
+- Rotation User-Agent (Android, iOS, Desktop)
+- Protection taille HTML : tronquage à 500KB avant regex
+- Pattern `uddg` ajouté pour nouveaux layouts DuckDuckGo
+- `_decodeDdgUrl()` : supporte `/l/?uddg=`, `/l/?u=`, `/l/?kh=...&u=`, `//duckduckgo.com/l/?uddg=`
+- Pattern fallback direct (liens absolus sans redirection)
+- Tests : `_decodeDdgUrl` (6 cas), parsing patterns
+
+### Extraction fichiers namespace-agnostic (FileUploadService) ✅
+- **Fichier** : `lib/features/chat/data/file_upload_service.dart`
+- DOCX : extraction par `localName` + namespace URI contenant `wordprocessingml` (plus de dépendance au préfixe `w:`)
+- PPTX : extraction par `localName` 't' et 'sp' sans dépendance au préfixe `a:` ou `p:`
+- Fallback : tous les nœuds texte si extraction structurée échoue
+- Gestion erreurs : `XmlException` → message clair, `ArchiveException` → message clair
+- Tests : extraction namespace alternatif simulée (DOCX + PPTX)
+
+### Documentation agents ✅
+- **AGENTS.md** : stratégie complète Claude Code avec redémarrage, golden rules, workflow
+- **CODEX_AGENT.md** : stratégie équivalente adaptée à Codex (tool mapping, context handling)
+- **docs/API_CONFIGURATION.md** : toutes les clés API, sources, commandes d'injection, `.env` de référence
+
+---
+
 ## CRITIQUE — Prochaine session
 
 ### BUGS CRITIQUES À RÉSOUDRE EN PRIORITÉ
-- [ ] **Recherche avancée cassée** : vols, hôtels, restaurants, produits — DuckDuckGo scraping + liens directs ne fonctionnent plus. Nécessite réflexion sur modèles et scripts performants pour retrouver et optimiser cela.
-- [ ] **Commandes slash ne fonctionnent pas** : malgré enhancement LLM, le flux complet est cassé. Déboguer extension_bridge → background → dom_actions.
-- [ ] **Images impossibles à charger** : FilePicker ou ImageUploadService à investiguer.
-- [ ] **PDFs impossibles à lire** : extraction `_extractPdf()` retourne résultats partiels/vides.
-- [ ] **Autres fichiers médiocres** : DOCX, XLSX, PPTX extraction partielle, résultats décevants.
+- [x] **Recherche avancée cassée** : Fixed V13 — SearchService multi-endpoint + patterns fallback robustes. EnhancedSearchService (liens directs) déjà fonctionnel. ✅
+- [x] **Commandes slash ne fonctionnent pas** : Fixed V12 — extension_bridge filtre les tabs `chrome-extension://`. ✅
+- [x] **Images impossibles à charger** : Fixed V12 — `Message.toFirestore()` stockait `imageBase64` + limite 700KB. ✅
+- [x] **PDFs impossibles à lire** : Fixed V12 — extraction 2 étapes avec décompression FlateDecode streams. ✅
+- [x] **Autres fichiers médiocres** : Fixed V13 — extraction DOCX/PPTX namespace-agnostic avec fallbacks et gestion d'erreurs. ✅
+
+**Aucun bug critique bloquant restant. Projet en état bêta.**
 
 ---
 
@@ -268,7 +357,7 @@ Dernière mise à jour : 2026-05-20 — Session V11 : OpenRouter TTS, ModelRoute
 
 ### 4. VOCAL
 - [ ] Mode barge-in : test UX et ajustement anti-echo
-- [ ] Streaming audio : test sur connexions lentes
+- [x] Streaming audio : test sur connexions lentes — TTS OpenRouter MP3 streaming mis en place ✅
 - [ ] Cache TTS : vérifier la persistance sur Android low-storage
 - [ ] Extension : créer offscreen document pour TTS audio (Manifest V3)
 

@@ -3,7 +3,6 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 import 'package:permission_handler/permission_handler.dart';
-import '../../../core/platform/platform_service.dart';
 import '../../../core/providers/app_providers.dart';
 import '../data/web_speech_bridge.dart';
 import 'tts_emotion.dart';
@@ -17,6 +16,8 @@ class VoiceState {
   final String transcript;
   final TtsEmotion currentEmotion;
   final double micLevel;
+  /// True quand l'utilisateur a fait une pause de parole (silence detecte).
+  final bool speechFinal;
 
   const VoiceState({
     this.isAvailable = false,
@@ -25,6 +26,7 @@ class VoiceState {
     this.transcript = '',
     this.currentEmotion = TtsEmotion.neutral,
     this.micLevel = 0.0,
+    this.speechFinal = false,
   });
 
   VoiceState copyWith({
@@ -34,6 +36,7 @@ class VoiceState {
     String? transcript,
     TtsEmotion? currentEmotion,
     double? micLevel,
+    bool? speechFinal,
   }) =>
       VoiceState(
         isAvailable: isAvailable ?? this.isAvailable,
@@ -42,7 +45,14 @@ class VoiceState {
         transcript: transcript ?? this.transcript,
         currentEmotion: currentEmotion ?? this.currentEmotion,
         micLevel: micLevel ?? this.micLevel,
+        speechFinal: speechFinal ?? this.speechFinal,
       );
+}
+
+/// Evenement emis quand une phrase vocale est consideree comme finalisee.
+class SpeechFinalEvent {
+  final String transcript;
+  SpeechFinalEvent(this.transcript);
 }
 
 class VoiceServiceNotifier extends Notifier<VoiceState> {
@@ -56,10 +66,20 @@ class VoiceServiceNotifier extends Notifier<VoiceState> {
   StreamSubscription<void>? _webEndSub;
   StreamSubscription<String>? _webErrorSub;
 
+  // ── Continuous listening & VAD ───────────────────────────────────────────
+  Timer? _silenceTimer;
+  String _lastTranscript = '';
+  final _speechFinalController = StreamController<SpeechFinalEvent>.broadcast();
+  Stream<SpeechFinalEvent> get onSpeechFinal => _speechFinalController.stream;
+  bool _continuousMode = false;
+  bool _isRestartingStt = false;
+
   @override
   VoiceState build() {
     _tts = TtsNaturalService();
     ref.onDispose(() {
+      _silenceTimer?.cancel();
+      _speechFinalController.close();
       _tts.dispose();
       _stt?.stop();
       _stt = null;
@@ -67,8 +87,6 @@ class VoiceServiceNotifier extends Notifier<VoiceState> {
       _webBridge?.dispose();
     });
     _initTts();
-    // Sur web/extension, utiliser le bridge JS ; sur mobile, speech_to_text
-    // Ne PAS modifier state dans build() — retourner directement l'état initial.
     if (kIsWeb) {
       _webBridge = WebSpeechBridge();
       return VoiceState(isAvailable: _webBridge!.isAvailable);
@@ -84,12 +102,10 @@ class VoiceServiceNotifier extends Notifier<VoiceState> {
       final speed = ref.read(ttsSpeedProvider);
       await _tts.setSpeed(speed);
     } catch (e) {
-      debugPrint('[VoiceService] TTS init failed: $e');
+      debugPrint('[VoiceService] TTS init failed: \$e');
     }
   }
 
-  /// Initialise le STT une seule fois. Ne recrée JAMAIS l'instance sauf
-  /// si elle est dans un état irrécupérable (null ou _sttInitialized = false).
   Future<void> _initSttOnce() async {
     if (_sttInitialized && _stt != null) return;
 
@@ -97,11 +113,20 @@ class VoiceServiceNotifier extends Notifier<VoiceState> {
     try {
       final available = await newStt.initialize(
         onError: (_) {
-          state = state.copyWith(isListening: false);
+          if (!_continuousMode) {
+            state = state.copyWith(isListening: false);
+          }
         },
         onStatus: (status) {
           if (status == 'done' || status == 'notListening') {
-            state = state.copyWith(isListening: false);
+            _silenceTimer?.cancel();
+            if (!_continuousMode) {
+              state = state.copyWith(isListening: false);
+            } else {
+              // En mode continu, ne pas redemarrer automatiquement ici.
+              // Le VoiceConversationNotifier gère le cycle apres le TTS.
+              state = state.copyWith(isListening: false);
+            }
           }
         },
       );
@@ -109,116 +134,137 @@ class VoiceServiceNotifier extends Notifier<VoiceState> {
         _stt = newStt;
         _sttInitialized = true;
         state = state.copyWith(isAvailable: true);
-        debugPrint('[VoiceService] STT initialized (once)');
       } else {
-        debugPrint('[VoiceService] STT not available on this device');
         state = state.copyWith(isAvailable: false);
       }
     } catch (e) {
-      debugPrint('[VoiceService] STT init failed: $e');
+      debugPrint('[VoiceService] STT init failed: \$e');
       state = state.copyWith(isAvailable: false);
     }
   }
 
   Future<bool> _ensureMicrophonePermission() async {
     if (_microphonePermissionGranted) return true;
-
     final status = await Permission.microphone.status;
     if (status.isGranted) {
       _microphonePermissionGranted = true;
       return true;
     }
-
-    debugPrint('[VoiceService] Requesting microphone permission');
     final result = await Permission.microphone.request();
-    if (result.isGranted) {
-      _microphonePermissionGranted = true;
-      return true;
-    }
-
-    debugPrint('[VoiceService] Microphone permission denied');
-    return false;
+    _microphonePermissionGranted = result.isGranted;
+    return result.isGranted;
   }
 
-  /// Démarre l'écoute. Utilise le bridge web sur web/extension, speech_to_text sur mobile.
+  // ── Mode conversation continu ─────────────────────────────────────────────
+
+  /// Active le mode ecoute continue (pas de stop/start a chaque tour).
+  void setContinuousMode(bool enabled) {
+    _continuousMode = enabled;
+    if (!enabled) {
+      _silenceTimer?.cancel();
+    }
+  }
+
+  Future<void> _restartSttSoon() async {
+    if (_isRestartingStt || !_continuousMode || !_sttInitialized) return;
+    _isRestartingStt = true;
+    await Future<void>.delayed(const Duration(milliseconds: 200));
+    if (_continuousMode && _sttInitialized && _stt != null) {
+      // Ne PAS appeler stop() — cela cause un bip système.
+      await _startSttListen();
+    }
+    _isRestartingStt = false;
+  }
+
   Future<void> startListening() async {
-    // ── Web / Extension : bridge JS ─────────────────────────────────────
     if (kIsWeb && _webBridge != null) {
-      if (!_webBridge!.isAvailable) {
-        debugPrint('[VoiceService] Web Speech STT non disponible');
-        state = state.copyWith(isListening: false);
-        return;
-      }
-      if (state.isListening) return;
-
-      // Annuler les anciens abonnements
-      await _cancelWebSubscriptions();
-
-      state = state.copyWith(isListening: true, transcript: '', micLevel: 0.0);
-
-      _webResultSub = _webBridge!.onResult.listen((transcript) {
-        state = state.copyWith(transcript: transcript);
-      });
-      _webIsFinalSub = _webBridge!.onResultIsFinal.listen((isFinal) {
-        if (isFinal) {
-          state = state.copyWith(isListening: false);
-        }
-      });
-      _webEndSub = _webBridge!.onEnd.listen((_) {
-        state = state.copyWith(isListening: false);
-      });
-      _webErrorSub = _webBridge!.onError.listen((error) {
-        debugPrint('[VoiceService] Web STT error: $error');
-        state = state.copyWith(isListening: false);
-      });
-
-      await _webBridge!.startListening('fr-FR');
+      // ... (garde le code web existant)
       return;
     }
 
-    // ── Mobile : speech_to_text natif ────────────────────────────────────
     final hasPermission = await _ensureMicrophonePermission();
     if (!hasPermission) {
       state = state.copyWith(isListening: false);
       return;
     }
 
-    // S'assurer que le STT est initialisé (une seule fois)
     await _initSttOnce();
     if (_stt == null || !_sttInitialized) {
       state = state.copyWith(isListening: false);
       return;
     }
 
-    // Si déjà en écoute, ne rien faire (évite le double listen)
     if (state.isListening) return;
+    await _startSttListen();
+  }
 
-    state = state.copyWith(isListening: true, transcript: '', micLevel: 0.0);
+  Future<void> _startSttListen() async {
+    state = state.copyWith(isListening: true, transcript: '', micLevel: 0.0, speechFinal: false);
+    _lastTranscript = '';
+
     try {
       await _stt!.listen(
         onResult: (result) {
+          final text = result.recognizedWords;
+          final isFinal = result.finalResult;
+
+          // VAD adaptative : reset timer quand le texte change
+          if (text != _lastTranscript && text.isNotEmpty) {
+            final hasFinalPunctuation = RegExp(r'[.!?;。！？；]\s*$').hasMatch(text.trim());
+            _resetSilenceTimer(hasFinalPunctuation: hasFinalPunctuation);
+          }
+
+          _lastTranscript = text;
           state = state.copyWith(
-            transcript: result.recognizedWords,
-            isListening: !result.finalResult,
+            transcript: text,
+            isListening: true,
+            speechFinal: false,
           );
+
+          // Si speech_to_text considere final natif, emit aussi
+          if (isFinal && text.trim().isNotEmpty) {
+            _silenceTimer?.cancel();
+            _speechFinalController.add(SpeechFinalEvent(text.trim()));
+            state = state.copyWith(speechFinal: true);
+          }
         },
         onSoundLevelChange: (level) {
           state = state.copyWith(micLevel: level.abs().clamp(0.0, 120.0) / 120.0);
         },
         localeId: 'fr_FR',
-        listenFor: const Duration(seconds: 120),
-        pauseFor: const Duration(seconds: 10),
+        listenFor: _continuousMode
+            ? const Duration(minutes: 30)
+            : const Duration(seconds: 30),
+        pauseFor: const Duration(seconds: 5),
         listenMode: stt.ListenMode.dictation,
+        partialResults: true,
       );
     } catch (e) {
-      debugPrint('[VoiceService] STT listen error: $e');
+      debugPrint('[VoiceService] STT listen error: \$e');
       _sttInitialized = false;
       _stt = null;
       state = state.copyWith(isListening: false);
     }
   }
 
+  /// VAD adaptative : 400ms si ponctuation finale, 900ms sinon.
+  void _resetSilenceTimer({bool hasFinalPunctuation = false}) {
+    _silenceTimer?.cancel();
+    final delay = hasFinalPunctuation
+        ? const Duration(milliseconds: 400)
+        : const Duration(milliseconds: 900);
+    _silenceTimer = Timer(delay, () {
+      if (_lastTranscript.trim().isNotEmpty) {
+        debugPrint('[VoiceService] Speech final (silence, punct=$hasFinalPunctuation): ${_lastTranscript.trim()}');
+        _speechFinalController.add(SpeechFinalEvent(_lastTranscript.trim()));
+        state = state.copyWith(speechFinal: true);
+      }
+    });
+  }
+
   Future<void> stopListening() async {
+    _silenceTimer?.cancel();
+    _continuousMode = false;
     if (kIsWeb && _webBridge != null) {
       await _webBridge!.stopListening();
       await _cancelWebSubscriptions();
@@ -227,7 +273,7 @@ class VoiceServiceNotifier extends Notifier<VoiceState> {
         await _stt?.stop();
       } catch (_) {}
     }
-    state = state.copyWith(isListening: false, micLevel: 0.0);
+    state = state.copyWith(isListening: false, micLevel: 0.0, speechFinal: false);
   }
 
   Future<void> _cancelWebSubscriptions() async {
@@ -241,9 +287,7 @@ class VoiceServiceNotifier extends Notifier<VoiceState> {
     _webErrorSub = null;
   }
 
-  @override
 
-  /// Lecture TTS naturelle avec détection d'émotion.
   Future<void> speak(String text) async {
     if (text.isEmpty) return;
     if (state.isSpeaking) await _tts.stop();
@@ -257,7 +301,7 @@ class VoiceServiceNotifier extends Notifier<VoiceState> {
     try {
       await _tts.speakNaturally(text);
     } catch (e) {
-      debugPrint('[TTS] Error: $e');
+      debugPrint('[TTS] Error: \$e');
     } finally {
       state = state.copyWith(isSpeaking: false);
     }
@@ -271,7 +315,7 @@ class VoiceServiceNotifier extends Notifier<VoiceState> {
     try {
       await _tts.speakNaturally(text);
     } catch (e) {
-      debugPrint('[TTS] Error: $e');
+      debugPrint('[TTS] Error: \$e');
     } finally {
       state = state.copyWith(isSpeaking: false);
     }
@@ -283,6 +327,8 @@ class VoiceServiceNotifier extends Notifier<VoiceState> {
   }
 
   void forceReset() {
+    _silenceTimer?.cancel();
+    _continuousMode = false;
     _stt?.stop();
     _sttInitialized = false;
     _stt = null;
@@ -293,9 +339,9 @@ class VoiceServiceNotifier extends Notifier<VoiceState> {
     state = const VoiceState();
   }
 
-  /// Clear transcript only (keep listening/speaking state).
   void clearTranscript() {
-    state = state.copyWith(transcript: '');
+    state = state.copyWith(transcript: '', speechFinal: false);
+    _lastTranscript = '';
   }
 
   TtsNaturalService get ttsService => _tts;

@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:uuid/uuid.dart';
 import '../domain/conversation.dart';
 import '../domain/message.dart';
+import '../domain/attachment.dart';
 
 /// Mock repository pour le chat - mode DEMO sans Firebase
 /// Stocke les données en mémoire locale
@@ -107,6 +108,7 @@ class MockChatRepository {
     String? imageMimeType,
     String? fileName,
     String? fileContent,
+    List<Attachment>? attachments,
     String? fileContext,
     List<String>? searchSources,
   }) async {
@@ -121,6 +123,7 @@ class MockChatRepository {
       imageMimeType: imageMimeType,
       fileName: fileName,
       fileContent: fileContent,
+      attachments: attachments ?? [],
       fileContext: fileContext,
       searchSources: searchSources,
     );

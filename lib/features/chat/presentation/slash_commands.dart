@@ -40,9 +40,9 @@ class SlashCommands {
     ),
     SlashCommand(
       name: 'links',
-      description: 'Extraire les liens de la page courante (filtrables par type)',
-      usage: '/links [all|video|videos|image|audio|document]',
-      params: ['filter'],
+      description: 'Extraire les liens d\'une page (courante ou URL, filtrables)',
+      usage: '/links [url] [all|video|videos|image|audio|document]',
+      params: ['url', 'filter'],
       icon: Icons.link,
     ),
     SlashCommand(
@@ -54,16 +54,16 @@ class SlashCommands {
     ),
     SlashCommand(
       name: 'summarize',
-      description: 'Résumer le contenu de la page courante',
-      usage: '/summarize',
-      params: [],
+      description: 'Résumer le contenu d\'une page (courante ou URL)',
+      usage: '/summarize [url]',
+      params: ['url'],
       icon: Icons.summarize,
     ),
     SlashCommand(
       name: 'extract',
-      description: 'Extraire le texte d\'un élément de la page (sélecteur CSS)',
-      usage: '/extract [selector]',
-      params: ['selector'],
+      description: 'Extraire le texte d\'une page ou élément (URL + sélecteur CSS)',
+      usage: '/extract [url] [selector]',
+      params: ['url', 'selector'],
       icon: Icons.content_paste,
     ),
     SlashCommand(
@@ -138,9 +138,9 @@ class SlashCommands {
     ),
     SlashCommand(
       name: 'metadata',
-      description: 'Afficher les métadonnées de la page (SEO, auteur, stats)',
-      usage: '/metadata',
-      params: [],
+      description: 'Afficher les métadonnées d\'une page (courante ou URL)',
+      usage: '/metadata [url]',
+      params: ['url'],
       icon: Icons.info_outline,
     ),
     SlashCommand(
@@ -206,6 +206,13 @@ class SlashCommands {
       params: ['format', 'sujet', 'nom_fichier'],
       icon: Icons.description,
     ),
+    SlashCommand(
+      name: 'scrape',
+      description: 'Scraper une URL via le backend et extraire prix, liens, contenu',
+      usage: '/scrape <url> [selectors_json]',
+      params: ['url', 'selectors'],
+      icon: Icons.web,
+    ),
   ];
 
   /// Recherche les commandes correspondant à un préfixe.
@@ -235,7 +242,7 @@ class SlashCommands {
   }
 
   /// Commandes universelles (fonctionnent sur toutes les plateformes).
-  static const Set<String> universalCommandNames = {'docgen'};
+  static const Set<String> universalCommandNames = {'docgen', 'scrape', 'summarize', 'extract', 'links', 'metadata'};
 
   /// Parse une commande slash depuis le texte de l'utilisateur.
   /// Retourne null si ce n'est pas une commande slash valide.

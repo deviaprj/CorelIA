@@ -9,9 +9,9 @@ import '../data/whisper_stt_service.dart';
 
 /// Etat du mode conversation vocale mains-libres.
 enum VoiceConversationState {
+  processingStt,
   idle,
   listening,
-  processingStt,
   thinking,
   speaking,
   error,
@@ -48,66 +48,57 @@ class VoiceConversationStatus {
       );
 }
 
-/// Service de conversation vocale mains-libres — 100% autonome et natif.
+/// Service de conversation vocale mains-libres — vrai chat vocal continu.
 ///
-/// Flux complet autonome :
-/// 1. LISTENING — speech_to_text natif avec VAD (pauseFor = silence detection)
-/// 2. THINKING — envoi automatique au ChatNotifier
-/// 3. SPEAKING — TTS naturel quand la reponse IA arrive (detectee via messagesStream)
-/// 4. Boucle continue tant que l'utilisateur parle
-///
-/// Support du barge-in : si l'utilisateur parle pendant que le TTS parle,
-/// le TTS est interrompu et on passe en mode écoute.
-///
-/// Support des balises prosodiques : [joyeux], [triste], [sérieux], [excité]
-/// L'émotion détectée est exposée via VoiceConversationStatus.emotion
+/// Flux :
+/// 1. LISTENING — ecoute continue sans bips, VAD logiciel (1.5s silence = fin)
+/// 2. THINKING — envoi automatique au ChatNotifier des que speech final
+/// 3. SPEAKING — TTS streaming par phrases des les premiers tokens recus
+/// 4. Apres reponse, retour automatique a LISTENING (conversation infinie)
+/// 5. BARGE-IN — si l'utilisateur parle pendant le TTS, interruption immediate
 class VoiceConversationNotifier
     extends FamilyNotifier<VoiceConversationStatus, String> {
   late final VoiceServiceNotifier _voice;
   bool _isActive = false;
-  String? _pendingTranscript;
 
-  // ── Barge-in ─────────────────────────────────────────────────────────────
+  // ── Streaming TTS ──────────────────────────────────────────────────────────
+  final StringBuffer _ttsBuffer = StringBuffer();
+  int _lastSpokenSentenceEnd = 0;
+
+  // ── Barge-in ───────────────────────────────────────────────────────────────
   bool _bargeInEnabled = true;
-  String _bargeInTranscript = '';
-  bool _bargeInDetected = false;
+  String _lastBargeInTranscript = '';
 
   // ── Whisper fallback ──────────────────────────────────────────────────────
   final WhisperSttService _whisperFallback = WhisperSttService();
-  int _sttFailureCount = 0;
 
-  static const _pollInterval = Duration(milliseconds: 150);
-  static const _sttFinalWait = Duration(milliseconds: 100);
-  static const _sttMaxWait = 30;
-  static const _ttsPollInterval = Duration(milliseconds: 300);
-  static const _postTtsGuard = Duration(milliseconds: 500);
-  static const _stopDelay = Duration(milliseconds: 200);
-  static const _bargeInPollInterval = Duration(milliseconds: 200);
+  // ── Subscriptions ──────────────────────────────────────────────────────────
+  StreamSubscription<SpeechFinalEvent>? _speechFinalSub;
+  StreamSubscription<void>? _ttsDoneSub;
+
+  static const _ttsSentenceMinLength = 40;
   static const _bargeInMinWords = 2;
 
   @override
   VoiceConversationStatus build(String conversationId) {
     _voice = ref.read(voiceServiceProvider.notifier);
 
-    ref.listen(messagesStreamProvider(conversationId), (prev, next) {
-      if (!_isActive || !next.hasValue) return;
-      final messages = next.valueOrNull;
-      if (messages == null) return;
-      if (messages.isEmpty) return;
+    // Ecouter le ChatNotifier pour streaming TTS (plus rapide que Firestore)
+    ref.listen(chatNotifierProvider(conversationId), (prev, next) {
+      if (!_isActive) return;
+      _handleChatState(next);
+    });
 
-      final lastMsg = messages.last;
-      if (lastMsg.isAssistant &&
-          !lastMsg.isStreaming &&
-          lastMsg.content.isNotEmpty &&
-          state.state == VoiceConversationState.thinking &&
-          _pendingTranscript != null) {
-        _pendingTranscript = null;
-        _speakResponseAndLoop(lastMsg.content);
-      }
+    // Ecouter le VoiceService pour barge-in audio temps réel
+    ref.listen(voiceServiceProvider, (prev, next) {
+      if (!_isActive) return;
+      _handleVoiceState(next);
     });
 
     ref.onDispose(() {
       _isActive = false;
+      _speechFinalSub?.cancel();
+      _ttsDoneSub?.cancel();
       _voice.stopListening();
       _voice.stopSpeaking();
       _whisperFallback.dispose();
@@ -116,268 +107,213 @@ class VoiceConversationNotifier
     return VoiceConversationStatus(bargeInEnabled: _bargeInEnabled);
   }
 
-  /// Active ou désactive le barge-in (interruption vocale du TTS).
   void setBargeInEnabled(bool enabled) {
     _bargeInEnabled = enabled;
     state = state.copyWith(bargeInEnabled: enabled);
   }
 
-  Future<void> startConversation() async {
-    _isActive = true;
-    _sttFailureCount = 0;
-    var consecutiveFailures = 0;
-    const maxFailures = 3;
-
-    while (_isActive) {
-      state = VoiceConversationStatus(
-        state: VoiceConversationState.listening,
-        bargeInEnabled: _bargeInEnabled,
-      );
-      final transcript = await _listenWithVad();
-
-      if (!_isActive) break;
-
-      if (transcript == null) {
-        consecutiveFailures++;
-        if (consecutiveFailures >= maxFailures) {
-          state = VoiceConversationStatus(
-            state: VoiceConversationState.error,
-            error: 'Microphone non disponible. Verifiez les permissions.',
-            bargeInEnabled: _bargeInEnabled,
-          );
-          break;
-        }
-        await Future<void>.delayed(const Duration(milliseconds: 1500));
-        continue;
+  /// Barge-in audio temps réel : détecte le son du micro pendant le TTS.
+  void _handleVoiceState(VoiceState voiceState) {
+    if (!_isActive) return;
+    if (state.state == VoiceConversationState.speaking && _bargeInEnabled) {
+      if (voiceState.micLevel > 0.12 && voiceState.isListening) {
+        debugPrint('[VoiceConversation] Barge-in audio detected (micLevel=${voiceState.micLevel})');
+        _voice.stopSpeaking();
+        _ttsBuffer.clear();
+        _lastSpokenSentenceEnd = 0;
+        state = state.copyWith(state: VoiceConversationState.listening);
       }
-
-      if (transcript.isEmpty) {
-        consecutiveFailures = 0;
-        continue;
-      }
-
-      consecutiveFailures = 0;
-      _pendingTranscript = transcript;
-
-      state = VoiceConversationStatus(
-        state: VoiceConversationState.thinking,
-        transcript: transcript,
-        bargeInEnabled: _bargeInEnabled,
-      );
-
-      try {
-        final chatNotifier = ref.read(chatNotifierProvider(arg).notifier);
-        await chatNotifier.sendMessage(transcript, isVoiceConversation: true, modelOverride: 'task:vocal');
-      } catch (e) {
-        debugPrint('[VoiceConversation] Erreur envoi chat : $e');
-        state = VoiceConversationStatus(
-          state: VoiceConversationState.error,
-          error: e.toString(),
-          transcript: transcript,
-          bargeInEnabled: _bargeInEnabled,
-        );
-        break;
-      }
-
-      while (_isActive &&
-          (state.state == VoiceConversationState.thinking ||
-              state.state == VoiceConversationState.speaking)) {
-        await Future<void>.delayed(_ttsPollInterval);
-      }
-
-      if (!_isActive) break;
-      if (state.state == VoiceConversationState.error) break;
     }
-
-    _reset();
   }
 
-  /// Lit la reponse IA a voix haute puis rend la main.
-  /// Si barge-in est activé, surveille l'entrée micro pendant le TTS.
-  Future<void> _speakResponseAndLoop(String text) async {
-    if (!_isActive) return;
+  /// Demarre la conversation vocale en boucle infinie.
+  Future<void> startConversation() async {
+    if (_isActive) return;
+    _isActive = true;
+    _voice.setContinuousMode(true);
+    _voice.clearTranscript();
+    _ttsBuffer.clear();
+    _lastSpokenSentenceEnd = 0;
 
-    await _voice.stopListening();
+    // Ecouter les evenements speech final du VoiceService
+    _speechFinalSub?.cancel();
+    _speechFinalSub = _voice.onSpeechFinal.listen((event) {
+      if (!_isActive) return;
+      _onSpeechFinal(event.transcript);
+    });
 
-    // Parser l'émotion du texte
-    final parseResult = EmotionParser.parse(text);
-    final emotion = parseResult.hasEmotionTag
-        ? parseResult.emotion
-        : EmotionParser.inferFromText(text);
+    // Premier tour d'ecoute
+    state = state.copyWith(state: VoiceConversationState.listening);
+    await _voice.startListening();
+  }
 
-    state = state.copyWith(
-      state: VoiceConversationState.speaking,
-      emotion: emotion,
-    );
+  void _onSpeechFinal(String transcript) {
+    if (transcript.isEmpty) return;
 
-    _bargeInDetected = false;
-    _bargeInTranscript = '';
-
-    try {
-      // Lancer le TTS
-      await _voice.speakWithEmotion(text, emotion);
-
-      if (_bargeInEnabled) {
-        // Barge-in : démarrer l'écoute pendant le TTS
-        // Le délai de 500ms évite que le micro capte le TTS qui vient de démarrer
-        await Future<void>.delayed(const Duration(milliseconds: 500));
-
-        if (_isActive && _voice.state.isSpeaking) {
-          await _voice.startListening();
-
-          while (_voice.state.isSpeaking && _isActive && !_bargeInDetected) {
-            final micInput = _voice.state.transcript;
-            if (micInput.isNotEmpty) {
-              // Vérifier que ce n'est pas juste du bruit (minimum 2 mots)
-              final words = micInput.trim().split(RegExp(r'\s+'));
-              if (words.length >= _bargeInMinWords) {
-                _bargeInDetected = true;
-                _bargeInTranscript = micInput;
-                debugPrint('[VoiceConversation] Barge-in détecté: "$micInput"');
-                break;
-              }
-            }
-            await Future<void>.delayed(_bargeInPollInterval);
-          }
-
-          // Arrêter l'écoute de barge-in
-          await _voice.stopListening();
-        }
-      } else {
-        // Mode classique : attendre la fin du TTS
-        while (_voice.state.isSpeaking && _isActive) {
-          await Future<void>.delayed(const Duration(milliseconds: 300));
-        }
-      }
-    } catch (e) {
-      debugPrint('[VoiceConversation] TTS erreur : $e');
-    }
-
-    if (_bargeInDetected && _bargeInTranscript.isNotEmpty) {
-      // L'utilisateur a interrompu — arrêter le TTS et traiter la nouvelle entrée
-      await _voice.stopSpeaking();
-
-      _pendingTranscript = _bargeInTranscript;
-      state = VoiceConversationStatus(
-        state: VoiceConversationState.thinking,
-        transcript: _bargeInTranscript,
-        bargeInEnabled: _bargeInEnabled,
-      );
-
-      try {
-        final chatNotifier = ref.read(chatNotifierProvider(arg).notifier);
-        await chatNotifier.sendMessage(_bargeInTranscript, isVoiceConversation: true, modelOverride: 'task:vocal');
-      } catch (e) {
-        debugPrint('[VoiceConversation] Erreur envoi barge-in : $e');
+    // Barge-in detection : si on parle pendant que le bot parle
+    if (state.state == VoiceConversationState.speaking) {
+      if (!_bargeInEnabled) return;
+      final words = transcript.trim().split(RegExp(r'\s+')).where((w) => w.isNotEmpty).length;
+      if (words >= _bargeInMinWords) {
+        _handleBargeIn(transcript);
       }
       return;
     }
 
-    if (_isActive) {
-      await Future<void>.delayed(_postTtsGuard);
-    }
+    // Normal flow : envoyer au LLM
+    _sendToLLM(transcript);
+  }
 
-    if (_isActive) {
-      state = state.copyWith(state: VoiceConversationState.idle);
+  void _sendToLLM(String transcript) {
+    if (transcript.isEmpty || !_isActive) return;
+
+    state = VoiceConversationStatus(
+      state: VoiceConversationState.thinking,
+      transcript: transcript,
+      bargeInEnabled: _bargeInEnabled,
+    );
+
+    // Nettoyer le buffer TTS pour la nouvelle reponse
+    _ttsBuffer.clear();
+    _lastSpokenSentenceEnd = 0;
+
+    // Vider le transcript vocal immediatement pour eviter qu'il reapparaisse
+    // dans l'InputBar lors du prochain rebuild.
+    _voice.clearTranscript();
+
+    final chatNotifier = ref.read(chatNotifierProvider(arg).notifier);
+    chatNotifier.sendMessage(transcript, isVoiceConversation: true, modelOverride: 'task:vocal');
+  }
+
+  /// Appelle quand le ChatNotifier recoit des tokens du LLM.
+  void _handleChatState(ChatState chatState) {
+    final messages = chatState.messages;
+    if (messages.isEmpty) return;
+
+    final lastMsg = messages.last;
+    if (!lastMsg.isAssistant) return;
+
+    final content = lastMsg.content;
+    if (content.isEmpty) return;
+
+    // Streaming en cours : parler les phrases completes au fur et a mesure
+    if (lastMsg.isStreaming) {
+      _speakStreamingSentences(content);
+    } else if (state.state == VoiceConversationState.thinking) {
+      // Stream vient de finir, dire le reste si non dit
+      _speakRemaining(content);
     }
   }
 
-  Future<String?> _listenWithVad() async {
-    await _voice.stopListening();
-    await _voice.startListening();
+  /// Parle les phrases completes des qu'elles sont disponibles dans le stream.
+  void _speakStreamingSentences(String fullText) {
+    if (fullText.length <= _lastSpokenSentenceEnd) return;
+    final newText = fullText.substring(_lastSpokenSentenceEnd);
 
-    if (!_voice.state.isAvailable && !_voice.state.isListening) {
-      debugPrint('[VoiceConversation] STT non disponible');
+    // Chercher une phrase complete (finie par . ! ? ;)
+    final sentenceEnd = _findSentenceEnd(newText);
+    if (sentenceEnd == -1) return;
 
-      // Fallback : essayer Whisper si le STT natif est indisponible
-      if (!kIsWeb && _whisperFallback.isAvailable) {
-        debugPrint('[VoiceConversation] Tentative Whisper fallback');
-        return await _listenWithWhisper();
-      }
-
-      return null;
+    final sentence = newText.substring(0, sentenceEnd + 1).trim();
+    if (sentence.length >= _ttsSentenceMinLength) {
+      _lastSpokenSentenceEnd = _lastSpokenSentenceEnd + sentenceEnd + 1;
+      _speakSentence(sentence);
     }
-
-    while (_voice.state.isListening && _isActive) {
-      final newTranscript = _voice.state.transcript;
-      if (newTranscript != state.transcript) {
-        state = state.copyWith(transcript: newTranscript);
-      }
-      await Future<void>.delayed(_pollInterval);
-    }
-
-    if (!_isActive) return '';
-
-    for (var i = 0; i < _sttMaxWait; i++) {
-      if (!_voice.state.isListening || !_isActive) break;
-      await Future<void>.delayed(_sttFinalWait);
-    }
-
-    if (!_isActive) return '';
-
-    await Future<void>.delayed(_postTtsGuard);
-
-    final finalTranscript = _voice.state.transcript;
-    if (_isActive) {
-      state = state.copyWith(
-        transcript: finalTranscript,
-        state: VoiceConversationState.processingStt,
-      );
-    }
-
-    return finalTranscript;
   }
 
-  /// Fallback Whisper : enregistre l'audio puis le transcrit via API.
-  Future<String?> _listenWithWhisper() async {
-    if (!_whisperFallback.isAvailable) return null;
-
-    final started = await _whisperFallback.startRecording();
-    if (!started) {
-      debugPrint('[VoiceConversation] Whisper fallback : échec démarrage');
-      return null;
+  /// Parle le texte restant quand le stream se termine.
+  void _speakRemaining(String fullText) {
+    if (fullText.length <= _lastSpokenSentenceEnd) {
+      _restartListeningAfterTts();
+      return;
     }
+    final remaining = fullText.substring(_lastSpokenSentenceEnd).trim();
+    if (remaining.isNotEmpty) {
+      _speakSentence(remaining);
+    } else {
+      _restartListeningAfterTts();
+    }
+  }
 
-    // Afficher l'état listening
-    state = state.copyWith(
-      state: VoiceConversationState.listening,
-      transcript: '(écoute Whisper en cours...)',
+  void _speakSentence(String sentence) {
+    if (sentence.isEmpty || !_isActive) return;
+
+    state = state.copyWith(state: VoiceConversationState.speaking);
+
+    final parseResult = EmotionParser.parse(sentence);
+    final emotion = parseResult.hasEmotionTag
+        ? parseResult.emotion
+        : EmotionParser.inferFromText(sentence);
+
+    _voice.speakWithEmotion(sentence, emotion).then((_) {
+      // Si on est toujours en speaking, le TTS a termine normalement -> redemarrer ecoute
+      // Si barge-in a change l'etat en thinking, ne rien faire (le barge-in gere le flux)
+      if (_isActive && state.state == VoiceConversationState.speaking) {
+        _restartListeningAfterTts();
+      }
+    }).catchError((e) {
+      debugPrint('[VoiceConversation] TTS error: \$e');
+    });
+  }
+
+  /// Barge-in : interruption vocale pendant que le bot parle.
+  void _handleBargeIn(String transcript) {
+    if (transcript == _lastBargeInTranscript) return;
+    _lastBargeInTranscript = transcript;
+
+    debugPrint('[VoiceConversation] Barge-in : \$transcript');
+    _voice.stopSpeaking();
+    _ttsBuffer.clear();
+    _lastSpokenSentenceEnd = 0;
+
+    state = VoiceConversationStatus(
+      state: VoiceConversationState.thinking,
+      transcript: transcript,
+      bargeInEnabled: _bargeInEnabled,
     );
 
-    // Écouter pendant 10 secondes max
-    await Future<void>.delayed(const Duration(seconds: 10));
+    final chatNotifier = ref.read(chatNotifierProvider(arg).notifier);
+    chatNotifier.sendMessage(transcript, isVoiceConversation: true, modelOverride: 'task:vocal');
+  }
 
-    final audioPath = await _whisperFallback.stopRecording();
-    if (audioPath == null) return null;
+  /// Trouve la fin de la premiere phrase complete dans [text].
+  /// Retourne l'index du dernier caractere de la phrase, ou -1 si pas trouve.
+  int _findSentenceEnd(String text) {
+    const enders = ['. ', '! ', '? ', '.\n', '!\n', '?\n', '；', '。'];
+    var earliest = -1;
+    for (final ender in enders) {
+      final idx = text.indexOf(ender);
+      if (idx != -1 && (earliest == -1 || idx < earliest)) {
+        earliest = idx;
+      }
+    }
+    return earliest;
+  }
 
-    state = state.copyWith(
-      state: VoiceConversationState.processingStt,
-      transcript: '(transcription en cours...)',
-    );
+  Future<void> _restartListeningAfterTts() async {
+    if (!_isActive) return;
+    await Future<void>.delayed(const Duration(milliseconds: 400));
+    if (!_isActive) return;
 
-    try {
-      final transcript = await _whisperFallback.transcribe(language: 'fr');
-      _sttFailureCount = 0;
-      return transcript.isEmpty ? null : transcript;
-    } catch (e) {
-      debugPrint('[VoiceConversation] Whisper fallback error : $e');
-      _sttFailureCount++;
-      return null;
+    state = state.copyWith(state: VoiceConversationState.listening);
+    _voice.clearTranscript();
+
+    // Ne redémarrer que si le micro s'est arrêté — évite les bips inutiles
+    if (!_voice.state.isListening) {
+      await _voice.startListening();
     }
   }
 
   Future<void> stop() async {
     _isActive = false;
-    _bargeInDetected = false;
-    _bargeInTranscript = '';
-    _pendingTranscript = null;
+    _speechFinalSub?.cancel();
+    _voice.setContinuousMode(false);
     await _voice.stopListening();
     await _voice.stopSpeaking();
     state = VoiceConversationStatus(
       state: VoiceConversationState.idle,
       bargeInEnabled: _bargeInEnabled,
     );
-    await Future<void>.delayed(_stopDelay);
   }
 
   Future<void> toggle() async {
@@ -386,10 +322,6 @@ class VoiceConversationNotifier
     } else {
       await startConversation();
     }
-  }
-
-  void _reset() {
-    state = VoiceConversationStatus(bargeInEnabled: _bargeInEnabled);
   }
 }
 

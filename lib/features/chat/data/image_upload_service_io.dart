@@ -3,118 +3,149 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'package:image_picker/image_picker.dart';
+import '../domain/attachment.dart';
 
 /// Exception specifique au service d'upload d'images.
 class ImageUploadException implements Exception {
   final String message;
   const ImageUploadException(this.message);
   @override
-  String toString() => 'ImageUploadException: $message';
-}
-
-/// Resultat d'un upload d'image.
-class ImageUploadResult {
-  final String base64;
-  final String mimeType;
-  final String? localPath;
-  final int width;
-  final int height;
-  final int sizeBytes;
-
-  const ImageUploadResult({
-    required this.base64,
-    required this.mimeType,
-    this.localPath,
-    required this.width,
-    required this.height,
-    required this.sizeBytes,
-  });
+  String toString() => 'ImageUploadException: \$message';
 }
 
 /// Service d'upload et compression d'images — 100% autonome cote client.
+///
+/// Supporte la selection multiple avec limite agrégée de 5MB.
 class ImageUploadService {
+  static const int maxTotalBytes = 5 * 1024 * 1024; // 5 MB total
+  static const int maxSingleBytes = 2 * 1024 * 1024; // 2 MB par image (apres compression)
   final ImagePicker _picker = ImagePicker();
 
-  /// Ouvre la galerie pour selectionner une image.
-  Future<ImageUploadResult?> pickFromGallery() async {
-    final picked = await _picker.pickImage(
-      source: ImageSource.gallery,
+  /// Ouvre la galerie pour selectionner plusieurs images.
+  Future<List<Attachment>> pickFromGallery({bool allowMultiple = true}) async {
+    final picked = await _picker.pickMultiImage(
       maxWidth: 1920,
       maxHeight: 1920,
       imageQuality: 85,
     );
-    if (picked == null) return null;
-    return _processImage(File(picked.path));
+    if (picked.isEmpty) return [];
+    return _processImages(picked.map((x) => File(x.path)).toList());
   }
 
-  /// Ouvre la camera pour prendre une photo.
-  Future<ImageUploadResult?> pickFromCamera() async {
+  /// Ouvre la camera pour prendre une photo (unique).
+  Future<List<Attachment>> pickFromCamera() async {
     final picked = await _picker.pickImage(
       source: ImageSource.camera,
       maxWidth: 1920,
       maxHeight: 1920,
       imageQuality: 85,
     );
-    if (picked == null) return null;
-    return _processImage(File(picked.path));
+    if (picked == null) return [];
+    return _processImages([File(picked.path)]);
   }
 
-  /// Compresse et convertit une image en base64.
-  Future<ImageUploadResult?> _processImage(File file) async {
+  Future<List<Attachment>> _processImages(List<File> files) async {
+    final results = <Attachment>[];
+    var totalSize = 0;
+
+    for (final file in files) {
+      try {
+        final att = await _processSingleImage(file);
+        if (att == null) continue;
+
+        // Verification limite agrégée
+        if (totalSize + att.sizeBytes > maxTotalBytes) {
+          debugPrint('[ImageUploadService] Limite 5MB atteinte, \${files.length - results.length} image(s) ignoree(s)');
+          break;
+        }
+
+        results.add(att);
+        totalSize += att.sizeBytes;
+      } catch (e) {
+        debugPrint('[ImageUploadService] Erreur traitement image : \$e');
+      }
+    }
+
+    if (results.isEmpty && files.isNotEmpty) {
+      throw const ImageUploadException(
+        'Aucune image valide. Limite totale : 5MB.',
+      );
+    }
+
+    return results;
+  }
+
+  Future<Attachment?> _processSingleImage(File file) async {
     try {
       final bytes = await file.readAsBytes();
       final originalSize = bytes.length;
+      debugPrint('[ImageUploadService] Original size: \${(originalSize / 1024).toStringAsFixed(1)}KB');
 
-      // Compression supplementaire si necessaire
       var compressedBytes = bytes;
       if (originalSize > 5 * 1024 * 1024) {
-        // > 5MB : compresser davantage pour DeepSeek (limite recommandee)
         final result = await FlutterImageCompress.compressWithFile(
           file.absolute.path,
           minWidth: 1024,
           minHeight: 1024,
-          quality: 60,
+          quality: 50,
           format: CompressFormat.jpeg,
         );
-        if (result != null) {
-          compressedBytes = result;
-        }
+        if (result != null) compressedBytes = result;
       } else if (originalSize > 2 * 1024 * 1024) {
-        // 2-5MB : compresser modérément
         final result = await FlutterImageCompress.compressWithFile(
           file.absolute.path,
           minWidth: 1280,
           minHeight: 1280,
-          quality: 70,
+          quality: 60,
           format: CompressFormat.jpeg,
         );
-        if (result != null) {
-          compressedBytes = result;
+        if (result != null) compressedBytes = result;
+      } else if (originalSize > 700 * 1024) {
+        final result = await FlutterImageCompress.compressWithFile(
+          file.absolute.path,
+          minWidth: 1600,
+          minHeight: 1600,
+          quality: 75,
+          format: CompressFormat.jpeg,
+        );
+        if (result != null) compressedBytes = result;
+      }
+
+      // Limite stricte par image : 2MB
+      if (compressedBytes.length > maxSingleBytes) {
+        final lastTry = await FlutterImageCompress.compressWithFile(
+          file.absolute.path,
+          minWidth: 1024,
+          minHeight: 1024,
+          quality: 45,
+          format: CompressFormat.jpeg,
+        );
+        if (lastTry != null && lastTry.length <= maxSingleBytes) {
+          compressedBytes = lastTry;
+        } else {
+          throw ImageUploadException(
+            'Image trop volumineuse apres compression (max \${maxSingleBytes ~/ 1024}KB)',
+          );
         }
       }
 
-      // Limite : 1MB max pour eviter les payloads API trop volumineux
-      if (compressedBytes.length > 1 * 1024 * 1024) {
-        throw const ImageUploadException('Image trop volumineuse (max 1MB)');
-      }
-
       final base64 = base64Encode(compressedBytes);
-      // Securite supplementaire : verifier la taille du base64
-      if (base64.length > 1.5 * 1024 * 1024) {
-        throw const ImageUploadException('Image encodee trop volumineuse (max 1MB base64)');
+      if (base64.length > 2.5 * 1024 * 1024) {
+        throw const ImageUploadException('Image encodee trop volumineuse');
       }
-      final mimeType = _detectMimeType(file.path);
 
-      return ImageUploadResult(
-        base64: base64,
+      final mimeType = _detectMimeType(file.path);
+      debugPrint('[ImageUploadService] Final size: \${(compressedBytes.length / 1024).toStringAsFixed(1)}KB');
+
+      return Attachment(
+        type: AttachmentType.image,
+        name: file.path.split('/').last,
         mimeType: mimeType,
-        localPath: file.path,
-        width: 0, // On pourrait utiliser image package pour obtenir les dimensions
-        height: 0,
         sizeBytes: compressedBytes.length,
+        imageBase64: base64,
       );
     } catch (e) {
-      debugPrint('[ImageUploadService] Erreur traitement image : $e');
+      debugPrint('[ImageUploadService] Erreur traitement image : \$e');
       return null;
     }
   }
