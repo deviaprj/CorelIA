@@ -73,10 +73,12 @@ void main() {
       }
     });
 
-    test('chaque voix est une voix française valide', () {
+    test('chaque config a rate et pitch positifs', () {
       for (final entry in emotionTtsConfigs.entries) {
-        expect(entry.value.voice, startsWith('fr-FR-'),
-            reason: '${entry.key} voice should start with fr-FR-');
+        expect(entry.value.rate, greaterThan(0.0),
+            reason: '${entry.key} rate should be > 0');
+        expect(entry.value.pitch, greaterThan(0.0),
+            reason: '${entry.key} pitch should be > 0');
       }
     });
   });

@@ -441,4 +441,52 @@ Les commandes slash (`/summarize`, `/extract`, `/links`, `/metadata`) ne fonctio
 
 ---
 
-*Dernière mise à jour : 2026-05-21*
+## ADR-017 : Vocal Turn-Taking — VAD Prosodique, Barge-In par Intention, et Hésitations TTS
+
+**Date** : 2026-05-22
+**Statut** : Accepté
+
+### Contexte
+Le mode conversation vocal mains-libres de Corely fonctionnait mais manquait de fluidité humaine. L'IA attendait la fin complète du texte avant de parler, coupait l'utilisateur sur un simple bruit pendant le TTS, et avait une voix robotique sans respiration.
+
+### Décision
+Architecture en 4 couches pour un turn-taking humain :
+
+1. **VAD Prosodique** (`ProsodyVadAnalyzer`) :
+   - Remplace le timer fixe (1.5s) par une analyse multi-facteurs : ponctuation finale + silence 400ms, pas de ponctuation + silence 900ms, chute d'énergie mic sous 15% du pic sur 300ms, safety cap 12s.
+   - Distingue `breathingPause` (silence 200-400ms + énergie qui remonte) de `endOfPhrase` pour éviter de couper l'utilisateur en plein milieu d'une phrase.
+   - Pas d'accès au buffer audio brut (limitation `speech_to_text`), donc utilisation de `onSoundLevelChange` comme proxy d'énergie vocale.
+
+2. **Streaming TTS par phrase** :
+   - `VoiceConversationNotifier._speakStreamingSentences()` parle les phrases complètes dès qu'elles arrivent du LLM (SSE streaming).
+   - Si aucune fin de phrase n'est trouvée après 120 caractères, parle le fragment quand même (évite l'attente indéfinie).
+   - Seuils réduits : 12 chars première phrase, 20 chars suivantes.
+
+3. **Barge-in par intention** (`BargeInIntentClassifier`) :
+   - Classification regex en 5 intentions (stop, topicChange, correction, repeat, none) sans appel LLM.
+   - Single-word shortcuts : "stop" → stop, "non" → correction, "encore" → repeat.
+   - Behaviors spécifiques : `repeat` relit `_lastSpokenText` sans appeler le LLM ; `topicChange` préfixe "Changement de sujet : " ; autres interrompent et envoient un nouveau message.
+   - Audio barge-in (micro pendant TTS) : exige `micLevel > 0.12` pendant > 200ms pour éviter les pics parasites.
+
+4. **Hésitations naturelles** (`VocalHesitationInjector`) :
+   - Post-processing TTS déterministe, pas d'injection dans le prompt LLM.
+   - Règles probabilistes : prefix "euh, " / "hmm, " (40% × intensity), mid-sentence "euh" après virgule (25% × intensity), pause "..." mid-sentence si > 80 chars (20% × intensity).
+   - Jamais dans les URLs ou le markdown.
+
+### Alternatives Considérées
+- **Timer fixe** (1.5s) : trop lent, coupe les utilisateurs en pleine phrase.
+- **Barge-in audio simple** (n'importe quel son coupe le TTS) : coupait sur un simple bruit ou parole sans sens.
+- **Injection hésitations dans le prompt LLM** : non déterministe, difficile à contrôler, modifie la qualité de la réponse texte.
+- **StyleTTS 2 / ElevenLabs native** : excellente qualité mais coûteux (ElevenLabs) ou nécessite un serveur GPU (StyleTTS 2). L'injection déterministe est un bon compromis gratuit immédiat.
+
+### Conséquences
+- ✅ Latence utilisateur→IA réduite à < 300ms (streaming par phrase + VAD intelligent)
+- ✅ Conversations infinies sans interruption involontaire
+- ✅ Voix plus humaine avec hésitations et pauses
+- ✅ Barge-in explicite détecté sans appel LLM (pas de coût supplémentaire)
+- ⚠️ `speech_to_text` ne donne pas de buffer audio brut → le VAD est approximatif (proxy mic level)
+- ⚠️ Edge TTS streaming (WebSocket) est complexe à intégrer et mobile-only
+
+---
+
+*Dernière mise à jour : 2026-05-22*

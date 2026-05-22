@@ -9,11 +9,14 @@ import '../data/openrouter_tts_service.dart';
 import '../data/tts_cache_service.dart';
 import 'audio_player_factory.dart';
 import 'emotion_parser.dart';
+import 'edge_tts_service.dart';
 import 'tts_emotion.dart';
+import 'vocal_hesitation_injector.dart';
 
 /// Moteur TTS sélectionné.
 enum TtsEngine {
   openRouter,
+  edgeTts,
   flutterTts,
 }
 
@@ -42,6 +45,7 @@ class TtsNaturalService {
   double _speechRate = 0.45;
   double _pitch = 1.10;
   String _language = 'fr-FR';
+  bool _hesitationEnabled = false;
 
   bool get isSpeaking => _isSpeaking;
   TtsEngine get activeEngine => _activeEngine;
@@ -158,6 +162,79 @@ class TtsNaturalService {
 
   void setEmotion(TtsEmotion emotion) {
     _currentEmotion = emotion;
+  }
+
+  void setHesitationEnabled(bool enabled) {
+    _hesitationEnabled = enabled;
+  }
+
+  /// Parle le texte en streaming TTS (Edge TTS primaire sur mobile).
+  /// Demarre la lecture des que ~4KB de MP3 sont disponibles.
+  Future<void> speakStreaming(String text, {TtsEmotion emotion = TtsEmotion.neutral}) async {
+    if (_isSpeaking) await stop();
+
+    final parseResult = EmotionParser.parse(text);
+    final effectiveEmotion = parseResult.hasEmotionTag ? parseResult.emotion : emotion;
+    var cleanText = parseResult.hasEmotionTag ? parseResult.cleanText : cleanMarkdown(text);
+
+    if (_hesitationEnabled) {
+      cleanText = VocalHesitationInjector.inject(cleanText, intensity: 0.25);
+    }
+
+    if (cleanText.trim().isEmpty) return;
+
+    _isSpeaking = true;
+    _currentEmotion = effectiveEmotion;
+
+    // Edge TTS streaming (mobile uniquement, pas web)
+    if (PlatformService.isMobile) {
+      try {
+        _activeEngine = TtsEngine.edgeTts;
+        await _speakWithEdgeTtsStreaming(cleanText, effectiveEmotion);
+        return;
+      } catch (e) {
+        debugPrint('[TtsNaturalService] Edge TTS streaming failed: $e');
+      }
+    }
+
+    // Fallback OpenRouter TTS (full-buffer)
+    if (PlatformService.isMobile && OpenRouterTtsService.isAvailable) {
+      try {
+        _activeEngine = TtsEngine.openRouter;
+        await _speakWithOpenRouterTts(cleanText, effectiveEmotion);
+        return;
+      } catch (e) {
+        debugPrint('[TtsNaturalService] OpenRouter TTS failed: $e');
+      }
+    }
+
+    // Fallback universel flutter_tts
+    _activeEngine = TtsEngine.flutterTts;
+    await _speakWithFlutterTts(cleanText);
+  }
+
+  Future<void> _speakWithEdgeTtsStreaming(String text, TtsEmotion emotion) async {
+    final edgeService = EdgeTtsService();
+    edgeService.setEmotion(emotion);
+
+    final player = AudioPlayerFactory.create();
+    if (player == null) throw UnsupportedError('Audio player unavailable');
+
+    try {
+      await for (final path in edgeService.synthesizeStream(text)) {
+        if (path != null) {
+          await AudioPlayerFactory.setFilePath(player, path);
+          await AudioPlayerFactory.play(player);
+          // On attend la fin de la lecture — le fichier continue d'etre ecrit
+          // par le WebSocket en parallele. ExoPlayer/AVPlayer lisent un MP3
+          // partiel tant que le header est valide.
+          await AudioPlayerFactory.waitForCompletion(player);
+        }
+      }
+    } finally {
+      await AudioPlayerFactory.stop(player);
+      await AudioPlayerFactory.dispose(player);
+    }
   }
 
   // ── Nettoyage markdown ──────────────────────────────────────────────────
@@ -279,7 +356,11 @@ class TtsNaturalService {
 
     final parseResult = EmotionParser.parse(text);
     final emotion = parseResult.hasEmotionTag ? parseResult.emotion : _currentEmotion;
-    final cleanText = parseResult.hasEmotionTag ? parseResult.cleanText : cleanMarkdown(text);
+    var cleanText = parseResult.hasEmotionTag ? parseResult.cleanText : cleanMarkdown(text);
+
+    if (_hesitationEnabled) {
+      cleanText = VocalHesitationInjector.inject(cleanText, intensity: 0.25);
+    }
 
     if (cleanText.trim().isEmpty) return;
 

@@ -267,16 +267,57 @@ Dernière mise à jour : 2026-05-21 — Session V14 : Vocal UX + Scraping Intell
 
 ---
 
+## Terminé — Session V15 (2026-05-22) — Vocal Turn-Taking (Mode Conversation Fluide)
+
+### Résumé
+Le mode conversation vocal mains-libres est désormais fluide et humain. Latence réduite, interruptions intelligentes, voix avec hésitations naturelles, et détection de fin de phrase basée sur la prosodie.
+
+### Décisions techniques clés
+- **VAD Prosodique** : remplacement du timer fixe par `ProsodyVadAnalyzer` qui analyse le niveau sonore, la ponctuation, et la cadence de parole pour distinguer une pause respiratoire (`breathingPause`) d'une fin de phrase (`endOfPhrase`). Règles : ponctuation + 400ms silence, pas de ponctuation + 900ms silence, chute d'énergie sous 15% du pic sur 300ms, safety cap 12s.
+- **Streaming TTS par phrase** : `VoiceConversationNotifier._speakStreamingSentences()` parle les phrases complètes dès qu'elles arrivent du LLM. Si pas de fin de phrase après 120 caractères, parle le fragment quand même. Seuils réduits : 12 chars première phrase, 20 chars suivantes.
+- **Barge-in intelligent par intention** : `BargeInIntentClassifier` détecte 5 intentions (stop, topicChange, correction, repeat, none) via regex sans appel LLM. Single-word shortcuts : "stop", "chut", "non", "encore", "pardon", "quoi". Comportements spécifiques : `repeat` relit la dernière réponse sans appeler le LLM ; `topicChange` préfixe le message ; `stop`/`correction` interrompent et envoient un nouveau message.
+- **Hésitations naturelles** : `VocalHesitationInjector` post-processe le texte TTS avec "euh", "hmm", pauses "..." selon des règles probabilistes (intensité 0.25). Fonctionne avec tous les moteurs TTS sans modification du prompt LLM.
+- **Cross-platform Edge TTS** : barrel file `edge_tts_service.dart` avec conditional export (`dart.library.io` vs web). Web stub retourne `UnsupportedError`. `EdgeTtsService.setEmotion()` mappe les émotions vers les voix Microsoft Edge (HenriNeural, DeniseNeural, etc.).
+
+### Fichiers créés
+- `lib/features/chat/presentation/prosody_vad_analyzer.dart` — VAD prosodique avec ring buffer mic
+- `lib/features/chat/presentation/barge_in_intent_classifier.dart` — Classification d'intention barge-in (5 classes)
+- `lib/features/chat/presentation/vocal_hesitation_injector.dart` — Injection probabiliste d'hésitations TTS
+- `lib/features/chat/presentation/edge_tts_service.dart` — Barrel conditional export
+- `lib/features/chat/presentation/edge_tts_service_web.dart` — Stub web Edge TTS
+- `test/features/chat/presentation/prosody_vad_analyzer_test.dart` — 12 tests unitaires
+- `test/features/chat/presentation/barge_in_intent_classifier_test.dart` — 15 tests unitaires
+- `test/features/chat/presentation/vocal_hesitation_injector_test.dart` — 9 tests unitaires (probabilistes)
+- `docs/tts_model_evaluation.md` — Évaluation comparatif TTS (Edge, OpenRouter, ElevenLabs, StyleTTS 2)
+
+### Fichiers modifiés
+- `lib/features/chat/presentation/edge_tts_service_io.dart` — Renommé, ajout `setEmotion()`, configs par émotion
+- `lib/features/chat/presentation/tts_emotion.dart` — Ajout `edgeEmotionTtsConfigs` (calibré pour Edge SSML scale)
+- `lib/features/chat/presentation/tts_natural_service.dart` — Ajout `TtsEngine.edgeTts`, `speakStreaming()`, `_hesitationEnabled`
+- `lib/features/chat/presentation/voice_service.dart` — Intégration `ProsodyVadAnalyzer`, `speakStreamingWithEmotion()`, timer VAD 50ms
+- `lib/features/chat/presentation/voice_conversation_service.dart` — Seuils TTS réduits, barge-in par intention, `_lastSpokenText` pour repeat
+- `lib/features/chat/presentation/chat_notifier.dart` — Prompt vocal enrichi : "Parle avec un rythme naturel, comme à l'oral"
+- `test/features/chat/presentation/edge_tts_service_test.dart` — Fix test préexistant `.voice` invalide sur `EmotionTtsConfig`
+
+### Tests
+- 36 nouveaux tests unitaires, 0 échec
+- `flutter analyze` : 0 erreur de compilation sur les fichiers modifiés
+- `flutter build web` : réussit (Edge TTS derrière conditional export)
+
+### Évaluation TTS avancée (résumé)
+| Modèle | Latence | Coût | Qualité | Intégration | Plateforme |
+|--------|---------|------|---------|-------------|------------|
+| Edge TTS streaming | 150-400ms | Gratuit | Bonne (neural) | Complexe (WebSocket) | Mobile uniquement |
+| OpenRouter TTS | 800-2500ms | Payant (crédits) | Excellente (nova/shimmer) | Simple (HTTP) | Mobile + Web |
+| ElevenLabs | 300-800ms | Payant (API key) | Excellente + émotion | Simple (HTTP) | Toutes |
+| StyleTTS 2 | ~500ms (server) | Gratuit (self-host) | Très bonne | Complexe (server GPU) | Server-side uniquement |
+| flutter_tts | 50-200ms | Gratuit | Moyenne (OS dépendant) | Trivial | Toutes |
+
+**Conclusion** : Edge TTS streaming est la meilleure option mobile (gratuit, latence faible). ElevenLabs est le meilleur upgrade payant (qualité + émotion). StyleTTS 2 est prometteur mais nécessite un serveur GPU dédié.
+
+---
+
 ## À faire — Prochaine session
-
-### Priorité CRITIQUE — Vocal Turn-Talking (Mode conversation fluide)
-Le mode vocal actuel fonctionne mais manque de **fluidité humaine**. L'IA doit savoir exactement quand parler sans couper la parole, avec une latence quasi nulle et une voix qui respire.
-
-- [ ] **Détection de fin de phrase** : VAD intelligent qui distingue une pause respiratoire d'une fin de phrase (prosodie, punctuation implicite). Ne pas interrompre l'utilisateur en plein milieu d'une phrase.
-- [ ] **Latence quasi nulle** : préchargement du premier chunk TTS dès que l'IA commence à générer la réponse (streaming TTS), pas d'attente de la fin complète du texte. Target < 300ms entre la fin de phrase utilisateur et le début du son IA.
-- [ ] **Voix qui respire** : intégrer des hésitations naturelles ("euh", " hmm", pauses), des intonations montantes/descendantes, des variations de débit. Les modèles **StyleTTS 2** ou **ElevenLabs** savent gérer cela nativement — évaluer leur intégration vs OpenRouter TTS actuel.
-- [ ] **Barge-in intelligent** : ne pas couper l'utilisateur si le TTS est en cours, mais détecter un "stop" ou un changement de sujet explicite. Sinon, laisser l'IA finir sa phrase.
-- [ ] **Évaluation modèles TTS avancés** : comparer ElevenLabs (multilingue, émotion, low-latency) vs StyleTTS 2 (open-source, fine-grained style control) vs gpt-4o-mini-tts actuel. Documenter coûts, latence, qualité.
 
 ### Priorité HAUTE
 - [ ] **Déployer le backend** : `bash scripts/deploy_backend.sh` depuis la machine de l'utilisateur (Docker a besoin d'internet pour `apt-get`). Cible : `api.aironbot.app`.

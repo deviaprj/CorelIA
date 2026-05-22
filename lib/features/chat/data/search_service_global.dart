@@ -54,7 +54,7 @@ class SmartSearchResponse {
         .map((r) => SmartSearchResult.fromJson(r as Map<String, dynamic>))
         .toList();
     final sourcesList = (json['sources'] as List<dynamic>? ?? [])
-        .map((s) => {
+        .map((s) {
           final m = s as Map<String, dynamic>;
           return <String, String>{
             'url': m['url'] as String? ?? '',

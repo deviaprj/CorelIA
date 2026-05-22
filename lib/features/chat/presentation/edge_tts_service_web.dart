@@ -11,9 +11,15 @@ class EdgeTtsService {
   double _rate = 1.0;
   double _pitch = 1.0;
 
+  String get voice => _voice;
+
   void setVoice(String voice) => _voice = voice;
   void setRate(double rate) => _rate = rate;
   void setPitch(double pitch) => _pitch = pitch;
+
+  void setEmotion(dynamic emotion) {
+    // Stub : pas d'effet sur web
+  }
 
   Future<String> synthesize(String text) async {
     throw UnsupportedError('Edge TTS is not available on web');
