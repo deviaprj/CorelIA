@@ -1,6 +1,72 @@
 # TASKS.md — Suivi Corely
 
-Dernière mise à jour : 2026-05-21 — Session V14 : Vocal UX + Scraping Intelligent + Slash Commands Cross-Platform
+Dernière mise à jour : 2026-05-22 — Session V16 : Simplification radicale du mode vocal (tour-par-tour, half-duplex)
+
+## Terminé — Session V16 (2026-05-22) — Mode Vocal Simplifié ✅
+
+### Problèmes résolus
+1. **Architecture V15 instable** : VAD prosodique, streaming TTS par phrases, full-duplex = fondamentalement cassé sur Android. Remplacé par une architecture tour-par-tour simple et fiable.
+2. **Monologue (STT capte l'écho du TTS)** : micro coupé pendant le TTS (half-duplex), rouvert après. Plus d'echo capturé.
+3. **TTS décousu** : suppression du streaming par phrases. La réponse complète est parlée d'un bloc via `speakNaturally()`.
+4. **Détection aléatoire de fin de phrase** : suppression du VAD custom. Utilisation de `finalResult` natif du STT uniquement.
+5. **Micro mort après 1er tour** : plus de redémarrage complexe du micro. Le cycle est explicitement géré : listen → stop → TTS → start.
+
+### Architecture V16 (tour-par-tour)
+```
+LISTENING → THINKING → SPEAKING → LISTENING
+   ↑_____________________________________|
+```
+- STT continu natif (`listenFor: 30min`, `pauseFor: null`)
+- TTS parle le message COMPLET (pas de streaming par phrases)
+- Half-duplex : micro OFF pendant le TTS, ON après
+- Barge-in : speech final détecté pendant speaking → stop TTS + nouveau message LLM
+
+### Fichiers modifiés
+- `lib/features/chat/presentation/voice_service.dart` : STT simplifié, suppression VAD prosodique, mode conversation, redémarrage explicite
+- `lib/features/chat/presentation/voice_conversation_service.dart` : machine à états tour-par-tour, TTS bloc, barge-in via speech final, suppression streaming TTS
+- `lib/features/chat/presentation/tts_natural_service.dart` : suppression `speakStreaming()`, `_speakWithEdgeTtsStreaming()`, `setHesitationEnabled()`
+- `lib/features/chat/presentation/prosody_vad_analyzer.dart` : **supprimé**
+- `lib/features/chat/presentation/aurora_splash.dart` : suppression état `processingStt`
+- `lib/features/chat/presentation/chat_screen.dart` : suppression état `processingStt`
+
+### Fichiers inchangés (conservés)
+- `barge_in_intent_classifier.dart` : classification d'intention barge-in
+- `emotion_parser.dart` : parsing des balises émotion `[joyeux]`, etc.
+- `tts_emotion.dart` : configs rate/pitch par émotion
+- `openrouter_tts_service.dart` : synthèse TTS via OpenRouter
+- `vocal_hesitation_injector.dart` : injections d'hésitations (inactif mais conservé)
+
+## TODO next-session (2026-05-23) — Priorité CRITIQUE
+
+### 1. Tester mode vocal sur Xiaomi 12
+- [ ] Détection fin de phrase : parler avec ponctuation → doit être rapide (< 1s)
+- [ ] Pas de double envoi : un seul message au LLM
+- [ ] TTS fluide : réponse complète d'un bloc, pas décousue
+- [ ] 5 tours complets : aucun blocage, micro redémarre à chaque fois
+- [ ] Barge-in : parler pendant que Corely parle (> 3 mots) → TTS s'arrête, Corely répond au nouveau message
+- [ ] Pas de monologue : Corely ne doit pas répondre à sa propre voix
+
+### 2. Évaluer les commandes slash
+- [ ] Tester `/scrape`, `/summarize`, `/extract`, `/links`, `/metadata` sur mobile
+- [ ] Vérifier le backend `/search_smart` et `/scrape` sont opérationnels
+- [ ] Évaluer si l'architecture actuelle suffit ou si une revue est nécessaire
+
+### 3. Évaluer la recherche avancée
+- [ ] Tester `searchFlights`, `searchHotels`, `searchProducts`, `searchWeather`
+- [ ] Vérifier le parsing des paramètres (`parseFlightParams`, etc.)
+- [ ] Évaluer si l'architecture actuelle suffit ou si une revue est nécessaire
+
+### 4. Évaluer l'analyse de fichiers et images
+- [ ] Tester l'extraction de texte de PDF, DOCX, XLSX
+- [ ] Tester la vision (images envoyées au LLM)
+- [ ] Évaluer si l'architecture actuelle suffit ou si une revue est nécessaire
+
+### 5. Décision architecture globale
+Après les tests, décider :
+- **Continuer à patcher** les mécanismes existants pour un résultat optimal
+- **Revoir l'architecture** de certains mécanismes (slash, recherche, fichiers) si les patchs ne suffisent pas
+
+## Termine — Session V14 (2026-05-21) — Vocal UX : Bips, Latence, Qualité, Full-Duplex ✅
 
 ## Termine — Session V14 (2026-05-21) — Vocal UX : Bips, Latence, Qualité, Full-Duplex ✅
 

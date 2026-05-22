@@ -489,4 +489,68 @@ Architecture en 4 couches pour un turn-taking humain :
 
 ---
 
+## ADR-018 : Simplification Radicale du Mode Vocal — Tour-par-Tour Half-Duplex
+
+**Date** : 2026-05-22
+**Statut** : Accepté (remplace l'ADR-017)
+
+### Contexte
+L'architecture V15/VAD prosodique (ADR-017) s'est révélée fondamentalement instable sur Android. Après 3+ tentatives de correction (VAD amélioré, dedup, retry micro), les symptômes persistants étaient :
+- Détection aléatoire de fin de phrase (silence mal mesuré car STT Android rafraîchit les partiels toutes les ~100ms)
+- TTS décousu (phrases dans le désordre, coupées, milieu manquant) — race conditions entre les `Completers` globaux de flutter_tts
+- Monologue (STT capte l'écho du TTS et envoie la réponse vocale de l'IA à l'IA)
+- Micro mort après le premier tour (redémarrage STT échoue silencieusement)
+- Architecture trop complexe : 4 couches concurrentes (VAD custom, streaming TTS par phrases, full-duplex, barge-in audio) sur un plugin `speech_to_text` conçu pour la dictée ponctuelle
+
+### Décision
+**Architecture tour-par-tour half-duplex simplifiée** :
+
+1. **Pas de VAD custom** : suppression de `ProsodyVadAnalyzer`, timer 50ms, `_speechFinalEmitted`. Utilisation de `result.finalResult` natif du STT uniquement.
+2. **Pas de streaming TTS par phrases** : suppression de `_speakStreamingSentences()`, `_speakRemaining()`, `_findSentenceEnd()`. La réponse complète est parlée d'un bloc via `speakNaturally()`.
+3. **Half-duplex explicite** : le micro est coupé AVANT le TTS (`stopListening()`), puis rouvert APRÈS le TTS (`startListening()`). Plus d'écho capturé, plus de monologue.
+4. **Barge-in par speech final** : pendant le TTS, un nouveau `SpeechFinalEvent` (transcript > 3 mots pour éviter l'écho) déclenche `stopSpeaking()` + nouveau message LLM.
+5. **Gestion explicite du cycle** : `VoiceConversationNotifier` contrôle entièrement les transitions listening → thinking → speaking → listening. Le `VoiceServiceNotifier` ne redémarre pas automatiquement le micro.
+
+### États simplifiés
+```
+idle → listening → thinking → speaking → listening → ...
+                    ↑__________________________________|
+```
+
+### Fichiers supprimés
+- `prosody_vad_analyzer.dart` (169 lignes)
+
+### Fichiers modifiés
+- `voice_service.dart` : STT continu simplifié, pas de VAD, `setConversationMode()` gère le redémarrage, `onStatus` n'agit pas en mode conversation
+- `voice_conversation_service.dart` : machine à états tour-par-tour, `_speakFullResponse()` parle le bloc complet, barge-in via speech final
+- `tts_natural_service.dart` : suppression `speakStreaming()`, `setHesitationEnabled()`
+- `chat_screen.dart`, `aurora_splash.dart` : suppression état `processingStt`
+
+### Ce qu'on perd
+- Streaming temps réel du TTS (on attend la fin du stream LLM)
+- Full-duplex (micro coupé pendant le TTS)
+- Hésitations TTS naturelles (désactivées, pas supprimées du code)
+
+### Ce qu'on gagne
+- Conversation vocale fiable à N tours sans blocage
+- TTS fluide et complet (pas décousu)
+- Pas de monologue (pas d'écho capturé)
+- Code beaucoup plus simple (-466 lignes net)
+
+### Alternatives Considérées
+- Continuer à patcher l'architecture V15 (3+ patchs échoués — loi du debugging : après 3 échecs, questionner l'architecture)
+- Utiliser un plugin STT différent (`speech_to_text` est le seul mature sur Flutter)
+- Implémenter le VAD côté natif Kotlin (complexe, pas de partage avec iOS/web)
+- Passer à un modèle de conversation vocale basé sur des pauses fixes (1.5s) sans VAD custom (rejeté : trop lent)
+
+### Conséquences
+- ✅ Mode vocal fiable et testable
+- ✅ Pas de race conditions STT/TTS
+- ✅ Code maintenable (-466 lignes)
+- ⚠️ Latence légèrement supérieure (on attend la fin du stream LLM avant de parler)
+- ⚠️ Pas de barge-in instantané (il faut attendre que le STT détecte `finalResult`)
+- ⚠️ Pas de full-duplex (micro coupé pendant le TTS)
+
+---
+
 *Dernière mise à jour : 2026-05-22*

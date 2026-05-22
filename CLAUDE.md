@@ -193,7 +193,7 @@ flutter build web --dart-define=DEEPSEEK_API_KEY=sk-xxx --dart-define=OPENROUTER
 - Limite : 1 MB (raw bytes), vérification base64 < 1.5 MB
 - MIME types supportés : JPEG, PNG, WebP, GIF, BMP
 
-## Voice Mode Architecture
+## Voice Mode Architecture (V16 — Tour-par-Tour Half-Duplex)
 
 **Qualité TTS système (critique pour le rendu)** :
 - Sur **Android** : paramètres → Accessibilité → Synthèse vocale → Moteur préféré → **Google Speech Services** (ou Samsung Neural si disponible). Éviter les moteurs basiques (pico TTS, eSpeak).
@@ -206,17 +206,19 @@ flutter build web --dart-define=DEEPSEEK_API_KEY=sk-xxx --dart-define=OPENROUTER
 2. **Conversation vocale mains-libres** (toggle "Vocal ON/OFF" dans toolbar) → `VoiceConversationNotifier.startConversation()`
 
 **VoiceServiceNotifier** (`lib/features/chat/presentation/voice_service.dart`):
-- Instance `SpeechToText` fraîche créée à chaque `startListening()` via `_createAndInitStt()`
-- L'ancienne instance est détruite proprement (`stop()` puis `null`)
+- STT continu natif : `listenFor: 30min`, `pauseFor: null` en mode conversation
+- Pas de VAD custom — `finalResult` natif du STT uniquement
+- `SpeechFinalEvent` émis quand `result.finalResult == true`
+- `setConversationMode(true/false)` : active/désactive le redémarrage auto du micro
+- `onStatus: (status)` ne redémarre pas le micro en mode conversation (géré explicitement par `VoiceConversationNotifier`)
 - Permission micro : cache `_microphonePermissionGranted`, reset dans `forceReset()`
-- **STT continu sans bips** : `listenFor: 30min` en mode conversation, `pauseFor: 5s`
-- **VAD adaptative** : 400ms silence si ponctuation finale détectée, 900ms sinon (au lieu de 1.5s fixe)
-- `listen_mode: ListenMode.dictation` pour écoute continue
 
 **VoiceConversationNotifier** (`lib/features/chat/presentation/voice_conversation_service.dart`):
-- Boucle : `listening → thinking → speaking → idle → listening`
-- **Full-duplex** : le micro reste ouvert pendant le TTS (pas de stop/start)
-- **Barge-in audio temps réel** : `micLevel > 0.12` détecté pendant le TTS → interruption immédiate
+- Machine à états tour-par-tour : `listening → thinking → speaking → listening`
+- **Half-duplex** : micro coupé AVANT le TTS (`stopListening()`), rouvert APRÈS (`startListening()`)
+- **TTS bloc** : la réponse complète est parlée d'un bloc via `speakNaturally()` (pas de streaming par phrases)
+- **Barge-in par speech final** : `SpeechFinalEvent` détecté pendant `speaking` avec > 3 mots → `stopSpeaking()` + nouveau message LLM
+- Pas de redémarrage complexe du micro entre les tours — cycle explicitement géré
 - `_speakResponseAndLoop()` : stop micro → TTS → pause anti-echo 500ms → **state = idle** (CRITIQUE : débloque la boucle)
 - Max 3 échecs STT consécutifs → état `error` (pas de boucle infinie)
 - `_listenWithVad()` : retourne `null` si STT indisponible, `""` si silence
