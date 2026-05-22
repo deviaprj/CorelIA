@@ -21,5 +21,5 @@ Future<void> disposePlayer(Object player) async {
 
 Future<void> waitForPlayerCompletion(Object player) async {
   await (player as AudioPlayer).processingStateStream
-      .firstWhere((state) => state == ProcessingState.completed);
+      .firstWhere((state) => state == ProcessingState.completed || state == ProcessingState.idle);
 }

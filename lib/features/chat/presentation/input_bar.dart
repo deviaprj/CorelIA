@@ -159,9 +159,10 @@ class InputBarState extends ConsumerState<InputBar> {
   @override
   Widget build(BuildContext context) {
     ref.listen(voiceServiceProvider, (_, next) {
-      // Ne remettre le transcript que s'il est vraiment different du texte actuel
-      // et non vide. Evite d'ecraser le controller apres _controller.clear().
-      if (next.transcript.isNotEmpty && next.transcript != _controller.text) {
+      if (next.transcript.isEmpty) {
+        // En mode conversation vocal, le transcript est vide apres envoi au LLM
+        if (_controller.text.isNotEmpty) _controller.clear();
+      } else if (next.transcript != _controller.text) {
         _controller.text = next.transcript;
         _controller.selection = TextSelection.fromPosition(
           TextPosition(offset: _controller.text.length),

@@ -9,23 +9,17 @@ import '../data/openrouter_tts_service.dart';
 import '../data/tts_cache_service.dart';
 import 'audio_player_factory.dart';
 import 'emotion_parser.dart';
-import 'edge_tts_service.dart';
 import 'tts_emotion.dart';
-import 'vocal_hesitation_injector.dart';
 
-/// Moteur TTS sélectionné.
+/// Moteur TTS selectionne.
 enum TtsEngine {
   openRouter,
   edgeTts,
   flutterTts,
 }
 
-/// Service TTS — OpenRouter TTS (voix réalistes) en priorité,
-/// flutter_tts (native platform) en dernier recours.
-///
-/// Architecture :
-/// - Mobile : OpenRouter TTS (gpt-4o-mini-tts → kokoro-82m) → flutter_tts
-/// - Web/Extension : flutter_tts (via Web SpeechSynthesis) uniquement
+/// Service TTS simplifie — parle le texte complet d'un bloc.
+/// Pas de streaming par phrases.
 class TtsNaturalService {
   // ── Audio player (mobile uniquement) ───────────────────────────────────────
   Object? _audioPlayer;
@@ -37,7 +31,7 @@ class TtsNaturalService {
   // ── Cache TTS ────────────────────────────────────────────────────────────
   final TtsCacheService _cache = TtsCacheService();
 
-  // ── État commun ─────────────────────────────────────────────────────────
+  // ── Etat commun ─────────────────────────────────────────────────────────
   static const double _openRouterTtsSpeed = 1.0;
   bool _isSpeaking = false;
   TtsEngine _activeEngine = TtsEngine.flutterTts;
@@ -45,13 +39,12 @@ class TtsNaturalService {
   double _speechRate = 0.45;
   double _pitch = 1.10;
   String _language = 'fr-FR';
-  bool _hesitationEnabled = false;
 
   bool get isSpeaking => _isSpeaking;
   TtsEngine get activeEngine => _activeEngine;
   TtsEmotion get currentEmotion => _currentEmotion;
 
-  /// True si une voix premium (neural/premium/enhanced) a été détectée.
+  /// True si une voix premium (neural/premium/enhanced) a ete detectee.
   bool get hasPremiumVoice => _hasPremiumVoice;
   bool _hasPremiumVoice = false;
 
@@ -63,7 +56,7 @@ class TtsNaturalService {
       _audioPlayer ??= AudioPlayerFactory.create();
     }
 
-    // Préchauffer le moteur TTS pour réduire la latence de la première phrase
+    // Prechauffer le moteur TTS pour reduire la latence de la premiere phrase
     if (_flutterTtsReady) {
       try {
         await _flutterTts.speak('');
@@ -84,7 +77,7 @@ class TtsNaturalService {
     }
   }
 
-  /// Sélectionne dynamiquement la meilleure voix fr-FR disponible.
+  /// Selectionne dynamiquement la meilleure voix fr-FR disponible.
   Future<void> _selectBestVoice() async {
     try {
       final voices = await _flutterTts.getVoices;
@@ -101,7 +94,6 @@ class TtsNaturalService {
       final premiumPatterns = ['neural', 'premium', 'enhanced', 'siri'];
       final fallbackPatterns = ['local', 'c1', 'c2', 'c3', 'network'];
       String? bestName;
-      // Chercher d'abord une voix premium
       for (final pattern in premiumPatterns) {
         for (final v in frVoices) {
           final map = v as Map<dynamic, dynamic>? ?? {};
@@ -114,7 +106,6 @@ class TtsNaturalService {
         }
         if (bestName != null) break;
       }
-      // Fallback sur les voix standard
       if (bestName == null) {
         for (final pattern in fallbackPatterns) {
           for (final v in frVoices) {
@@ -132,12 +123,6 @@ class TtsNaturalService {
 
       if (bestName != null) {
         await _flutterTts.setVoice({'name': bestName, 'locale': 'fr-FR'});
-        if (_hasPremiumVoice) {
-          debugPrint('[TtsNaturalService] Premium voice selected: $bestName');
-        } else {
-          debugPrint('[TtsNaturalService] ⚠️ Basic voice selected: $bestName — '
-              'For human-like TTS, switch to Google Speech Services or Samsung Neural in system settings.');
-        }
       }
     } catch (e) {
       debugPrint('[TtsNaturalService] Voice selection failed: $e');
@@ -164,76 +149,135 @@ class TtsNaturalService {
     _currentEmotion = emotion;
   }
 
-  void setHesitationEnabled(bool enabled) {
-    _hesitationEnabled = enabled;
-  }
-
-  /// Parle le texte en streaming TTS (Edge TTS primaire sur mobile).
-  /// Demarre la lecture des que ~4KB de MP3 sont disponibles.
-  Future<void> speakStreaming(String text, {TtsEmotion emotion = TtsEmotion.neutral}) async {
+  /// Parle le texte complet d'un bloc (pas de streaming par phrases).
+  Future<void> speakNaturally(String text) async {
     if (_isSpeaking) await stop();
 
     final parseResult = EmotionParser.parse(text);
-    final effectiveEmotion = parseResult.hasEmotionTag ? parseResult.emotion : emotion;
+    final emotion = parseResult.hasEmotionTag ? parseResult.emotion : _currentEmotion;
     var cleanText = parseResult.hasEmotionTag ? parseResult.cleanText : cleanMarkdown(text);
-
-    if (_hesitationEnabled) {
-      cleanText = VocalHesitationInjector.inject(cleanText, intensity: 0.25);
-    }
 
     if (cleanText.trim().isEmpty) return;
 
     _isSpeaking = true;
-    _currentEmotion = effectiveEmotion;
+    _currentEmotion = emotion;
 
-    // Edge TTS streaming (mobile uniquement, pas web)
-    if (PlatformService.isMobile) {
-      try {
-        _activeEngine = TtsEngine.edgeTts;
-        await _speakWithEdgeTtsStreaming(cleanText, effectiveEmotion);
-        return;
-      } catch (e) {
-        debugPrint('[TtsNaturalService] Edge TTS streaming failed: $e');
-      }
-    }
-
-    // Fallback OpenRouter TTS (full-buffer)
+    // OpenRouter TTS (mobile, si cle API disponible)
     if (PlatformService.isMobile && OpenRouterTtsService.isAvailable) {
       try {
         _activeEngine = TtsEngine.openRouter;
-        await _speakWithOpenRouterTts(cleanText, effectiveEmotion);
+        await _speakWithOpenRouterTts(cleanText, emotion);
         return;
       } catch (e) {
-        debugPrint('[TtsNaturalService] OpenRouter TTS failed: $e');
+        debugPrint('[TtsNaturalService] OpenRouter TTS failed, falling back: $e');
       }
     }
 
-    // Fallback universel flutter_tts
+    // flutter_tts (fallback universel)
     _activeEngine = TtsEngine.flutterTts;
     await _speakWithFlutterTts(cleanText);
   }
 
-  Future<void> _speakWithEdgeTtsStreaming(String text, TtsEmotion emotion) async {
-    final edgeService = EdgeTtsService();
-    edgeService.setEmotion(emotion);
+  Future<void> _speakWithOpenRouterTts(String text, TtsEmotion emotion) async {
+    if (_audioPlayer == null) {
+      _audioPlayer = AudioPlayerFactory.create();
+    }
 
-    final player = AudioPlayerFactory.create();
-    if (player == null) throw UnsupportedError('Audio player unavailable');
+    final voice = emotionVoiceMap[emotion.name] ?? TtsVoice.nova;
+
+    final cachedPath = await _cache.get(
+      text,
+      voice: voice.name,
+      rate: _openRouterTtsSpeed,
+      pitch: 1.0,
+      format: 'openrouter',
+    );
+
+    String? audioPath;
+
+    if (cachedPath != null) {
+      audioPath = cachedPath;
+    } else {
+      final bytes = await OpenRouterTtsService.synthesize(
+        text,
+        voice: voice,
+        speed: _openRouterTtsSpeed,
+      );
+      if (bytes == null) {
+        throw StateError('OpenRouter TTS returned no audio');
+      }
+
+      final cached = await _cache.putBytes(
+        text,
+        bytes,
+        voice: voice.name,
+        rate: _openRouterTtsSpeed,
+        pitch: 1.0,
+        format: 'openrouter',
+      );
+      audioPath = cached;
+    }
+
+    if (audioPath == null) {
+      throw StateError('OpenRouter TTS: no audio path');
+    }
 
     try {
-      await for (final path in edgeService.synthesizeStream(text)) {
-        if (path != null) {
-          await AudioPlayerFactory.setFilePath(player, path);
-          await AudioPlayerFactory.play(player);
-          // On attend la fin de la lecture — le fichier continue d'etre ecrit
-          // par le WebSocket en parallele. ExoPlayer/AVPlayer lisent un MP3
-          // partiel tant que le header est valide.
-          await AudioPlayerFactory.waitForCompletion(player);
+      await AudioPlayerFactory.setFilePath(_audioPlayer!, audioPath);
+      await AudioPlayerFactory.play(_audioPlayer!);
+      await AudioPlayerFactory.waitForCompletion(_audioPlayer!);
+    } finally {
+      await AudioPlayerFactory.stop(_audioPlayer!);
+    }
+  }
+
+  Future<void> _speakWithFlutterTts(String text) async {
+    if (!_flutterTtsReady) {
+      await _initFlutterTts();
+    }
+
+    final config = emotionTtsConfigs[_currentEmotion] ?? emotionTtsConfigs[TtsEmotion.neutral]!;
+    final adaptiveRate = text.length < 150
+        ? config.rate * 1.05
+        : config.rate * 0.95;
+    try {
+      await _flutterTts.setSpeechRate(adaptiveRate.clamp(0.35, 1.00));
+      await _flutterTts.setPitch(config.pitch * _pitch / 1.10);
+    } catch (e) {
+      debugPrint('[TtsNaturalService] flutter_tts emotion params failed: $e');
+    }
+
+    try {
+      final chunks = _splitForNaturalSpeech(text);
+      for (var i = 0; i < chunks.length; i++) {
+        if (!_isSpeaking) break;
+        final completer = Completer<void>();
+        _flutterTts.setCompletionHandler(() {
+          if (!completer.isCompleted) completer.complete();
+        });
+        _flutterTts.setErrorHandler((_) {
+          if (!completer.isCompleted) completer.complete();
+        });
+
+        await _flutterTts.speak(chunks[i]);
+        await completer.future.timeout(
+          const Duration(seconds: 25),
+          onTimeout: () {},
+        );
+
+        if (i < chunks.length - 1) {
+          await Future<void>.delayed(const Duration(milliseconds: 140));
         }
       }
+    } catch (e) {
+      debugPrint('[TtsNaturalService] flutter_tts error: $e');
     } finally {
-      await AudioPlayerFactory.stop(player);
-      await AudioPlayerFactory.dispose(player);
+      _flutterTts.setCompletionHandler(() {});
+      _flutterTts.setErrorHandler((_) {});
+      try {
+        await _flutterTts.setSpeechRate(_speechRate);
+        await _flutterTts.setPitch(_pitch);
+      } catch (_) {}
     }
   }
 
@@ -347,146 +391,6 @@ class TtsNaturalService {
     );
     result = result.replaceFirst(plainPattern, '');
     return result;
-  }
-
-  // ── Synthèse vocale ─────────────────────────────────────────────────────
-
-  Future<void> speakNaturally(String text) async {
-    if (_isSpeaking) await stop();
-
-    final parseResult = EmotionParser.parse(text);
-    final emotion = parseResult.hasEmotionTag ? parseResult.emotion : _currentEmotion;
-    var cleanText = parseResult.hasEmotionTag ? parseResult.cleanText : cleanMarkdown(text);
-
-    if (_hesitationEnabled) {
-      cleanText = VocalHesitationInjector.inject(cleanText, intensity: 0.25);
-    }
-
-    if (cleanText.trim().isEmpty) return;
-
-    _isSpeaking = true;
-    _currentEmotion = emotion;
-
-    // OpenRouter TTS (mobile, si clé API disponible)
-    if (PlatformService.isMobile && OpenRouterTtsService.isAvailable) {
-      try {
-        _activeEngine = TtsEngine.openRouter;
-        await _speakWithOpenRouterTts(cleanText, emotion);
-        return;
-      } catch (e) {
-        debugPrint('[TtsNaturalService] OpenRouter TTS failed, falling back: $e');
-      }
-    }
-
-    // flutter_tts (fallback universel)
-    _activeEngine = TtsEngine.flutterTts;
-    await _speakWithFlutterTts(cleanText);
-  }
-
-  Future<void> _speakWithOpenRouterTts(String text, TtsEmotion emotion) async {
-    if (_audioPlayer == null) {
-      _audioPlayer = AudioPlayerFactory.create();
-    }
-
-    final voice = emotionVoiceMap[emotion.name] ?? TtsVoice.nova;
-
-    // Vérifier le cache d'abord
-    final cachedPath = await _cache.get(
-      text,
-      voice: voice.name,
-      rate: _openRouterTtsSpeed,
-      pitch: 1.0,
-      format: 'openrouter',
-    );
-
-    String? audioPath;
-
-    if (cachedPath != null) {
-      audioPath = cachedPath;
-    } else {
-      final bytes = await OpenRouterTtsService.synthesize(
-        text,
-        voice: voice,
-        speed: _openRouterTtsSpeed,
-      );
-      if (bytes == null) {
-        throw StateError('OpenRouter TTS returned no audio');
-      }
-
-      final cached = await _cache.putBytes(
-        text,
-        bytes,
-        voice: voice.name,
-        rate: _openRouterTtsSpeed,
-        pitch: 1.0,
-        format: 'openrouter',
-      );
-      audioPath = cached;
-    }
-
-    if (audioPath == null) {
-      throw StateError('OpenRouter TTS: no audio path');
-    }
-
-    try {
-      await AudioPlayerFactory.setFilePath(_audioPlayer!, audioPath);
-      await AudioPlayerFactory.play(_audioPlayer!);
-      await AudioPlayerFactory.waitForCompletion(_audioPlayer!);
-    } finally {
-      await AudioPlayerFactory.stop(_audioPlayer!);
-    }
-  }
-
-  Future<void> _speakWithFlutterTts(String text) async {
-    if (!_flutterTtsReady) {
-      await _initFlutterTts();
-    }
-
-    final config = emotionTtsConfigs[_currentEmotion] ?? emotionTtsConfigs[TtsEmotion.neutral]!;
-    // Pas de ratio magique — les valeurs emotionTtsConfigs sont deja calibrees
-    // pour Google TTS. Leger ajustement : courts = +5%, longs = -5% pour la clarte.
-    final adaptiveRate = text.length < 150
-        ? config.rate * 1.05
-        : config.rate * 0.95;
-    try {
-      await _flutterTts.setSpeechRate(adaptiveRate.clamp(0.35, 1.00));
-      await _flutterTts.setPitch(config.pitch * _pitch / 1.10);
-    } catch (e) {
-      debugPrint('[TtsNaturalService] flutter_tts emotion params failed: $e');
-    }
-
-    try {
-      final chunks = _splitForNaturalSpeech(text);
-      for (var i = 0; i < chunks.length; i++) {
-        if (!_isSpeaking) break;
-        final completer = Completer<void>();
-        _flutterTts.setCompletionHandler(() {
-          if (!completer.isCompleted) completer.complete();
-        });
-        _flutterTts.setErrorHandler((_) {
-          if (!completer.isCompleted) completer.complete();
-        });
-
-        await _flutterTts.speak(chunks[i]);
-        await completer.future.timeout(
-          const Duration(seconds: 25),
-          onTimeout: () {},
-        );
-
-        if (i < chunks.length - 1) {
-          await Future<void>.delayed(const Duration(milliseconds: 140));
-        }
-      }
-    } catch (e) {
-      debugPrint('[TtsNaturalService] flutter_tts error: $e');
-    } finally {
-      _flutterTts.setCompletionHandler(() {});
-      _flutterTts.setErrorHandler((_) {});
-      try {
-        await _flutterTts.setSpeechRate(_speechRate);
-        await _flutterTts.setPitch(_pitch);
-      } catch (_) {}
-    }
   }
 
   List<String> _splitForNaturalSpeech(String text) {

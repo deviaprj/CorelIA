@@ -681,10 +681,6 @@ class _VoiceConversationBanner extends StatelessWidget {
         label = 'Écoute en cours...';
         icon = Icons.mic;
         break;
-      case VoiceConversationState.processingStt:
-        label = 'Transcription...';
-        icon = Icons.transcribe;
-        break;
       case VoiceConversationState.thinking:
         label = 'Réflexion...';
         icon = Icons.psychology;

@@ -6,11 +6,9 @@ import 'barge_in_intent_classifier.dart';
 import 'tts_emotion.dart';
 import 'emotion_parser.dart';
 import 'voice_service.dart';
-import '../data/whisper_stt_service.dart';
 
 /// Etat du mode conversation vocale mains-libres.
 enum VoiceConversationState {
-  processingStt,
   idle,
   listening,
   thinking,
@@ -49,63 +47,42 @@ class VoiceConversationStatus {
       );
 }
 
-/// Service de conversation vocale mains-libres — vrai chat vocal continu.
+/// Service de conversation vocale tour-par-tour.
 ///
-/// Flux :
-/// 1. LISTENING — ecoute continue sans bips, VAD logiciel (1.5s silence = fin)
-/// 2. THINKING — envoi automatique au ChatNotifier des que speech final
-/// 3. SPEAKING — TTS streaming par phrases des les premiers tokens recus
-/// 4. Apres reponse, retour automatique a LISTENING (conversation infinie)
-/// 5. BARGE-IN — si l'utilisateur parle pendant le TTS, interruption immediate
+/// Flux simplifie :
+/// 1. LISTENING — STT continu (micro toujours ouvert)
+/// 2. THINKING — envoi au LLM quand speech final natif
+/// 3. SPEAKING — TTS du message complet (pas de streaming par phrases)
+/// 4. Retour automatique a LISTENING (micro jamais coupe)
+/// 5. BARGE-IN — si l'utilisateur parle pendant le TTS (speech final detecte),
+///    interruption immediate + nouveau message LLM.
 class VoiceConversationNotifier
     extends FamilyNotifier<VoiceConversationStatus, String> {
   late final VoiceServiceNotifier _voice;
   bool _isActive = false;
 
-  // ── Streaming TTS ──────────────────────────────────────────────────────────
-  final StringBuffer _ttsBuffer = StringBuffer();
-  int _lastSpokenSentenceEnd = 0;
-
-  // ── Barge-in ───────────────────────────────────────────────────────────────
   bool _bargeInEnabled = true;
   String _lastBargeInTranscript = '';
-  DateTime? _bargeInAudioStart;
 
-  // ── Whisper fallback ──────────────────────────────────────────────────────
-  final WhisperSttService _whisperFallback = WhisperSttService();
-
-  // ── Subscriptions ──────────────────────────────────────────────────────────
   StreamSubscription<SpeechFinalEvent>? _speechFinalSub;
-  StreamSubscription<void>? _ttsDoneSub;
 
-  static const _ttsSentenceMinLength = 20;
-  static const _ttsFirstSentenceMinLength = 12;
-  static const _bargeInMinWords = 2;
-  String _lastSpokenText = '';
+  String? _lastProcessedTranscript;
+  DateTime? _lastProcessedTime;
 
   @override
   VoiceConversationStatus build(String conversationId) {
     _voice = ref.read(voiceServiceProvider.notifier);
 
-    // Ecouter le ChatNotifier pour streaming TTS (plus rapide que Firestore)
     ref.listen(chatNotifierProvider(conversationId), (prev, next) {
       if (!_isActive) return;
       _handleChatState(next);
     });
 
-    // Ecouter le VoiceService pour barge-in audio temps réel
-    ref.listen(voiceServiceProvider, (prev, next) {
-      if (!_isActive) return;
-      _handleVoiceState(next);
-    });
-
     ref.onDispose(() {
       _isActive = false;
       _speechFinalSub?.cancel();
-      _ttsDoneSub?.cancel();
       _voice.stopListening();
       _voice.stopSpeaking();
-      _whisperFallback.dispose();
     });
 
     return VoiceConversationStatus(bargeInEnabled: _bargeInEnabled);
@@ -116,46 +93,19 @@ class VoiceConversationNotifier
     state = state.copyWith(bargeInEnabled: enabled);
   }
 
-  /// Barge-in audio temps reel : detecte le son du micro pendant le TTS.
-  /// Exige un niveau mic > 0.12 pendant > 200ms pour eviter les pics parasites.
-  void _handleVoiceState(VoiceState voiceState) {
-    if (!_isActive) return;
-    if (state.state == VoiceConversationState.speaking && _bargeInEnabled) {
-      final micHigh = voiceState.micLevel > 0.12 && voiceState.isListening;
-      if (micHigh) {
-        _bargeInAudioStart ??= DateTime.now();
-        final sustained = DateTime.now().difference(_bargeInAudioStart!);
-        if (sustained >= const Duration(milliseconds: 200)) {
-          debugPrint('[VoiceConversation] Barge-in audio sustained (micLevel=${voiceState.micLevel}, ${sustained.inMilliseconds}ms)');
-          _bargeInAudioStart = null;
-          _voice.stopSpeaking();
-          _ttsBuffer.clear();
-          _lastSpokenSentenceEnd = 0;
-          state = state.copyWith(state: VoiceConversationState.listening);
-        }
-      } else {
-        _bargeInAudioStart = null;
-      }
-    }
-  }
-
   /// Demarre la conversation vocale en boucle infinie.
   Future<void> startConversation() async {
     if (_isActive) return;
     _isActive = true;
-    _voice.setContinuousMode(true);
+    _voice.setConversationMode(true);
     _voice.clearTranscript();
-    _ttsBuffer.clear();
-    _lastSpokenSentenceEnd = 0;
 
-    // Ecouter les evenements speech final du VoiceService
     _speechFinalSub?.cancel();
     _speechFinalSub = _voice.onSpeechFinal.listen((event) {
       if (!_isActive) return;
       _onSpeechFinal(event.transcript);
     });
 
-    // Premier tour d'ecoute
     state = state.copyWith(state: VoiceConversationState.listening);
     await _voice.startListening();
   }
@@ -163,20 +113,24 @@ class VoiceConversationNotifier
   void _onSpeechFinal(String transcript) {
     if (transcript.isEmpty) return;
 
-    // Barge-in detection : si on parle pendant que le bot parle
-    if (state.state == VoiceConversationState.speaking) {
-      if (!_bargeInEnabled) return;
-      final intent = BargeInIntentClassifier.classify(transcript);
-      if (intent == BargeInIntent.none) {
-        final words = transcript.trim().split(RegExp(r'\s+')).where((w) => w.isNotEmpty).length;
-        if (words < _bargeInMinWords) return;
-      }
-      _handleBargeIn(transcript, intent: intent);
+    // Dedup : ignorer les doublons dans les 2 secondes
+    if (transcript == _lastProcessedTranscript) {
+      final elapsed = DateTime.now().difference(_lastProcessedTime!);
+      if (elapsed < const Duration(seconds: 2)) return;
+    }
+    _lastProcessedTranscript = transcript;
+    _lastProcessedTime = DateTime.now();
+
+    // Barge-in pendant le TTS
+    if (state.state == VoiceConversationState.speaking && _bargeInEnabled) {
+      _handleBargeInDuringSpeaking(transcript);
       return;
     }
 
-    // Normal flow : envoyer au LLM
-    _sendToLLM(transcript);
+    // Normal flow : envoyer au LLM (seulement en ecoute)
+    if (state.state == VoiceConversationState.listening) {
+      _sendToLLM(transcript);
+    }
   }
 
   void _sendToLLM(String transcript) {
@@ -188,12 +142,6 @@ class VoiceConversationNotifier
       bargeInEnabled: _bargeInEnabled,
     );
 
-    // Nettoyer le buffer TTS pour la nouvelle reponse
-    _ttsBuffer.clear();
-    _lastSpokenSentenceEnd = 0;
-
-    // Vider le transcript vocal immediatement pour eviter qu'il reapparaisse
-    // dans l'InputBar lors du prochain rebuild.
     _voice.clearTranscript();
 
     final chatNotifier = ref.read(chatNotifierProvider(arg).notifier);
@@ -202,6 +150,8 @@ class VoiceConversationNotifier
 
   /// Appelle quand le ChatNotifier recoit des tokens du LLM.
   void _handleChatState(ChatState chatState) {
+    if (state.state != VoiceConversationState.thinking) return;
+
     final messages = chatState.messages;
     if (messages.isEmpty) return;
 
@@ -211,155 +161,90 @@ class VoiceConversationNotifier
     final content = lastMsg.content;
     if (content.isEmpty) return;
 
-    // Streaming en cours : parler les phrases completes au fur et a mesure
-    if (lastMsg.isStreaming) {
-      _speakStreamingSentences(content);
-    } else if (state.state == VoiceConversationState.thinking) {
-      // Stream vient de finir, dire le reste si non dit
-      _speakRemaining(content);
+    // Attendre la fin du stream pour parler le message COMPLET d'un bloc.
+    if (!lastMsg.isStreaming) {
+      _speakFullResponse(content);
     }
   }
 
-  /// Parle les phrases completes des qu'elles sont disponibles dans le stream.
-  /// Si aucune fin de phrase n'est trouvee apres 120 chars, parle le fragment.
-  void _speakStreamingSentences(String fullText) {
-    if (fullText.length <= _lastSpokenSentenceEnd) return;
-    final newText = fullText.substring(_lastSpokenSentenceEnd);
+  /// Parle la reponse complete d'un bloc (pas de streaming par phrases).
+  Future<void> _speakFullResponse(String text) async {
+    if (!_isActive) return;
 
-    // Chercher une phrase complete (finie par . ! ? ;)
-    final sentenceEnd = _findSentenceEnd(newText);
-    if (sentenceEnd == -1) {
-      // Pas de fin de phrase : parler le fragment si trop long
-      if (newText.length > 120) {
-        final fragment = newText.substring(0, 120).trim();
-        _lastSpokenSentenceEnd += 120;
-        _speakSentence(fragment);
-      }
-      return;
-    }
+    // Couper le micro avant de parler — evite l'echo (monologue)
+    await _voice.stopListening();
 
-    final sentence = newText.substring(0, sentenceEnd + 1).trim();
-    final minLen = _lastSpokenSentenceEnd == 0
-        ? _ttsFirstSentenceMinLength
-        : _ttsSentenceMinLength;
-    if (sentence.length >= minLen) {
-      _lastSpokenSentenceEnd = _lastSpokenSentenceEnd + sentenceEnd + 1;
-      _speakSentence(sentence);
-    }
-  }
-
-  /// Parle le texte restant quand le stream se termine.
-  void _speakRemaining(String fullText) {
-    if (fullText.length <= _lastSpokenSentenceEnd) {
-      _restartListeningAfterTts();
-      return;
-    }
-    final remaining = fullText.substring(_lastSpokenSentenceEnd).trim();
-    if (remaining.isNotEmpty) {
-      _speakSentence(remaining);
-    } else {
-      _restartListeningAfterTts();
-    }
-  }
-
-  void _speakSentence(String sentence) {
-    if (sentence.isEmpty || !_isActive) return;
-
-    _lastSpokenText = sentence;
     state = state.copyWith(state: VoiceConversationState.speaking);
 
-    final parseResult = EmotionParser.parse(sentence);
+    final parseResult = EmotionParser.parse(text);
     final emotion = parseResult.hasEmotionTag
         ? parseResult.emotion
-        : EmotionParser.inferFromText(sentence);
+        : EmotionParser.inferFromText(text);
 
-    _voice.speakStreamingWithEmotion(sentence, emotion).then((_) {
-      // Si on est toujours en speaking, le TTS a termine normalement -> redemarrer ecoute
-      // Si barge-in a change l'etat en thinking, ne rien faire (le barge-in gere le flux)
-      if (_isActive && state.state == VoiceConversationState.speaking) {
-        _restartListeningAfterTts();
+    try {
+      await _voice.speakWithEmotion(text, emotion);
+    } catch (e) {
+      debugPrint('[VoiceConversation] TTS error: $e');
+    }
+
+    // Apres le TTS, rouvrir le micro pour le prochain tour.
+    if (_isActive) {
+      await Future<void>.delayed(const Duration(milliseconds: 400));
+      if (_isActive) {
+        state = state.copyWith(state: VoiceConversationState.listening, transcript: '');
+        _voice.clearTranscript();
+        await _voice.startListening();
       }
-    }).catchError((e) {
-      debugPrint('[VoiceConversation] TTS error: \$e');
-    });
+    }
   }
 
-  /// Barge-in : interruption vocale pendant que le bot parle.
-  void _handleBargeIn(String transcript, {BargeInIntent intent = BargeInIntent.stop}) {
+  /// Barge-in pendant le TTS : l'utilisateur parle par-dessus la reponse.
+  void _handleBargeInDuringSpeaking(String transcript) {
+    // Ignorer les courts transcripts (probable echo/bruit)
+    final words = transcript.trim().split(RegExp(r'\s+')).where((w) => w.isNotEmpty).length;
+    if (words < 3) {
+      debugPrint('[VoiceConversation] Barge-in ignored (too short: $words words)');
+      return;
+    }
+
     if (transcript == _lastBargeInTranscript) return;
     _lastBargeInTranscript = transcript;
 
-    debugPrint('[VoiceConversation] Barge-in ($intent): \$transcript');
+    final intent = BargeInIntentClassifier.classify(transcript);
+    debugPrint('[VoiceConversation] Barge-in ($intent): $transcript');
+
     _voice.stopSpeaking();
-    _ttsBuffer.clear();
-    _lastSpokenSentenceEnd = 0;
 
     switch (intent) {
       case BargeInIntent.repeat:
-        // Relire la derniere reponse sans appeler le LLM
-        if (_lastSpokenText.isNotEmpty) {
-          state = state.copyWith(state: VoiceConversationState.speaking);
-          _speakSentence(_lastSpokenText);
+        // Relire la derniere reponse complete
+        final messages = ref.read(chatNotifierProvider(arg)).messages;
+        if (messages.isNotEmpty) {
+          final lastAssistant = messages.lastWhere(
+            (m) => m.isAssistant,
+            orElse: () => messages.first,
+          );
+          if (lastAssistant.content.isNotEmpty) {
+            _speakFullResponse(lastAssistant.content);
+          }
         }
         return;
       case BargeInIntent.topicChange:
-        // Prefixer pour signaler le changement de sujet
         final prefixed = 'Changement de sujet : $transcript';
-        state = VoiceConversationStatus(
-          state: VoiceConversationState.thinking,
-          transcript: prefixed,
-          bargeInEnabled: _bargeInEnabled,
-        );
-        final chatNotifier = ref.read(chatNotifierProvider(arg).notifier);
-        chatNotifier.sendMessage(prefixed, isVoiceConversation: true, modelOverride: 'task:vocal');
+        _sendToLLM(prefixed);
         return;
       case BargeInIntent.stop:
       case BargeInIntent.correction:
       case BargeInIntent.none:
-        // Interruption immediate + nouveau message LLM
-        state = VoiceConversationStatus(
-          state: VoiceConversationState.thinking,
-          transcript: transcript,
-          bargeInEnabled: _bargeInEnabled,
-        );
-        final chatNotifier = ref.read(chatNotifierProvider(arg).notifier);
-        chatNotifier.sendMessage(transcript, isVoiceConversation: true, modelOverride: 'task:vocal');
+        _sendToLLM(transcript);
         return;
-    }
-  }
-
-  /// Trouve la fin de la premiere phrase complete dans [text].
-  /// Retourne l'index du dernier caractere de la phrase, ou -1 si pas trouve.
-  int _findSentenceEnd(String text) {
-    const enders = ['. ', '! ', '? ', '.\n', '!\n', '?\n', '；', '。'];
-    var earliest = -1;
-    for (final ender in enders) {
-      final idx = text.indexOf(ender);
-      if (idx != -1 && (earliest == -1 || idx < earliest)) {
-        earliest = idx;
-      }
-    }
-    return earliest;
-  }
-
-  Future<void> _restartListeningAfterTts() async {
-    if (!_isActive) return;
-    await Future<void>.delayed(const Duration(milliseconds: 400));
-    if (!_isActive) return;
-
-    state = state.copyWith(state: VoiceConversationState.listening);
-    _voice.clearTranscript();
-
-    // Ne redémarrer que si le micro s'est arrêté — évite les bips inutiles
-    if (!_voice.state.isListening) {
-      await _voice.startListening();
     }
   }
 
   Future<void> stop() async {
     _isActive = false;
     _speechFinalSub?.cancel();
-    _voice.setContinuousMode(false);
+    _voice.setConversationMode(false);
     await _voice.stopListening();
     await _voice.stopSpeaking();
     state = VoiceConversationStatus(

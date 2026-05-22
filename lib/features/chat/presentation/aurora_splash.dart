@@ -89,8 +89,6 @@ class _AuroraSplashState extends ConsumerState<AuroraSplash>
         return const Color(0xFF2196F3); // blue
       case VoiceConversationState.speaking:
         return const Color(0xFFFF9800); // orange
-      case VoiceConversationState.processingStt:
-        return const Color(0xFF00BCD4); // cyan
       case VoiceConversationState.error:
         return const Color(0xFFF44336); // red
       case VoiceConversationState.idle:
@@ -106,8 +104,6 @@ class _AuroraSplashState extends ConsumerState<AuroraSplash>
         return Icons.psychology;
       case VoiceConversationState.speaking:
         return Icons.record_voice_over;
-      case VoiceConversationState.processingStt:
-        return Icons.transcribe;
       case VoiceConversationState.error:
         return Icons.error;
       case VoiceConversationState.idle:
@@ -123,8 +119,6 @@ class _AuroraSplashState extends ConsumerState<AuroraSplash>
         return 'Je réfléchis...';
       case VoiceConversationState.speaking:
         return 'Je parle...';
-      case VoiceConversationState.processingStt:
-        return 'Transcription...';
       case VoiceConversationState.error:
         return 'Erreur';
       case VoiceConversationState.idle:
