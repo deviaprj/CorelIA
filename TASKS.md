@@ -60,32 +60,64 @@ LISTENING → THINKING → SPEAKING → LISTENING
 - `openrouter_tts_service.dart` : synthèse TTS via OpenRouter
 - `vocal_hesitation_injector.dart` : injections d'hésitations (inactif mais conservé)
 
-## TODO next-session (2026-05-23) — Priorité CRITIQUE
+## Terminé — Session 2026-05-23 — TTS Fix + Quota Retry + Monetization ✅
 
-### 1. Tester mode vocal sur Xiaomi 12
-- [ ] Détection fin de phrase : parler avec ponctuation → doit être rapide (< 1s)
-- [ ] Pas de double envoi : un seul message au LLM
-- [ ] TTS fluide : réponse complète d'un bloc, pas décousue
+### Problèmes résolus
+1. **TTS lit les sources et markdown** : `cleanMarkdown()` dans `tts_natural_service.dart` strippe maintenant :
+   - Sections Sources/Références/Links (8 patterns, avec/sans `---`, bold/plain)
+   - Blocs de raisonnement `<think>...</think>` et ` ```reasoning...``` `
+   - Tableaux markdown → texte plat (cellules séparées par virgules)
+   - Artefacts résiduels : `*`, `-`, `_`, `|`, `[`, `]`, `#`, `>` en début de ligne ou isolés
+   - Newlines → espaces (discours continu sans pauses artificielles)
+2. **Quota oublié après vidéo** : `_PendingMessage` stocke tous les paramètres de `sendMessage()`. `retryPendingMessage()` re-soumet automatiquement après `QuotaExceededDialog` vidéo réussie. `clearPendingMessage()` sur annulation.
+3. **Notification icon manquante** : `ic_notification.xml` (vecteur cloche 24dp) + `keep.xml` (`tools:keep="@drawable/ic_notification"`) empêche R8/shrinkResources de le supprimer.
+4. **Monetization fixes** : AdMob retry loading (3 essais avec backoff), GoRouter paywall navigation (`context.push`), Stripe fallback web, algo progressif `AdRewardTracker` (tier 0→1→2 = 1→2→3 vidéos, 30s anti-spam, reset minuit).
+5. **Retention services** : `StreakService` (bonus +2 après 3 jours), `UserProfileService` (nom + intérêts), `UsageStatsService` (compteur messages + temps économisé), `DailyQuestionService` (notification locale 9h00).
+6. **Slash commands overhaul** : traductions `scrape`/`docgen` (6 langues), messages assistant persistants via `_persistAssistantMessage()` (Firestore), annonces pré-exécution, erreurs persistantes au lieu de SnackBar éphémères.
+
+### Fichiers modifiés (session)
+- `lib/features/chat/presentation/tts_natural_service.dart` — `cleanMarkdown()` + `_stripSourcesSection()`
+- `lib/features/chat/presentation/chat_notifier.dart` — `_PendingMessage`, `retryPendingMessage()`, `clearPendingMessage()`
+- `lib/features/chat/presentation/chat_screen.dart` — `retryPendingMessage()` dans quota dialog
+- `android/app/src/main/res/drawable/ic_notification.xml` — nouveau
+- `android/app/src/main/res/raw/keep.xml` — nouveau
+- `lib/features/monetization/ads/ad_reward_tracker.dart` — nouveau
+- `lib/features/monetization/ads/ad_service_mobile.dart` — retry loading + rewarded fix
+- `lib/features/monetization/ads/quota_exceeded_dialog.dart` — séquentiel, progress bar, auto-load
+- `lib/features/retention/` — 4 services nouveaux
+
+---
+
+## TODO next-session (2026-05-24) — Priorité CRITIQUE
+
+### 1. Tester mode vocal V16 sur Xiaomi 12
 - [ ] 5 tours complets : aucun blocage, micro redémarre à chaque fois
+- [ ] TTS naturel : pas de sources, asterisques, tirets, tableaux lus à voix haute
+- [ ] Quota retry : demander vol Paris→Marseille en vocal, atteindre quota, regarder vidéo, vérifier que Corely répond au vol automatiquement
 - [ ] Barge-in : parler pendant que Corely parle (> 3 mots) → TTS s'arrête, Corely répond au nouveau message
 - [ ] Pas de monologue : Corely ne doit pas répondre à sa propre voix
 
-### 2. Évaluer les commandes slash
-- [ ] Tester `/scrape`, `/summarize`, `/extract`, `/links`, `/metadata` sur mobile
-- [ ] Vérifier le backend `/search_smart` et `/scrape` sont opérationnels
-- [ ] Évaluer si l'architecture actuelle suffit ou si une revue est nécessaire
+### 2. Tester slash commands mobile avec backend local
+- [ ] `/scrape https://example.com` → annonce + résultat/erreur persistant
+- [ ] `/links https://example.com` → liste liens sans crash
+- [ ] `/summarize https://example.com` → résumé persistant
+- [ ] Backend `192.168.1.38:8000` opérationnel via `adb reverse tcp:8000`
 
-### 3. Évaluer la recherche avancée
+### 3. Déployer le backend cloud
+- [ ] `bash scripts/deploy_backend.sh` sur machine avec internet (Docker pull + push)
+- [ ] Vérifier `api.aironbot.app` répond sur `/health` et `/search_smart`
+
+### 4. Évaluer la recherche avancée
 - [ ] Tester `searchFlights`, `searchHotels`, `searchProducts`, `searchWeather`
 - [ ] Vérifier le parsing des paramètres (`parseFlightParams`, etc.)
 - [ ] Évaluer si l'architecture actuelle suffit ou si une revue est nécessaire
 
-### 4. Évaluer l'analyse de fichiers et images
+### 5. Évaluer l'analyse de fichiers et images
 - [ ] Tester l'extraction de texte de PDF, DOCX, XLSX
 - [ ] Tester la vision (images envoyées au LLM)
 - [ ] Évaluer si l'architecture actuelle suffit ou si une revue est nécessaire
 
-### 5. Décision architecture globale
+### 6. Décision architecture globale
 Après les tests, décider :
 - **Continuer à patcher** les mécanismes existants pour un résultat optimal
 - **Revoir l'architecture** de certains mécanismes (slash, recherche, fichiers) si les patchs ne suffisent pas

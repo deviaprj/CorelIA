@@ -551,6 +551,69 @@ idle → listening → thinking → speaking → listening → ...
 - ⚠️ Pas de barge-in instantané (il faut attendre que le STT détecte `finalResult`)
 - ⚠️ Pas de full-duplex (micro coupé pendant le TTS)
 
+## ADR-019 : Algorithme de Récompense Publicitaire Progressif (AdRewardTracker)
+
+**Date** : 2026-05-23
+**Statut** : Accepté
+
+### Contexte
+Le modèle actuel de vidéos récompensées (1 vidéo = +5 messages) est trop généreux et ne maximise pas le LTV. Les utilisateurs regardent une vidéo et obtiennent 5 messages, mais il n'y a pas d'incitation à revenir ni de progression dans l'engagement.
+
+### Décision
+**Algorithme progressif à 3 tiers** :
+- **Tier 0** (nouveau/jour 1) : 1 vidéo = +5 messages
+- **Tier 1** (après 1 vidéo dans la journée) : 2 vidéos = +5 messages
+- **Tier 2** (après 3 vidéos dans la journée) : 3 vidéos = +5 messages
+- **Anti-spam** : 30s minimum entre deux vidéos
+- **Reset** : minuit local via `DateTime.now().day` comparison
+- **Persistance** : `SharedPreferences` pour `ad_tier`, `ad_last_watched_timestamp`, `ad_videos_watched_today`
+
+### Conséquences
+- ✅ LTV augmenté : les utilisateurs engagés regardent plus de pubs
+- ✅ Pas de frustration initiale : 1 vidéo au début reste facile
+- ✅ Anti-gaming : 30s cooldown + reset minuit
+- ⚠️ Complexité accrue par rapport à 1 vidéo fixe
+- ⚠️ Nécessite `SharedPreferences` persistant
+
 ---
 
-*Dernière mise à jour : 2026-05-22*
+## ADR-020 : Services de Rétention (Streaks, Profil, Stats, Question du Jour)
+
+**Date** : 2026-05-23
+**Statut** : Accepté
+
+### Contexte
+Le taux de rétention D7/D30 est critique pour atteindre 1M+ utilisateurs. Actuellement, Corely n'a aucun mécanisme de gamification ou d'habitude quotidienne.
+
+### Décision
+4 services de rétention implémentés :
+
+1. **StreakService** (`lib/features/retention/data/streak_service.dart`) :
+   - Compteur de jours consécutifs d'ouverture de l'app
+   - Bonus +2 messages gratuits après 3 jours de streak
+   - Persistance `SharedPreferences` (`streak_count`, `streak_last_open_date`)
+
+2. **UserProfileService** (`lib/features/retention/data/user_profile_service.dart`) :
+   - Nom d'affichage et centres d'intérêt de l'utilisateur
+   - Utilisés pour personnaliser le prompt système et les questions du jour
+
+3. **UsageStatsService** (`lib/features/retention/data/usage_stats_service.dart`) :
+   - Compteur de messages envoyés
+   - Temps économisé estimé (hypothèse : 2 min/message vs recherche manuelle)
+   - Affichage dans l'écran de profil
+
+4. **DailyQuestionService** (`lib/features/retention/data/daily_question_service.dart`) :
+   - Notification locale à 9h00 (fuseau local)
+   - Question personnalisée basée sur les intérêts de l'utilisateur
+   - Canal "Corely Daily" avec icône personnalisée
+
+### Conséquences
+- ✅ Rétention D7/D30 améliorée via habitude quotidienne
+- ✅ Personnalisation accrue → engagement ↑
+- ✅ Stats visibles → sentiment de valeur ↑
+- ⚠️ Notifications locales nécessitent permission sur Android 13+
+- ⚠️ Pas de backend Firebase pour la rétention (100% local pour l'instant)
+
+---
+
+*Dernière mise à jour : 2026-05-23*

@@ -479,11 +479,19 @@ flutter build web --dart-define=DEEPSEEK_API_KEY=sk-xxx --dart-define=OPENROUTER
 - [x] **CRITIQUE V12** : Commandes slash fonctionnelles — extension_bridge filtre + flux DOM complet
 - [x] **CRITIQUE V12** : Images + PDFs chargés correctement
 - [x] **CRITIQUE V14** : Scraping intelligent cross-plateforme — `/scrape`, `/summarize <url>`, `/extract <url>`, `/links <url>`, `/metadata <url>` fonctionnent sur mobile/web/extension via backend `/scrape` et `/search_smart`
+- [x] **CRITIQUE V16** : TTS markdown sanitization — `cleanMarkdown()` strippe sources, citations, tableaux, raisonnements, et artefacts markdown résiduels (* - _ | [ ] # >) pour un discours naturel
+- [x] **CRITIQUE V16** : Quota retry — `_PendingMessage` + `retryPendingMessage()` pour re-soumettre automatiquement la requête originale après vidéo récompensée
+- [x] **CRITIQUE V16** : Notification icon — `ic_notification.xml` + `keep.xml` empêche R8 de le supprimer
+- [x] **CRITIQUE V16** : Slash commands overhaul — traductions `scrape`/`docgen`, messages assistant persistants (Firestore), annonces pré-exécution, erreurs persistantes au lieu de SnackBar
+- [x] **CRITIQUE V16** : Monetization fixes — AdMob retry loading, GoRouter paywall navigation, Stripe fallback, algo progressif `AdRewardTracker` (tiers 0/1/2 = 1→2→3 vidéos)
+- [x] **CRITIQUE V16** : Retention services — `StreakService` (+2 bonus après 3 jours), `UserProfileService` (nom + intérêts), `UsageStatsService` (messages + temps économisé), `DailyQuestionService` (push 9h local)
 
 ### 🔴 À faire — Priorité CRITIQUE (prochaine session)
-- [ ] **Vocal Turn-Taking** : détection de fin de phrase intelligente, latence <300ms, voix avec hésitations/respirations. Évaluer StyleTTS 2 / ElevenLabs.
+- [ ] **Tester mode vocal V16 sur Xiaomi 12** : 5 tours complets, pas de monologue, barge-in >3 mots, TTS fluide sans sources/asterisques, quota retry auto après vidéo
 - [ ] **Déployer le backend** : `bash scripts/deploy_backend.sh` depuis la machine utilisateur (Docker nécessite internet). Cible `api.aironbot.app`.
 - [ ] **Tester parsing vols réel** : "trouve un billet paris-londre direct du 29/05", requêtes lowercase + mots parasites
+- [ ] **Tester slash commands mobile** : `/scrape https://example.com`, `/summarize <url>`, `/links <url>` avec backend local `192.168.1.38:8000`
+- [ ] **TTS qualité** : évaluer si le nettoyage markdown suffit ou si des artefacts persistent (tableaux complexes, emojis non standards)
 
 ### 🟡 À faire — Priorité moyenne
 - [ ] Analyse fichiers TXT/MD : tester l'injection comme contexte conversationnel
@@ -492,6 +500,8 @@ flutter build web --dart-define=DEEPSEEK_API_KEY=sk-xxx --dart-define=OPENROUTER
 - [ ] Extension Chrome : résumé de page, extraction média — actions navigateur existent mais non testées
 - [ ] Tests non-régression : `_tryParseFlightParamsGeneric`, `_isValidCityPair`, IATA fuzzy per-word
 - [ ] Recherche hôtels : `searchHotels` n'utilise pas checkIn/checkOut/guests depuis les params → vérifier passage dans `_performEnhancedSearch`
+- [ ] Retention UI : afficher les streaks, stats d'usage, et question du jour dans l'écran de profil/paramètres
+- [ ] AdRewardTracker : persister l'état tier entre sessions (actuellement en mémoire uniquement)
 
 ### 🟢 À faire — Priorité basse
 - [ ] Synchronisation temps réel des préférences entre mobile et extension
@@ -499,4 +509,5 @@ flutter build web --dart-define=DEEPSEEK_API_KEY=sk-xxx --dart-define=OPENROUTER
 - [ ] OCR pour PDF scannés
 - [ ] Firebase Storage pour les images (au lieu de base64)
 - [ ] Documents volumineux : tronqués à 15000 caractères dans le contexte system
+- [ ] Push notifications : tester `DailyQuestionService` push à 9h00 locale sur Xiaomi 12
 - [x] **HAUTE** : Autres types de fichiers (DOCX, XLSX, PPTX) : Fixed V13 : extraction namespace-agnostic (`localName` + `namespaceUri`) sans dépendance au préfixe XML. Fallback texte brut + gestion erreurs XML/ZIP.
