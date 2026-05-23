@@ -11,7 +11,7 @@ void main() {
           child: MaterialApp(
             home: Scaffold(
               body: InputBar(
-                onSend: (_, {imageBase64, imageMimeType, fileName, fileContent}) {},
+                onSend: (_, {attachments = const [], imageBase64, imageMimeType, fileName, fileContent}) {},
               ),
             ),
           ),
@@ -27,7 +27,7 @@ void main() {
           child: MaterialApp(
             home: Scaffold(
               body: InputBar(
-                onSend: (_, {imageBase64, imageMimeType, fileName, fileContent}) {},
+                onSend: (_, {attachments = const [], imageBase64, imageMimeType, fileName, fileContent}) {},
               ),
             ),
           ),
@@ -46,7 +46,7 @@ void main() {
           child: MaterialApp(
             home: Scaffold(
               body: InputBar(
-                onSend: (_, {imageBase64, imageMimeType, fileName, fileContent}) {},
+                onSend: (_, {attachments = const [], imageBase64, imageMimeType, fileName, fileContent}) {},
               ),
             ),
           ),
@@ -67,7 +67,7 @@ void main() {
           child: MaterialApp(
             home: Scaffold(
               body: InputBar(
-                onSend: (_, {imageBase64, imageMimeType, fileName, fileContent}) {},
+                onSend: (_, {attachments = const [], imageBase64, imageMimeType, fileName, fileContent}) {},
               ),
             ),
           ),
@@ -92,7 +92,7 @@ void main() {
           child: MaterialApp(
             home: Scaffold(
               body: InputBar(
-                onSend: (_, {imageBase64, imageMimeType, fileName, fileContent}) {},
+                onSend: (_, {attachments = const [], imageBase64, imageMimeType, fileName, fileContent}) {},
                 isLoading: true,
               ),
             ),
@@ -111,7 +111,7 @@ void main() {
           child: MaterialApp(
             home: Scaffold(
               body: InputBar(
-                onSend: (_, {imageBase64, imageMimeType, fileName, fileContent}) {},
+                onSend: (_, {attachments = const [], imageBase64, imageMimeType, fileName, fileContent}) {},
                 isLoading: true,
               ),
             ),
@@ -132,7 +132,7 @@ void main() {
           child: MaterialApp(
             home: Scaffold(
               body: InputBar(
-                onSend: (_, {imageBase64, imageMimeType, fileName, fileContent}) {},
+                onSend: (_, {attachments = const [], imageBase64, imageMimeType, fileName, fileContent}) {},
               ),
             ),
           ),
@@ -152,7 +152,7 @@ void main() {
           child: MaterialApp(
             home: Scaffold(
               body: InputBar(
-                onSend: (_, {imageBase64, imageMimeType, fileName, fileContent}) {},
+                onSend: (_, {attachments = const [], imageBase64, imageMimeType, fileName, fileContent}) {},
               ),
             ),
           ),
@@ -168,7 +168,7 @@ void main() {
           child: MaterialApp(
             home: Scaffold(
               body: InputBar(
-                onSend: (_, {imageBase64, imageMimeType, fileName, fileContent}) {},
+                onSend: (_, {attachments = const [], imageBase64, imageMimeType, fileName, fileContent}) {},
               ),
             ),
           ),

@@ -29,7 +29,7 @@ class Settings(BaseSettings):
     cors_origins: str = "*"
 
     # Rate limiting
-    redis_url: str = "redis://localhost:6379/0"
+    redis_url: str = "memory://"
     rate_limit: str = "100/minute"
 
     @property

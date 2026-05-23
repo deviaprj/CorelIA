@@ -5,12 +5,11 @@ import 'package:airon_bot/features/chat/presentation/tts_emotion.dart';
 void main() {
   group('VoiceConversationState', () {
     test('tous les états existent', () {
-      expect(VoiceConversationState.values.length, 6);
+      expect(VoiceConversationState.values.length, 5);
       expect(VoiceConversationState.values, contains(VoiceConversationState.idle));
       expect(VoiceConversationState.values, contains(VoiceConversationState.listening));
       expect(VoiceConversationState.values, contains(VoiceConversationState.thinking));
       expect(VoiceConversationState.values, contains(VoiceConversationState.speaking));
-      expect(VoiceConversationState.values, contains(VoiceConversationState.processingStt));
       expect(VoiceConversationState.values, contains(VoiceConversationState.error));
     });
   });

@@ -78,6 +78,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         }
       },
     );
+    final notifier = ref.read(chatNotifierProvider(widget.conversationId).notifier);
     if (granted && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -85,6 +86,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
           duration: Duration(seconds: 2),
         ),
       );
+      // Relancer automatiquement la demande bloquee par le quota
+      await notifier.retryPendingMessage();
+    } else {
+      // Dialog ferme sans bonus : annuler le message en attente
+      notifier.clearPendingMessage();
     }
   }
 

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'chat_notifier.dart';
+import '../domain/message.dart';
 import 'barge_in_intent_classifier.dart';
 import 'tts_emotion.dart';
 import 'emotion_parser.dart';
@@ -68,6 +69,15 @@ class VoiceConversationNotifier
 
   String? _lastProcessedTranscript;
   DateTime? _lastProcessedTime;
+
+  /// Garde contre les appels concurrents à _speakFullResponse.
+  bool _isProcessingResponse = false;
+
+  /// Heure de la dernière requête LLM envoyée par _sendToLLM.
+  /// Utilisée pour identifier le message assistant qui correspond au tour
+  /// vocal actuel (évite de parler un message d'un tour précédent si
+  /// messages.last pointe sur l'ancien message).
+  DateTime? _lastRequestTime;
 
   @override
   VoiceConversationStatus build(String conversationId) {
@@ -144,6 +154,10 @@ class VoiceConversationNotifier
 
     _voice.clearTranscript();
 
+    // Marquer l'heure de la requete pour que _handleChatState puisse
+    // identifier le message assistant du tour actuel.
+    _lastRequestTime = DateTime.now();
+
     final chatNotifier = ref.read(chatNotifierProvider(arg).notifier);
     chatNotifier.sendMessage(transcript, isVoiceConversation: true, modelOverride: 'task:vocal');
   }
@@ -151,25 +165,53 @@ class VoiceConversationNotifier
   /// Appelle quand le ChatNotifier recoit des tokens du LLM.
   void _handleChatState(ChatState chatState) {
     if (state.state != VoiceConversationState.thinking) return;
+    if (_isProcessingResponse) {
+      debugPrint('[VoiceConversation] _handleChatState ignored: already processing response');
+      return;
+    }
 
     final messages = chatState.messages;
     if (messages.isEmpty) return;
 
-    final lastMsg = messages.last;
-    if (!lastMsg.isAssistant) return;
-
-    final content = lastMsg.content;
-    if (content.isEmpty) return;
-
-    // Attendre la fin du stream pour parler le message COMPLET d'un bloc.
-    if (!lastMsg.isStreaming) {
-      _speakFullResponse(content);
+    // Trouver le dernier message assistant non-streaming cree APRES
+    // _lastRequestTime. Cela garantit qu'on parle le message du tour
+    // actuel, meme si messages.last pointe sur un ancien message a cause
+    // d'un snapshot Firestore intermediaire.
+    final lastRequestTime = _lastRequestTime;
+    Message? targetMsg;
+    for (var i = messages.length - 1; i >= 0; i--) {
+      final m = messages[i];
+      if (!m.isAssistant) continue;
+      if (m.isStreaming) continue;
+      if (m.content.isEmpty) continue;
+      if (lastRequestTime != null &&
+          m.createdAt.isBefore(lastRequestTime)) {
+        continue;
+      }
+      targetMsg = m;
+      break;
     }
+
+    if (targetMsg == null) {
+      debugPrint('[VoiceConversation] No assistant message found after $_lastRequestTime');
+      return;
+    }
+
+    debugPrint('[VoiceConversation] Will speak msg id=${targetMsg.id}, '
+        'createdAt=${targetMsg.createdAt}, len=${targetMsg.content.length}');
+    _isProcessingResponse = true;
+    _speakFullResponse(targetMsg.content).whenComplete(() {
+      _isProcessingResponse = false;
+    });
   }
 
   /// Parle la reponse complete d'un bloc (pas de streaming par phrases).
   Future<void> _speakFullResponse(String text) async {
     if (!_isActive) return;
+    if (_isProcessingResponse && state.state == VoiceConversationState.speaking) {
+      debugPrint('[VoiceConversation] _speakFullResponse skipped: already speaking');
+      return;
+    }
 
     // Couper le micro avant de parler — evite l'echo (monologue)
     await _voice.stopListening();

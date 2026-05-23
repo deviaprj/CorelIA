@@ -223,16 +223,11 @@ class ModelRouter {
       final entry = _registry[modelId];
       if (entry == null) continue;
       if (rateLimiter.isCoolingDown(modelId)) continue;
-      if (entry.provider == 'deepseek' && AppConstants.deepSeekApiKey.isEmpty) continue;
-      if (entry.provider == 'openrouter' && AppConstants.openRouterApiKey.isEmpty) continue;
       return entry;
     }
 
-    // Dernier recours : deepseek-v4-flash si la clé existe
-    if (AppConstants.deepSeekApiKey.isNotEmpty) {
-      return _registry['deepseek-v4-flash'];
-    }
-    return null;
+    // Dernier recours : deepseek-v4-flash
+    return _registry['deepseek-v4-flash'];
   }
 
   /// Marque un modèle comme rate-limited après un 429.

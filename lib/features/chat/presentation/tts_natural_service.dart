@@ -338,30 +338,68 @@ class TtsNaturalService {
 
   static String cleanMarkdown(String text) {
     var working = _stripSourcesSection(text);
+
+    // 1. Strip reasoning / thinking blocks (DeepSeek R1, etc.)
+    working = working.replaceAllMapped(
+      RegExp(r'\<think\>[\s\S]*?\<\/think\>'),
+      (_) => '',
+    );
+    working = working.replaceAllMapped(
+      RegExp(r'\`\`\`\s*reasoning[\s\S]*?\`\`\`'),
+      (_) => '',
+    );
+
+    // 2. Strip URLs, citations, emojis early
     working = stripUrls(working);
     working = stripCitations(working);
     working = stripEmojis(working);
+
+    // 3. Bold / italic / underline
     working = working
         .replaceAllMapped(RegExp(r'\*\*\*(.+?)\*\*\*'), (m) => m.group(1) ?? '')
         .replaceAllMapped(RegExp(r'\*\*(.+?)\*\*'), (m) => m.group(1) ?? '')
         .replaceAllMapped(RegExp(r'\*(.+?)\*'), (m) => m.group(1) ?? '')
         .replaceAllMapped(RegExp(r'__(.+?)__'), (m) => m.group(1) ?? '')
         .replaceAllMapped(RegExp(r'_(.+?)_'), (m) => m.group(1) ?? '');
+
+    // 4. Headings
     working = working.replaceAllMapped(
       RegExp(r'^#{1,6}\s+(.+)$', multiLine: true),
       (m) => '${m.group(1) ?? ''}\n\n',
     );
+
+    // 5. Code blocks → hint, inline code → raw
     working = working.replaceAllMapped(
       RegExp(r'`{3}[\s\S]*?`{3}'),
       (_) => ' [bloc de code] .\n\n',
     );
     working = working.replaceAllMapped(RegExp(r'`(.+?)`'), (m) => m.group(1) ?? '');
+
+    // 6. Horizontal rules
     working = working.replaceAll(RegExp(r'^-{3,}\s*$', multiLine: true), '\n\n');
+
+    // 7. Links → text only, images → alt
     working = working.replaceAllMapped(RegExp(r'\[(.+?)\]\(.+?\)'), (m) => m.group(1) ?? '');
     working = working.replaceAllMapped(RegExp(r'!\[(.*?)\]\(.+?\)'), (m) {
       final alt = m.group(1);
       return alt != null && alt.isNotEmpty ? ' [image: $alt] ' : ' [image] ';
     });
+
+    // 8. Markdown tables → plain text (remove pipes, header separator)
+    working = working.replaceAllMapped(
+      RegExp(r'^\s*\|?(.+?)\|?\s*$', multiLine: true),
+      (m) {
+        final raw = m.group(1) ?? '';
+        // Skip table header separator lines like |---|---|
+        if (RegExp(r'^\s*[|:-\s]+\|\s*[|:-\s]+\s*$').hasMatch(raw)) {
+          return '\n';
+        }
+        final cells = raw.split('|').where((c) => c.trim().isNotEmpty).join(', ');
+        return cells.isNotEmpty ? '$cells. ' : '\n';
+      },
+    );
+
+    // 9. Lists (bullets + numbered)
     working = working.replaceAllMapped(
       RegExp(r'^\s*[-*+]\s+(.+)$', multiLine: true),
       (m) => '${m.group(1) ?? ''}\n',
@@ -370,26 +408,105 @@ class TtsNaturalService {
       RegExp(r'^\s*\d+\.\s+(.+)$', multiLine: true),
       (m) => '${m.group(1) ?? ''}\n',
     );
+
+    // 10. Blockquotes
     working = working.replaceAll(RegExp(r'^>\s+', multiLine: true), '');
+
+    // 11. HTML tags
     working = working.replaceAll(RegExp(r'<[^>]+>'), '');
+
+    // 12. Trailing URLs / domains
+    working = working.replaceAll(RegExp(r'\bhttps?://\S+'), ' ');
+    working = working.replaceAll(RegExp(r'\bwww\.\S+'), ' ');
+    working = working.replaceAllMapped(
+      RegExp(r'\b[a-zA-Z0-9-]+\.(com|fr|org|net|io|co|app|dev|ai|eu|de|it|es|pt)\b', caseSensitive: false),
+      (_) => ' ',
+    );
+
+    // 13. Punctuation normalization for speech
+    working = working.replaceAll(RegExp(r'(?<=\w);(?=\s|$)'), '. ');
+    working = working.replaceAll(RegExp(r'(?<=\w):(?=\s|$)'), '. ');
+    working = working.replaceAll(RegExp(r'\s+#\s+'), ' ');
+    working = working.replaceAll(RegExp(r'\s+##+\s+'), ' ');
+    working = working.replaceAll(RegExp(r'(?<=\w)\/(?=\w)'), ' ');
+    working = working.replaceAll(RegExp(r'(?<=\w)\\(?=\w)'), ' ');
+
+    // 14. Final aggressive pass — remove stray markdown artifacts
+    // Any remaining *, -, _, |, [ ], #, > at line start that are NOT part of words
+    working = working.replaceAllMapped(
+      RegExp(r'^\s*[-*_#>|]+\s*', multiLine: true),
+      (_) => '',
+    );
+    // Remove stray brackets that weren't links
+    working = working.replaceAll(RegExp(r'\[|\]'), ' ');
+    // Remove stray asterisks / underscores inside text (not caught by above)
+    working = working.replaceAll(RegExp(r'(?<!\w)[*_]+(?!\w)'), ' ');
+    // Remove stray pipes
+    working = working.replaceAll('|', ' ');
+
+    // 15. Collapse whitespace for natural speech
     working = working.replaceAll(RegExp(r'[ \t]+'), ' ');
-    working = working.replaceAll(RegExp(r'\n{3,}'), '\n\n');
+    working = working.replaceAll(RegExp(r'\n{2,}'), ' ');
+    working = working.replaceAll('\n', ' ');
+
     return working.trim();
   }
 
   static String _stripSourcesSection(String text) {
-    final sepPattern = RegExp(
-      r'\n?\s*---+\s*\n?\s*\*\*Sources\s*:\*\*.*',
-      caseSensitive: false,
-      dotAll: true,
-    );
-    var result = text.replaceFirst(sepPattern, '');
-    final plainPattern = RegExp(
-      r'\n\n\s*Sources\s*:.*',
-      caseSensitive: false,
-      dotAll: true,
-    );
-    result = result.replaceFirst(plainPattern, '');
+    // Patterns pour "Sources", "Références", "Liens", "References", "Links"
+    final patterns = [
+      // Separator + bold Sources
+      RegExp(
+        r'\n?\s*---+\s*\n?\s*\*\*Sources\s*:\*\*.*',
+        caseSensitive: false,
+        dotAll: true,
+      ),
+      // Plain Sources (English)
+      RegExp(
+        r'\n\n\s*Sources\s*:.*',
+        caseSensitive: false,
+        dotAll: true,
+      ),
+      // Références (French)
+      RegExp(
+        r'\n\n\s*Références\s*:.*',
+        caseSensitive: false,
+        dotAll: true,
+      ),
+      // Liens (French)
+      RegExp(
+        r'\n\n\s*Liens\s*:.*',
+        caseSensitive: false,
+        dotAll: true,
+      ),
+      // Links (English)
+      RegExp(
+        r'\n\n\s*Links\s*:.*',
+        caseSensitive: false,
+        dotAll: true,
+      ),
+      // References (English variant)
+      RegExp(
+        r'\n\n\s*References\s*:.*',
+        caseSensitive: false,
+        dotAll: true,
+      ),
+      // Inline reference markers like [1], [2], [3] at end of text
+      RegExp(
+        r'\n?\s*\*\*Références?\s*:\*\*.*',
+        caseSensitive: false,
+        dotAll: true,
+      ),
+      RegExp(
+        r'\n?\s*\*\*Liens?\s*:\*\*.*',
+        caseSensitive: false,
+        dotAll: true,
+      ),
+    ];
+    var result = text;
+    for (final pattern in patterns) {
+      result = result.replaceFirst(pattern, '');
+    }
     return result;
   }
 

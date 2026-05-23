@@ -15,6 +15,7 @@ class AdService {
   static Future<bool> showRewarded({
     required Future<dynamic> Function() loadAd,
     required void Function(dynamic) onEarned,
+    void Function(String)? onError,
   }) async => false;
 }
 

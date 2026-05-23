@@ -11,6 +11,7 @@ import '../../../core/secure_storage.dart';
 import '../../auth/presentation/auth_notifier.dart';
 import '../../monetization/subscription/subscription_service.dart';
 import '../../referral/data/referral_service.dart';
+import '../../retention/data/retention_providers.dart';
 
 // ── System prompt provider ──────────────────────────────────────────────────
 const _systemPromptKey = 'corely_system_prompt';
@@ -203,6 +204,13 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           // ── Parrainage ─────────────────────────────────────────────────
           _SectionTitle('Parrainage'),
           _ReferralSection(),
+
+          // ── Statistiques & Rétention ─────────────────────────────────────
+          _SectionTitle('Statistiques'),
+          _StatsSection(),
+
+          _SectionTitle('Rétention'),
+          _DailyQuestionToggle(),
 
           // ── Déconnexion / Suppression ────────────────────────────────────
           _SectionTitle('Danger zone'),
@@ -459,5 +467,138 @@ class _ReferralSectionState extends ConsumerState<_ReferralSection> {
         ),
       ],
     );
+  }
+}
+
+class _StatsSection extends ConsumerWidget {
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final statsAsync = ref.watch(usageStatsProvider);
+
+    return statsAsync.when(
+      data: (stats) {
+        return Column(
+          children: [
+            ListTile(
+              leading: const Icon(Icons.chat_bubble_outline),
+              title: const Text('Messages envoyes'),
+              trailing: Text(
+                '${stats.totalMessages}',
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.timer_outlined),
+              title: const Text('Temps economise'),
+              trailing: Text(
+                stats.timeSavedFormatted,
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.calendar_today_outlined),
+              title: const Text('Jours d\'utilisation'),
+              trailing: Text(
+                '${stats.daysUsed}',
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: Text(
+                stats.motivationMessage,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(context).colorScheme.primary,
+                    ),
+              ),
+            ),
+          ],
+        );
+      },
+      loading: () => const ListTile(
+        leading: SizedBox(
+          width: 20,
+          height: 20,
+          child: CircularProgressIndicator(strokeWidth: 2),
+        ),
+        title: Text('Chargement des statistiques...'),
+      ),
+      error: (_, __) => const SizedBox.shrink(),
+    );
+  }
+}
+
+class _DailyQuestionToggle extends ConsumerStatefulWidget {
+  @override
+  ConsumerState<_DailyQuestionToggle> createState() =>
+      _DailyQuestionToggleState();
+}
+
+class _DailyQuestionToggleState extends ConsumerState<_DailyQuestionToggle> {
+  bool? _enabled;
+  bool _loading = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadState();
+  }
+
+  Future<void> _loadState() async {
+    final service = ref.read(dailyQuestionServiceProvider);
+    final enabled = await service.isEnabled();
+    setState(() => _enabled = enabled);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      leading: const Icon(Icons.notifications_active_outlined),
+      title: const Text('Question du jour'),
+      subtitle: const Text('Notification a 9h00 avec une question tendance'),
+      trailing: _enabled == null
+          ? const SizedBox(
+              width: 20,
+              height: 20,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          : Switch(
+              value: _enabled!,
+              onChanged: _loading ? null : _toggle,
+            ),
+    );
+  }
+
+  Future<void> _toggle(bool value) async {
+    setState(() {
+      _loading = true;
+      _enabled = value;
+    });
+
+    final service = ref.read(dailyQuestionServiceProvider);
+    try {
+      await service.setEnabled(value);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(value
+                ? 'Notification quotidienne activee'
+                : 'Notification quotidienne desactivee'),
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('[DailyQuestion] Toggle error: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Erreur lors de la configuration. Reessayez.'),
+          ),
+        );
+        setState(() => _enabled = !value);
+      }
+    } finally {
+      setState(() => _loading = false);
+    }
   }
 }

@@ -98,7 +98,38 @@ class EmotionParser {
     return false;
   }
 
-  /// Retire les balises émotionnelles du texte pour l'affichage UI.
+  /// Mapping balise émotion → emoji pour l'affichage UI.
+  static const _tagToEmoji = {
+    '[joyeux]': '😊',
+    '[heureux]': '😊',
+    '[content]': '🙂',
+    '[triste]': '😢',
+    '[melancolique]': '😔',
+    '[sérieux]': '😐',
+    '[grave]': '😐',
+    '[excité]': '🤩',
+    '[enthousiaste]': '🎉',
+    '[neutre]': '',
+    '[calme]': '😌',
+    '[amical]': '🤗',
+    '[chaleureux]': '🔥',
+  };
+
+  /// Remplace les balises émotionnelles par des emojis pour l'affichage UI.
+  static String toUiText(String text) {
+    var result = text;
+    for (final match in _tagPattern.allMatches(text)) {
+      final rawTag = match.group(1)?.toLowerCase().trim() ?? '';
+      final tag = '[$rawTag]';
+      final emoji = _tagToEmoji[tag];
+      if (emoji != null) {
+        result = result.replaceFirst(tag, emoji);
+      }
+    }
+    return result.replaceAll(RegExp(r'\s+'), ' ').trim();
+  }
+
+  /// Retire les balises émotionnelles du texte pour l'affichage UI (legacy).
   static String stripEmotionTags(String text) {
     return _tagPattern.allMatches(text).fold<String>(text, (acc, match) {
       final tag = '[${match.group(1)?.toLowerCase().trim()}]';

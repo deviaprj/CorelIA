@@ -37,6 +37,9 @@ import '../../monetization/credits/credit_service.dart';
 import '../../../main.dart' show isDemoMode;
 import '../../../core/language/language_service.dart' as lang;
 import 'slash_commands.dart';
+import '../../retention/data/retention_providers.dart';
+import '../../retention/data/user_profile_service.dart';
+import '../../retention/data/usage_stats_service.dart';
 
 // ── Conversations stream ───────────────────────────────────────────────────
 final conversationsStreamProvider =
@@ -121,7 +124,36 @@ class ChatState {
           : messages.sublist(messages.length - displayCount);
 }
 
+/// Parametres d'un message bloque par quota, stockes pour retry auto.
+class _PendingMessage {
+  final String text;
+  final String? imageBase64;
+  final String? imageMimeType;
+  final String? fileName;
+  final String? fileContent;
+  final List<Attachment>? attachments;
+  final bool isVoiceConversation;
+  final String? modelOverride;
+  final bool bypassSlashCheck;
+
+  const _PendingMessage({
+    required this.text,
+    this.imageBase64,
+    this.imageMimeType,
+    this.fileName,
+    this.fileContent,
+    this.attachments,
+    this.isVoiceConversation = false,
+    this.modelOverride,
+    this.bypassSlashCheck = false,
+  });
+}
+
 class ChatNotifier extends FamilyNotifier<ChatState, String> {
+  /// Message en attente quand le quota bloque l'envoi.
+  /// Permet de relancer automatiquement apres bonus (video ou Pro).
+  _PendingMessage? _pendingMessage;
+
   List<String> _lastLinksForDownload = const [];
   String _lastLinksFilter = 'all';
   String? _lastUsedModelId;
@@ -160,10 +192,12 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
     // Commands that work on ALL platforms (not just extension)
     if (!isExtension && !SlashCommands.universalCommandNames.contains(parsed.command.name)) {
       // Extension-only commands require the extension bridge.
-      state = state.copyWith(
-        error: 'Commande /${parsed.command.name} disponible uniquement dans l\'extension Chrome.',
-        isStreaming: false,
+      await _persistAssistantMessage(
+        '❌ Commande non disponible\n\n'
+        'La commande `/${parsed.command.name}` fonctionne uniquement dans l\'extension Chrome.\n\n'
+        '💡 Installez l\'extension Corely sur Chrome pour utiliser cette commande.',
       );
+      state = state.copyWith(isStreaming: false);
       return true;
     }
 
@@ -196,6 +230,12 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
     } catch (_) {
       // Non-bloquant : le message est deja dans le state local
     }
+
+    // Annonce pré-exécution : explique ce que la commande va faire
+    await _persistAssistantMessage(
+      '▶️ **Commande** `${parsed.fullText}`\n\n'
+      '$naturalText',
+    );
 
     switch (parsed.command.name) {
       case 'download':
@@ -287,15 +327,20 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
       final count = downloaded.where((d) => (d as Map?)?['success'] == true).length;
       state = state.copyWith(error: null, isStreaming: false);
       if (cmd.args.isEmpty) {
-        _addAssistantMessage(
+        await _persistAssistantMessage(
           'Téléchargement lancé pour $count fichier(s) depuis le dernier `/links` '
           '(filtre `${_lastLinksFilter}`, ${_lastLinksForDownload.length} lien(s) en mémoire).',
         );
       } else {
-        _addAssistantMessage('Téléchargement lancé pour $count fichier(s).');
+        await _persistAssistantMessage('Téléchargement lancé pour $count fichier(s).');
       }
     } else {
-      state = state.copyWith(error: 'Erreur téléchargement : ${result.error}', isStreaming: false);
+      await _persistAssistantMessage(
+        '❌ Échec téléchargement\n\n'
+        'Erreur : ${result.error}\n\n'
+        '💡 Vérifiez que les URLs sont valides et accessibles.',
+      );
+      state = state.copyWith(isStreaming: false);
     }
     return true;
   }
@@ -314,9 +359,14 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
     final result = await bridge.executeAction(action);
     if (result.success) {
       state = state.copyWith(error: null, isStreaming: false);
-      _addAssistantMessage('Fenêtre d\'impression ouverte. Choisissez "Enregistrer au format PDF".');
+      await _persistAssistantMessage('Fenêtre d\'impression ouverte. Choisissez "Enregistrer au format PDF".');
     } else {
-      state = state.copyWith(error: 'Erreur PDF : ${result.error}', isStreaming: false);
+      await _persistAssistantMessage(
+        '❌ Échec PDF\n\n'
+        'Erreur : ${result.error}\n\n'
+        '💡 Vérifiez que la page est chargée dans l\'extension.',
+      );
+      state = state.copyWith(isStreaming: false);
     }
     return true;
   }
@@ -350,19 +400,29 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
         });
         final links = filtered.map((m) => '- [${m['text'] ?? 'Lien'}](${m['url']})').join('\n');
         if (links.isEmpty) {
-          _addAssistantMessage('Aucun lien trouvé sur $url (filtre: $rawFilter).');
+          await _persistAssistantMessage('Aucun lien trouvé sur $url (filtre: $rawFilter).');
           return true;
         }
-        _addAssistantMessage('Liens extraits de $url (filtre: $rawFilter):\n\n$links');
+        await _persistAssistantMessage('Liens extraits de $url (filtre: $rawFilter):\n\n$links');
         return true;
       } catch (e) {
-        state = state.copyWith(error: 'Erreur scrape backend: $e', isStreaming: false);
+        await _persistAssistantMessage(
+          '❌ Échec extraction liens\n\n'
+          'Erreur backend : $e\n\n'
+          '💡 Vérifiez que l\'URL est accessible ou utilisez l\'extension Chrome.',
+        );
+        state = state.copyWith(isStreaming: false);
         return true;
       }
     }
 
     if (!bridge.isExtension) {
-      state = state.copyWith(error: 'Usage mobile : /links <url> [filter]', isStreaming: false);
+      await _persistAssistantMessage(
+        '❌ Usage incorrect\n\n'
+        'Commande `/links` sur mobile nécessite une URL.\n\n'
+        '💡 **Usage** : `/links <url> [all|video|image|audio|document]`',
+      );
+      state = state.copyWith(isStreaming: false);
       return true;
     }
 
@@ -404,10 +464,15 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
       final diagnostics = 'Diagnostic: page="${pageTitle.isNotEmpty ? pageTitle : 'N/A'}" '
           'URL=$pageUrl | ancres_brutes=$rawAnchorCount | media_sources=$mediaSourceCount '
           '| matches_total=$totalMatched | retournes=$count';
-      _addAssistantMessage('Liens trouvés ($appliedFilter, $count au total) :\n$linksText$more\n\n'
+      await _persistAssistantMessage('Liens trouvés ($appliedFilter, $count au total) :\n$linksText$more\n\n'
           '$diagnostics\n\n💡 Lancez `/download` sans paramètre pour télécharger toute cette liste.');
     } else {
-      state = state.copyWith(error: 'Erreur extraction liens : ${result.error}', isStreaming: false);
+      await _persistAssistantMessage(
+        '❌ Échec extraction liens\n\n'
+        'Erreur : ${result.error}\n\n'
+        '💡 Vérifiez que la page est chargée dans l\'extension.',
+      );
+      state = state.copyWith(isStreaming: false);
     }
     return true;
   }
@@ -426,20 +491,30 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
             .join('\n');
         final title = data['title'] as String? ?? url;
         if (allTexts.isEmpty) {
-          _addAssistantMessage('Aucun contenu extrait de $url.');
+          await _persistAssistantMessage('Aucun contenu extrait de $url.');
           return true;
         }
         final summarizePrompt = 'Résume le contenu suivant de la page "$title" ($url) :\n\n$allTexts';
         await sendMessage(summarizePrompt, bypassSlashCheck: true);
         return true;
       } catch (e) {
-        state = state.copyWith(error: 'Erreur scrape backend: $e', isStreaming: false);
+        await _persistAssistantMessage(
+          '❌ Échec résumé\n\n'
+          'Erreur backend : $e\n\n'
+          '💡 Vérifiez que l\'URL est accessible ou utilisez l\'extension Chrome.',
+        );
+        state = state.copyWith(isStreaming: false);
         return true;
       }
     }
 
     if (!bridge.isExtension) {
-      state = state.copyWith(error: 'Usage mobile : /summarize <url>', isStreaming: false);
+      await _persistAssistantMessage(
+        '❌ Usage incorrect\n\n'
+        'Commande `/summarize` sur mobile nécessite une URL.\n\n'
+        '💡 **Usage** : `/summarize <url>`',
+      );
+      state = state.copyWith(isStreaming: false);
       return true;
     }
 
@@ -457,7 +532,12 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
       await sendMessage(summarizePrompt, bypassSlashCheck: true);
       return true;
     } else {
-      state = state.copyWith(error: 'Erreur résumé : ${result.error}', isStreaming: false);
+      await _persistAssistantMessage(
+        '❌ Échec résumé\n\n'
+        'Erreur : ${result.error}\n\n'
+        '💡 Vérifiez que la page est chargée dans l\'extension.',
+      );
+      state = state.copyWith(isStreaming: false);
     }
     return true;
   }
@@ -487,19 +567,29 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
                 .where((t) => t.toString().isNotEmpty)
                 .join('\n');
         if (allTexts.isEmpty) {
-          _addAssistantMessage('Aucun contenu extrait de $url.');
+          await _persistAssistantMessage('Aucun contenu extrait de $url.');
           return true;
         }
-        _addAssistantMessage('Contenu extrait de $url ($selector):\n\n$allTexts');
+        await _persistAssistantMessage('Contenu extrait de $url ($selector):\n\n$allTexts');
         return true;
       } catch (e) {
-        state = state.copyWith(error: 'Erreur scrape backend: $e', isStreaming: false);
+        await _persistAssistantMessage(
+          '❌ Échec extraction\n\n'
+          'Erreur backend : $e\n\n'
+          '💡 Vérifiez que l\'URL est accessible ou utilisez l\'extension Chrome.',
+        );
+        state = state.copyWith(isStreaming: false);
         return true;
       }
     }
 
     if (!bridge.isExtension) {
-      state = state.copyWith(error: 'Usage mobile : /extract <url> [selector]', isStreaming: false);
+      await _persistAssistantMessage(
+        '❌ Usage incorrect\n\n'
+        'Commande `/extract` sur mobile nécessite une URL.\n\n'
+        '💡 **Usage** : `/extract <url> [sélecteur CSS]`',
+      );
+      state = state.copyWith(isStreaming: false);
       return true;
     }
 
@@ -509,13 +599,18 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
     );
     final result = await bridge.executeAction(action);
     if (!result.success || result.data == null) {
-      state = state.copyWith(error: 'Erreur extraction : ${result.error}', isStreaming: false);
+      await _persistAssistantMessage(
+        '❌ Échec extraction\n\n'
+        'Erreur : ${result.error}\n\n'
+        '💡 Vérifiez que la page est chargée dans l\'extension.',
+      );
+      state = state.copyWith(isStreaming: false);
       return true;
     }
 
     final text = result.data!['text'] as String? ?? '';
     if (text.isEmpty) {
-      _addAssistantMessage('Aucun texte extrait de "$selector".');
+      await _persistAssistantMessage('Aucun texte extrait de "$selector".');
       return true;
     }
 
@@ -529,7 +624,7 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
     try {
       await sendMessage(llmPrompt, bypassSlashCheck: true);
     } catch (e) {
-      _addAssistantMessage('Texte extrait de "$selector" (${text.length} caractères) :\n\n$rawPreview');
+      await _persistAssistantMessage('Texte extrait de "$selector" (${text.length} caractères) :\n\n$rawPreview');
     }
     return true;
   }
@@ -544,16 +639,25 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
     final result = await bridge.executeAction(action);
     if (result.success) {
       state = state.copyWith(error: null, isStreaming: false);
-      _addAssistantMessage('Défilé ${direction == 'up' ? 'vers le haut' : 'vers le bas'} de $amount px.');
+      await _persistAssistantMessage('Défilé ${direction == 'up' ? 'vers le haut' : 'vers le bas'} de $amount px.');
     } else {
-      state = state.copyWith(error: 'Erreur scroll : ${result.error}', isStreaming: false);
+      await _persistAssistantMessage(
+        '❌ Échec défilement\n\n'
+        'Erreur : ${result.error}\n\n'
+        '💡 Vérifiez que la page est chargée dans l\'extension.',
+      );
+      state = state.copyWith(isStreaming: false);
     }
     return true;
   }
 
   Future<bool> _handleSlashOpen(ParsedSlashCommand cmd, ExtensionBridge bridge) async {
     if (cmd.args.isEmpty) {
-      state = state.copyWith(error: 'Usage : /open <url>', isStreaming: false);
+      await _persistAssistantMessage(
+        '❌ Usage incorrect\n\n'
+        '💡 **Usage** : `/open <url>`',
+      );
+      state = state.copyWith(isStreaming: false);
       return true;
     }
     final action = BrowserAction(
@@ -563,16 +667,25 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
     final result = await bridge.executeAction(action);
     if (result.success) {
       state = state.copyWith(error: null, isStreaming: false);
-      _addAssistantMessage('Onglet ouvert : ${cmd.args[0]}');
+      await _persistAssistantMessage('Onglet ouvert : ${cmd.args[0]}');
     } else {
-      state = state.copyWith(error: 'Erreur ouverture : ${result.error}', isStreaming: false);
+      await _persistAssistantMessage(
+        '❌ Échec ouverture\n\n'
+        'Erreur : ${result.error}\n\n'
+        '💡 Vérifiez que l\'URL est valide.',
+      );
+      state = state.copyWith(isStreaming: false);
     }
     return true;
   }
 
   Future<bool> _handleSlashClick(ParsedSlashCommand cmd, ExtensionBridge bridge) async {
     if (cmd.args.isEmpty) {
-      state = state.copyWith(error: 'Usage : /click <sélecteur CSS>', isStreaming: false);
+      await _persistAssistantMessage(
+        '❌ Usage incorrect\n\n'
+        '💡 **Usage** : `/click <sélecteur CSS>`',
+      );
+      state = state.copyWith(isStreaming: false);
       return true;
     }
     final action = BrowserAction(
@@ -582,16 +695,25 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
     final result = await bridge.executeAction(action);
     if (result.success) {
       state = state.copyWith(error: null, isStreaming: false);
-      _addAssistantMessage('Cliqué sur "${cmd.args[0]}".');
+      await _persistAssistantMessage('Cliqué sur "${cmd.args[0]}".');
     } else {
-      state = state.copyWith(error: 'Erreur clic : ${result.error}', isStreaming: false);
+      await _persistAssistantMessage(
+        '❌ Échec clic\n\n'
+        'Erreur : ${result.error}\n\n'
+        '💡 Vérifiez que le sélecteur CSS est correct.',
+      );
+      state = state.copyWith(isStreaming: false);
     }
     return true;
   }
 
   Future<bool> _handleSlashFill(ParsedSlashCommand cmd, ExtensionBridge bridge) async {
     if (cmd.args.length < 2) {
-      state = state.copyWith(error: 'Usage : /fill <sélecteur CSS> <valeur>', isStreaming: false);
+      await _persistAssistantMessage(
+        '❌ Usage incorrect\n\n'
+        '💡 **Usage** : `/fill <sélecteur CSS> <valeur>`',
+      );
+      state = state.copyWith(isStreaming: false);
       return true;
     }
     final action = BrowserAction(
@@ -601,9 +723,14 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
     final result = await bridge.executeAction(action);
     if (result.success) {
       state = state.copyWith(error: null, isStreaming: false);
-      _addAssistantMessage('Champ "${cmd.args[0]}" rempli.');
+      await _persistAssistantMessage('Champ "${cmd.args[0]}" rempli.');
     } else {
-      state = state.copyWith(error: 'Erreur remplissage : ${result.error}', isStreaming: false);
+      await _persistAssistantMessage(
+        '❌ Échec remplissage\n\n'
+        'Erreur : ${result.error}\n\n'
+        '💡 Vérifiez que le sélecteur CSS correspond à un champ de formulaire.',
+      );
+      state = state.copyWith(isStreaming: false);
     }
     return true;
   }
@@ -625,12 +752,17 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
           },
         );
         await bridge.executeAction(downloadAction);
-        _addAssistantMessage('Capture d\'écran téléchargée (PNG).');
+        await _persistAssistantMessage('Capture d\'écran téléchargée (PNG).');
       } else {
-        _addAssistantMessage('Capture d\'écran effectuée.');
+        await _persistAssistantMessage('Capture d\'écran effectuée.');
       }
     } else {
-      state = state.copyWith(error: 'Erreur capture : ${result.error}', isStreaming: false);
+      await _persistAssistantMessage(
+        '❌ Échec capture d\'écran\n\n'
+        'Erreur : ${result.error}\n\n'
+        '💡 Vérifiez que la page est chargée dans l\'extension.',
+      );
+      state = state.copyWith(isStreaming: false);
     }
     return true;
   }
@@ -640,9 +772,13 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
     final result = await bridge.executeAction(action);
     if (result.success) {
       state = state.copyWith(error: null, isStreaming: false);
-      _addAssistantMessage('Retour à la page précédente.');
+      await _persistAssistantMessage('Retour à la page précédente.');
     } else {
-      state = state.copyWith(error: 'Erreur navigation : ${result.error}', isStreaming: false);
+      await _persistAssistantMessage(
+        '❌ Échec navigation\n\n'
+        'Erreur : ${result.error}',
+      );
+      state = state.copyWith(isStreaming: false);
     }
     return true;
   }
@@ -652,9 +788,13 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
     final result = await bridge.executeAction(action);
     if (result.success) {
       state = state.copyWith(error: null, isStreaming: false);
-      _addAssistantMessage('Page suivante.');
+      await _persistAssistantMessage('Page suivante.');
     } else {
-      state = state.copyWith(error: 'Erreur navigation : ${result.error}', isStreaming: false);
+      await _persistAssistantMessage(
+        '❌ Échec navigation\n\n'
+        'Erreur : ${result.error}',
+      );
+      state = state.copyWith(isStreaming: false);
     }
     return true;
   }
@@ -668,17 +808,18 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
       final forms = result.data!['forms'] as List? ?? [];
       final count = result.data!['count'] as int? ?? forms.length;
       if (forms.isEmpty) {
-        _addAssistantMessage('Aucun formulaire trouvé sur cette page.');
+        await _persistAssistantMessage('Aucun formulaire trouvé sur cette page.');
       } else {
         final buffer = StringBuffer();
         final requestedIndex = cmd.args.isNotEmpty ? int.tryParse(cmd.args[0]) : null;
 
         if (requestedIndex != null) {
           if (requestedIndex < 0 || requestedIndex >= forms.length) {
-            state = state.copyWith(
-              error: 'Index de formulaire invalide: $requestedIndex (0..${forms.length - 1})',
-              isStreaming: false,
+            await _persistAssistantMessage(
+              '❌ Index de formulaire invalide : $requestedIndex\n\n'
+              '💡 Indices valides : 0 à ${forms.length - 1}',
             );
+            state = state.copyWith(isStreaming: false);
             return true;
           }
 
@@ -714,10 +855,15 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
           }
           buffer.writeln('\n💡 `/forms 0` pour le détail d\'un formulaire. `/autofill` pour remplissage automatique.');
         }
-        _addAssistantMessage(buffer.toString());
+        await _persistAssistantMessage(buffer.toString());
       }
     } else {
-      state = state.copyWith(error: 'Erreur extraction formulaires : ${result.error}', isStreaming: false);
+      await _persistAssistantMessage(
+        '❌ Échec extraction formulaires\n\n'
+        'Erreur : ${result.error}\n\n'
+        '💡 Vérifiez que la page est chargée dans l\'extension.',
+      );
+      state = state.copyWith(isStreaming: false);
     }
     return true;
   }
@@ -728,16 +874,17 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
     if (result.success && result.data != null) {
       final tables = result.data!['tables'] as List? ?? [];
       if (tables.isEmpty) {
-        _addAssistantMessage('Aucun tableau trouvé sur cette page.');
+        await _persistAssistantMessage('Aucun tableau trouvé sur cette page.');
       } else {
         final requestedIndex = cmd.args.isNotEmpty ? int.tryParse(cmd.args[0]) : null;
         final buffer = StringBuffer();
 
         if (requestedIndex != null && (requestedIndex < 0 || requestedIndex >= tables.length)) {
-          state = state.copyWith(
-            error: 'Index de tableau invalide: $requestedIndex (0..${tables.length - 1})',
-            isStreaming: false,
+          await _persistAssistantMessage(
+            '❌ Index de tableau invalide : $requestedIndex\n\n'
+            '💡 Indices valides : 0 à ${tables.length - 1}',
           );
+          state = state.copyWith(isStreaming: false);
           return true;
         }
 
@@ -763,10 +910,15 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
           buffer.writeln();
         }
         buffer.writeln('💡 Utilisez `/export csv` pour exporter les tableaux en CSV.');
-        _addAssistantMessage(buffer.toString());
+        await _persistAssistantMessage(buffer.toString());
       }
     } else {
-      state = state.copyWith(error: 'Erreur extraction tableaux : ${result.error}', isStreaming: false);
+      await _persistAssistantMessage(
+        '❌ Échec extraction tableaux\n\n'
+        'Erreur : ${result.error}\n\n'
+        '💡 Vérifiez que la page est chargée dans l\'extension.',
+      );
+      state = state.copyWith(isStreaming: false);
     }
     return true;
   }
@@ -823,9 +975,14 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
           }
       }
       buffer.writeln('\n💡 `/download <url>` pour télécharger un média. Combo : `/media images` puis `/download <url>`.');
-      _addAssistantMessage(buffer.toString());
+      await _persistAssistantMessage(buffer.toString());
     } else {
-      state = state.copyWith(error: 'Erreur extraction médias : ${result.error}', isStreaming: false);
+      await _persistAssistantMessage(
+        '❌ Échec extraction médias\n\n'
+        'Erreur : ${result.error}\n\n'
+        '💡 Vérifiez que la page est chargée dans l\'extension.',
+      );
+      state = state.copyWith(isStreaming: false);
     }
     return true;
   }
@@ -848,23 +1005,38 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
             .expand((d) => (d['values'] as List? ?? []).cast<Map>())
             .map((m) => '| ${m['name'] ?? ''} | ${(m['content'] ?? '').toString().replaceAll('\n', ' ').substring(0, (m['content'] ?? '').toString().length < 100 ? (m['content'] ?? '').toString().length : 100)}${(m['content'] ?? '').toString().length > 100 ? '...' : ''} |');
         buffer.writeln(metaItems.join('\n'));
-        _addAssistantMessage(buffer.toString());
+        await _persistAssistantMessage(buffer.toString());
         return true;
       } catch (e) {
-        state = state.copyWith(error: 'Erreur scrape backend: $e', isStreaming: false);
+        await _persistAssistantMessage(
+          '❌ Échec extraction métadonnées\n\n'
+          'Erreur backend : $e\n\n'
+          '💡 Vérifiez que l\'URL est accessible ou utilisez l\'extension Chrome.',
+        );
+        state = state.copyWith(isStreaming: false);
         return true;
       }
     }
 
     if (!bridge.isExtension) {
-      state = state.copyWith(error: 'Usage mobile : /metadata <url>', isStreaming: false);
+      await _persistAssistantMessage(
+        '❌ Usage incorrect\n\n'
+        'Commande `/metadata` sur mobile nécessite une URL.\n\n'
+        '💡 **Usage** : `/metadata <url>`',
+      );
+      state = state.copyWith(isStreaming: false);
       return true;
     }
 
     final action = BrowserAction(action: BrowserActionType.pageMetadata, params: {});
     final result = await bridge.executeAction(action);
     if (!result.success || result.data == null) {
-      state = state.copyWith(error: 'Erreur métadonnées : ${result.error}', isStreaming: false);
+      await _persistAssistantMessage(
+        '❌ Échec extraction métadonnées\n\n'
+        'Erreur : ${result.error}\n\n'
+        '💡 Vérifiez que la page est chargée dans l\'extension.',
+      );
+      state = state.copyWith(isStreaming: false);
       return true;
     }
 
@@ -901,7 +1073,7 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
     try {
       await sendMessage(llmPrompt);
     } catch (e) {
-      _addAssistantMessage('$rawMeta\n\n/summarize pour résumer. /export json pour exporter. /links pour les liens.');
+      await _persistAssistantMessage('$rawMeta\n\n/summarize pour résumer. /export json pour exporter. /links pour les liens.');
     }
     return true;
   }
@@ -917,7 +1089,7 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
 
     final forms = formResult.data!['forms'] as List? ?? [];
     if (forms.isEmpty) {
-      _addAssistantMessage('Aucun formulaire trouvé sur cette page.');
+      await _persistAssistantMessage('Aucun formulaire trouvé sur cette page.');
       return true;
     }
 
@@ -989,7 +1161,7 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
         final fillResult = await bridge.executeAction(fillAction);
         if (fillResult.success) filledCount++;
       }
-      _addAssistantMessage('Formulaire rempli intelligemment : **$filledCount / ${fieldValues.length}** champ(s).\n\n'
+      await _persistAssistantMessage('Formulaire rempli intelligemment : **$filledCount / ${fieldValues.length}** champ(s).\n\n'
           'Valeurs générées par IA selon le contexte de la page.\n'
           '/fill <sélecteur> <valeur> pour modifier un champ. /forms pour voir les formulaires.');
     } else {
@@ -1004,18 +1176,27 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
     if (result.success && result.data != null) {
       final filled = result.data!['filledCount'] as int? ?? 0;
       final total = result.data!['totalInputs'] as int? ?? 0;
-      _addAssistantMessage('Formulaire rempli automatiquement : **$filled / $total** champ(s).\n\n'
+      await _persistAssistantMessage('Formulaire rempli automatiquement : **$filled / $total** champ(s).\n\n'
           'Données de test utilisées (Jean Dupont). Modifiez les champs si nécessaire.\n'
           '/fill <sélecteur> <valeur> pour modifier un champ spécifique. /forms pour voir les formulaires.');
     } else {
-      state = state.copyWith(error: 'Erreur autofill : ${result.error}', isStreaming: false);
+      await _persistAssistantMessage(
+        '❌ Échec remplissage automatique\n\n'
+        'Erreur : ${result.error}\n\n'
+        '💡 Vérifiez qu\'un formulaire est présent sur la page.',
+      );
+      state = state.copyWith(isStreaming: false);
     }
     return true;
   }
 
   Future<bool> _handleSlashInspect(ParsedSlashCommand cmd, ExtensionBridge bridge) async {
     if (cmd.args.isEmpty) {
-      state = state.copyWith(error: 'Usage : /inspect <sélecteur CSS>', isStreaming: false);
+      await _persistAssistantMessage(
+        '❌ Usage incorrect\n\n'
+        '💡 **Usage** : `/inspect <sélecteur CSS>`',
+      );
+      state = state.copyWith(isStreaming: false);
       return true;
     }
     final action = BrowserAction(
@@ -1043,16 +1224,25 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
       }
       buffer.writeln('\nHTML (début) : ```html\n${d['html'] ?? ''}\n```');
       buffer.writeln('\n💡 `/click ${cmd.args[0]}` pour cliquer. `/highlight ${cmd.args[0]}` pour surligner.');
-      _addAssistantMessage(buffer.toString());
+      await _persistAssistantMessage(buffer.toString());
     } else {
-      state = state.copyWith(error: 'Erreur inspection : ${result.error}', isStreaming: false);
+      await _persistAssistantMessage(
+        '❌ Échec inspection\n\n'
+        'Erreur : ${result.error}\n\n'
+        '💡 Vérifiez que le sélecteur CSS est correct.',
+      );
+      state = state.copyWith(isStreaming: false);
     }
     return true;
   }
 
   Future<bool> _handleSlashHighlight(ParsedSlashCommand cmd, ExtensionBridge bridge) async {
     if (cmd.args.isEmpty) {
-      state = state.copyWith(error: 'Usage : /highlight <sélecteur CSS>', isStreaming: false);
+      await _persistAssistantMessage(
+        '❌ Usage incorrect\n\n'
+        '💡 **Usage** : `/highlight <sélecteur CSS>`',
+      );
+      state = state.copyWith(isStreaming: false);
       return true;
     }
     final action = BrowserAction(
@@ -1061,16 +1251,25 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
     );
     final result = await bridge.executeAction(action);
     if (result.success) {
-      _addAssistantMessage('Élément `${cmd.args[0]}` surligné pendant 3 secondes.');
+      await _persistAssistantMessage('Élément `${cmd.args[0]}` surligné pendant 3 secondes.');
     } else {
-      state = state.copyWith(error: 'Erreur surbrillance : ${result.error}', isStreaming: false);
+      await _persistAssistantMessage(
+        '❌ Échec surbrillance\n\n'
+        'Erreur : ${result.error}\n\n'
+        '💡 Vérifiez que le sélecteur CSS est correct.',
+      );
+      state = state.copyWith(isStreaming: false);
     }
     return true;
   }
 
   Future<bool> _handleSlashWaitFor(ParsedSlashCommand cmd, ExtensionBridge bridge) async {
     if (cmd.args.isEmpty) {
-      state = state.copyWith(error: 'Usage : /waitfor <sélecteur CSS> [timeout_ms]', isStreaming: false);
+      await _persistAssistantMessage(
+        '❌ Usage incorrect\n\n'
+        '💡 **Usage** : `/waitfor <sélecteur CSS> [timeout_ms]`',
+      );
+      state = state.copyWith(isStreaming: false);
       return true;
     }
     final timeout = cmd.args.length > 1 ? int.tryParse(cmd.args[1]) ?? 10000 : 10000;
@@ -1081,10 +1280,15 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
     final result = await bridge.executeAction(action);
     if (result.success) {
       final waited = result.data!['waited'] as int? ?? 0;
-      _addAssistantMessage('Élément `${cmd.args[0]}` apparu après ${waited}ms.\n'
+      await _persistAssistantMessage('Élément `${cmd.args[0]}` apparu après ${waited}ms.\n'
           '💡 `/inspect ${cmd.args[0]}` pour l\'analyser. `/click ${cmd.args[0]}` pour cliquer dessus.');
     } else {
-      state = state.copyWith(error: 'Timeout : ${result.error}', isStreaming: false);
+      await _persistAssistantMessage(
+        '❌ Timeout\n\n'
+        'L\'élément `${cmd.args[0]}` n\'est pas apparu dans le délai imparti.\n\n'
+        '💡 Augmentez le timeout : `/waitfor ${cmd.args[0]} 20000`',
+      );
+      state = state.copyWith(isStreaming: false);
     }
     return true;
   }
@@ -1100,7 +1304,12 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
     final contentResult = await bridge.executeAction(contentAction);
 
     if (!contentResult.success) {
-      state = state.copyWith(error: 'Erreur export : ${contentResult.error}', isStreaming: false);
+      await _persistAssistantMessage(
+        '❌ Échec export\n\n'
+        'Erreur : ${contentResult.error}\n\n'
+        '💡 Vérifiez que la page est chargée dans l\'extension.',
+      );
+      state = state.copyWith(isStreaming: false);
       return true;
     }
 
@@ -1114,13 +1323,13 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
       case 'json':
         final json = '{\n  "title": ${_jsonStr(title)},\n  "url": ${_jsonStr(url)},\n'
             '  "content": ${_jsonStr(content.substring(0, content.length > 10000 ? 10000 : content.length))}\n}';
-        _addAssistantMessage('**Export JSON :**\n```json\n$json\n```\n\n'
+        await _persistAssistantMessage('**Export JSON :**\n```json\n$json\n```\n\n'
             '💡 Copiez ce contenu ou utilisez `/download <url>` pour des fichiers distants.');
         break;
       case 'md':
       case 'markdown':
         final md = '# $title\n\n> Source : $url\n\n$content';
-        _addAssistantMessage('**Export Markdown :**\n```markdown\n${md.substring(0, md.length > 3000 ? 3000 : md.length)}\n```\n\n'
+        await _persistAssistantMessage('**Export Markdown :**\n```markdown\n${md.substring(0, md.length > 3000 ? 3000 : md.length)}\n```\n\n'
             '${md.length > 3000 ? '(tronqué à 3000 caractères)\n\n' : ''}'
             '💡 `/pdf` pour imprimer la page. `/download` pour fichiers distants.');
         break;
@@ -1138,21 +1347,29 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
             }
             csvBuffer.writeln();
           }
-          _addAssistantMessage('**Export CSV (tableaux) :**\n```csv\n${csvBuffer.toString().substring(0, 3000)}\n```\n\n'
+          await _persistAssistantMessage('**Export CSV (tableaux) :**\n```csv\n${csvBuffer.toString().substring(0, 3000)}\n```\n\n'
               '💡 Les données CSV peuvent être ouvertes dans Excel / Google Sheets.');
         } else {
-          _addAssistantMessage('Aucun tableau trouvé pour l\'export CSV. Utilisez `/export json` ou `/export md`.');
+          await _persistAssistantMessage('Aucun tableau trouvé pour l\'export CSV. Utilisez `/export json` ou `/export md`.');
         }
         break;
       default:
-        state = state.copyWith(error: 'Format inconnu : $format. Utilisez json, csv, ou md.', isStreaming: false);
+        await _persistAssistantMessage(
+          '❌ Format inconnu : `$format`\n\n'
+          '💡 Formats supportés : `json`, `csv`, `md` (markdown)',
+        );
+        state = state.copyWith(isStreaming: false);
     }
     return true;
   }
 
   Future<bool> _handleSlashMonitor(ParsedSlashCommand cmd, ExtensionBridge bridge) async {
     if (cmd.args.isEmpty) {
-      state = state.copyWith(error: 'Usage : /monitor <sélecteur CSS> [interval_sec]', isStreaming: false);
+      await _persistAssistantMessage(
+        '❌ Usage incorrect\n\n'
+        '💡 **Usage** : `/monitor <sélecteur CSS> [interval_sec]`',
+      );
+      state = state.copyWith(isStreaming: false);
       return true;
     }
     final selector = cmd.args[0];
@@ -1167,13 +1384,18 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
     final result = await bridge.executeAction(action);
     if (result.success) {
       final text = result.data!['text'] as String? ?? '';
-      _addAssistantMessage('**Vérification ponctuelle** : `${selector}`\n\n'
+      await _persistAssistantMessage('**Vérification ponctuelle** : `${selector}`\n\n'
           'Valeur actuelle : "${text.substring(0, text.length > 200 ? 200 : text.length)}"\n\n'
           'Relancez `/monitor $selector $clampedInterval` pour vérifier à nouveau.\n'
           '💡 Idéal pour : prix, disponibilité, score, statut. '
           'Combo : `/waitfor <selecteur>` puis `/click` quand prêt.');
     } else {
-      state = state.copyWith(error: 'Erreur surveillance : ${result.error}', isStreaming: false);
+      await _persistAssistantMessage(
+        '❌ Échec surveillance\n\n'
+        'Erreur : ${result.error}\n\n'
+        '💡 Vérifiez que le sélecteur CSS est correct.',
+      );
+      state = state.copyWith(isStreaming: false);
     }
     return true;
   }
@@ -1182,10 +1404,11 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
     final targetLang = cmd.args.isNotEmpty ? cmd.args[0] : 'fr';
     const supportedLangs = ['fr', 'en', 'es', 'de', 'it', 'pt', 'ja', 'zh', 'ar', 'ru', 'ko', 'nl'];
     if (!supportedLangs.contains(targetLang)) {
-      state = state.copyWith(
-        error: 'Langue non supportée : $targetLang. Supportées : ${supportedLangs.join(', ')}',
-        isStreaming: false,
+      await _persistAssistantMessage(
+        '❌ Langue non supportée : `$targetLang`\n\n'
+        '💡 Langues supportées : ${supportedLangs.join(', ')}',
       );
+      state = state.copyWith(isStreaming: false);
       return true;
     }
 
@@ -1195,7 +1418,12 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
     );
     final contentResult = await bridge.executeAction(contentAction);
     if (!contentResult.success) {
-      state = state.copyWith(error: 'Erreur extraction contenu : ${contentResult.error}', isStreaming: false);
+      await _persistAssistantMessage(
+        '❌ Échec extraction contenu\n\n'
+        'Erreur : ${contentResult.error}\n\n'
+        '💡 Vérifiez que la page est chargée dans l\'extension.',
+      );
+      state = state.copyWith(isStreaming: false);
       return true;
     }
 
@@ -1222,7 +1450,11 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
 
   Future<bool> _handleSlashSearchPage(ParsedSlashCommand cmd, ExtensionBridge bridge) async {
     if (cmd.args.isEmpty) {
-      state = state.copyWith(error: 'Usage : /searchpage <terme>', isStreaming: false);
+      await _persistAssistantMessage(
+        '❌ Usage incorrect\n\n'
+        '💡 **Usage** : `/searchpage <terme>`',
+      );
+      state = state.copyWith(isStreaming: false);
       return true;
     }
     final searchTerm = cmd.args.join(' ');
@@ -1233,7 +1465,12 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
     );
     final result = await bridge.executeAction(action);
     if (!result.success) {
-      state = state.copyWith(error: 'Erreur extraction page : ${result.error}', isStreaming: false);
+      await _persistAssistantMessage(
+        '❌ Échec extraction page\n\n'
+        'Erreur : ${result.error}\n\n'
+        '💡 Vérifiez que la page est chargée dans l\'extension.',
+      );
+      state = state.copyWith(isStreaming: false);
       return true;
     }
 
@@ -1249,7 +1486,7 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
     }
 
     if (occurrences.isEmpty) {
-      _addAssistantMessage('Terme **"$searchTerm"** non trouvé dans la page.\n'
+      await _persistAssistantMessage('Terme **"$searchTerm"** non trouvé dans la page.\n'
           'Essayez `/summarize` pour un résumé, ou `/metadata` pour les mots-clés de la page.');
       return true;
     }
@@ -1277,7 +1514,7 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
     try {
       await sendMessage(llmPrompt, bypassSlashCheck: true);
     } catch (e) {
-      _addAssistantMessage('$rawResult\n\n/extract pour extraire une section. /summarize pour un résumé.');
+      await _persistAssistantMessage('$rawResult\n\n/extract pour extraire une section. /summarize pour un résumé.');
     }
     return true;
   }
@@ -1383,7 +1620,7 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
             : PlatformService.isMobile
                 ? '\n\n_Partage echoue: ${downloadError ?? "inconnu"}._'
                 : '\n\n_Le document sera disponible via le partage._';
-        _addAssistantMessage(
+        await _persistAssistantMessage(
           'Document genere: **${generated.fileName}** (${generated.sizeBytes} octets)\n'
           'Format: $normalizedFormat\n\n'
           '---\n\n$shortPreview\n'
@@ -1392,7 +1629,7 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
         );
       } else {
         final shortPreview = draft.length > 500 ? '${draft.substring(0, 500)}...' : draft;
-        _addAssistantMessage(
+        await _persistAssistantMessage(
           'Document genere: ${generated.fileName} (${generated.sizeBytes} octets).\n'
           'Format: $normalizedFormat\n\n'
           'Apercu:\n$shortPreview\n\n'
@@ -1400,17 +1637,19 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
         );
       }
     } on AiException catch (e) {
-      state = state.copyWith(
-        error: _formatAiError(e),
-        isStreaming: false,
-        isSearching: false,
+      await _persistAssistantMessage(
+        '❌ Échec génération document\n\n'
+        '${_formatAiError(e)}\n\n'
+        '💡 Réessayez avec un sujet plus court ou vérifiez votre connexion.',
       );
+      state = state.copyWith(isStreaming: false, isSearching: false);
     } catch (e) {
-      state = state.copyWith(
-        error: 'Erreur generation document: $e',
-        isStreaming: false,
-        isSearching: false,
+      await _persistAssistantMessage(
+        '❌ Échec génération document\n\n'
+        'Erreur : $e\n\n'
+        '💡 Réessayez avec un format supporté (word, excel, powerpoint, pdf, markdown, text).',
       );
+      state = state.copyWith(isStreaming: false, isSearching: false);
     } finally {
       if (state.isStreaming || state.isSearching) {
         state = state.copyWith(isStreaming: false, isSearching: false);
@@ -1422,7 +1661,12 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
 
   Future<bool> _handleSlashScrape(ParsedSlashCommand cmd, ExtensionBridge bridge) async {
     if (cmd.args.isEmpty) {
-      state = state.copyWith(error: 'Usage : /scrape <url> [selectors_json]', isStreaming: false);
+      await _persistAssistantMessage(
+        '❌ Usage incorrect\n\n'
+        'Commande `/scrape` nécessite une URL.\n\n'
+        '💡 **Usage** : `/scrape <url> [selectors_json]`',
+      );
+      state = state.copyWith(isStreaming: false);
       return true;
     }
     final url = cmd.args[0];
@@ -1432,7 +1676,12 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
         final decoded = jsonDecode(cmd.args[1]) as Map<String, dynamic>;
         selectors = decoded.map((k, v) => MapEntry(k, v.toString()));
       } catch (e) {
-        state = state.copyWith(error: 'JSON selectors invalide: $e', isStreaming: false);
+        await _persistAssistantMessage(
+          '❌ JSON invalide\n\n'
+          'Le paramètre selectors_json n\'est pas valide : $e\n\n'
+          '💡 **Exemple** : `/scrape https://example.com {"prix":".price","titre":"h1"}`',
+        );
+        state = state.copyWith(isStreaming: false);
         return true;
       }
     }
@@ -1459,9 +1708,14 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
       if (dataList.isEmpty) {
         buffer.writeln('_Aucune donnée structurée trouvée._');
       }
-      _addAssistantMessage(buffer.toString());
+      await _persistAssistantMessage(buffer.toString());
     } catch (e) {
-      state = state.copyWith(error: 'Erreur scrape: $e', isStreaming: false);
+      await _persistAssistantMessage(
+        '❌ Échec scrape\n\n'
+        'Erreur : $e\n\n'
+        '💡 Vérifiez que l\'URL est accessible et que le backend est disponible.',
+      );
+      state = state.copyWith(isStreaming: false);
     }
     return true;
   }
@@ -1531,8 +1785,15 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
 
   String _jsonStr(String s) => '"${s.replaceAll('\\', '\\\\').replaceAll('"', '\\"').replaceAll('\n', '\\n')}"';
 
-  /// Ajoute un message assistant au state (pour les résultats de commandes slash).
-  void _addAssistantMessage(String text) {
+  /// Ajoute un message assistant au state ET le persiste dans le repo.
+  Future<void> _persistAssistantMessage(String text) async {
+    // Retention : extraire les sujets favoris de la reponse IA
+    try {
+      await ref.read(userProfileServiceProvider).extractInterestsFromText(text);
+    } catch (e) {
+      debugPrint('[Retention] Error extracting interests: $e');
+    }
+
     final msg = Message(
       id: 'slash_${DateTime.now().millisecondsSinceEpoch}',
       conversationId: arg,
@@ -1542,6 +1803,23 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
       createdAt: DateTime.now(),
     );
     state = state.copyWith(messages: [...state.messages, msg]);
+    try {
+      if (isDemoMode) {
+        await mockChatRepository.addMessage(
+          conversationId: arg,
+          role: Role.assistant,
+          content: text,
+        );
+      } else {
+        await ref.read(chatRepositoryProvider).addMessage(
+          conversationId: arg,
+          role: Role.assistant,
+          content: text,
+        );
+      }
+    } catch (_) {
+      // Non-bloquant : le message est déjà dans le state local
+    }
   }
 
   Future<void> sendMessage(
@@ -1588,6 +1866,9 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
       return;
     }
 
+    // Nouveau message valide : effacer tout pending precedent.
+    _pendingMessage = null;
+
     final user = ref.read(currentUserProvider);
     if (user == null) return;
 
@@ -1599,6 +1880,17 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
         state = state.copyWith(remainingRequests: remaining);
       } on QuotaExceededException {
         state = state.copyWith(error: 'quota_exceeded', isStreaming: false);
+        _pendingMessage = _PendingMessage(
+          text: text,
+          imageBase64: imageBase64,
+          imageMimeType: imageMimeType,
+          fileName: fileName,
+          fileContent: fileContent,
+          attachments: attachments,
+          isVoiceConversation: isVoiceConversation,
+          modelOverride: modelOverride,
+          bypassSlashCheck: bypassSlashCheck,
+        );
         return;
       } on FirebaseFunctionsException catch (e) {
         debugPrint('[Quota] Cloud Function unavailable: ${e.message}');
@@ -1608,6 +1900,17 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
           state = state.copyWith(remainingRequests: remaining);
         } on CreditsExhaustedException {
           state = state.copyWith(error: 'quota_exceeded', isStreaming: false);
+          _pendingMessage = _PendingMessage(
+            text: text,
+            imageBase64: imageBase64,
+            imageMimeType: imageMimeType,
+            fileName: fileName,
+            fileContent: fileContent,
+            attachments: attachments,
+            isVoiceConversation: isVoiceConversation,
+            modelOverride: modelOverride,
+            bypassSlashCheck: bypassSlashCheck,
+          );
           return;
         } catch (fallbackErr) {
           debugPrint('[Credit] Fallback error: $fallbackErr');
@@ -1620,6 +1923,17 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
           state = state.copyWith(remainingRequests: remaining);
         } on CreditsExhaustedException {
           state = state.copyWith(error: 'quota_exceeded', isStreaming: false);
+          _pendingMessage = _PendingMessage(
+            text: text,
+            imageBase64: imageBase64,
+            imageMimeType: imageMimeType,
+            fileName: fileName,
+            fileContent: fileContent,
+            attachments: attachments,
+            isVoiceConversation: isVoiceConversation,
+            modelOverride: modelOverride,
+            bypassSlashCheck: bypassSlashCheck,
+          );
           return;
         } catch (fallbackErr) {
           debugPrint('[Credit] Fallback error: $fallbackErr');
@@ -1634,6 +1948,17 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
           state = state.copyWith(
             error: 'quota_files_exceeded',
             isStreaming: false,
+          );
+          _pendingMessage = _PendingMessage(
+            text: text,
+            imageBase64: imageBase64,
+            imageMimeType: imageMimeType,
+            fileName: fileName,
+            fileContent: fileContent,
+            attachments: attachments,
+            isVoiceConversation: isVoiceConversation,
+            modelOverride: modelOverride,
+            bypassSlashCheck: bypassSlashCheck,
           );
           return;
         } catch (e) {
@@ -1650,6 +1975,17 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
             error: 'quota_search_exceeded',
             isStreaming: false,
           );
+          _pendingMessage = _PendingMessage(
+            text: text,
+            imageBase64: imageBase64,
+            imageMimeType: imageMimeType,
+            fileName: fileName,
+            fileContent: fileContent,
+            attachments: attachments,
+            isVoiceConversation: isVoiceConversation,
+            modelOverride: modelOverride,
+            bypassSlashCheck: bypassSlashCheck,
+          );
           return;
         } catch (e) {
           debugPrint('[SearchQuota] Error: $e');
@@ -1664,6 +2000,17 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
           state = state.copyWith(
             error: 'quota_voice_exceeded',
             isStreaming: false,
+          );
+          _pendingMessage = _PendingMessage(
+            text: text,
+            imageBase64: imageBase64,
+            imageMimeType: imageMimeType,
+            fileName: fileName,
+            fileContent: fileContent,
+            attachments: attachments,
+            isVoiceConversation: isVoiceConversation,
+            modelOverride: modelOverride,
+            bypassSlashCheck: bypassSlashCheck,
           );
           return;
         } catch (e) {
@@ -1704,6 +2051,14 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
             attachments: attachments ?? attachmentList,
             fileContext: attachmentContext,
           );
+
+    // Retention : enregistrer l'usage
+    try {
+      await ref.read(usageStatsServiceProvider).recordMessageSent();
+      await ref.read(userProfileServiceProvider).extractInterestsFromText(effectiveText);
+    } catch (e) {
+      debugPrint('[Retention] Error recording usage: $e');
+    }
 
     // 2. ref.listen va sync le message utilisateur depuis le repo,
     //    mais en attendant on s'assure que le state le contient pour
@@ -2304,6 +2659,27 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
   void selectModel(String model) {
     state = state.copyWith(selectedModel: model);
   }
+
+  /// Relance automatiquement le dernier message bloque par quota.
+  Future<void> retryPendingMessage() async {
+    final pending = _pendingMessage;
+    if (pending == null) return;
+    _pendingMessage = null;
+    await sendMessage(
+      pending.text,
+      imageBase64: pending.imageBase64,
+      imageMimeType: pending.imageMimeType,
+      fileName: pending.fileName,
+      fileContent: pending.fileContent,
+      attachments: pending.attachments,
+      isVoiceConversation: pending.isVoiceConversation,
+      modelOverride: pending.modelOverride,
+      bypassSlashCheck: pending.bypassSlashCheck,
+    );
+  }
+
+  /// Annule le message en attente (utilisateur a ferme le dialog sans bonus).
+  void clearPendingMessage() => _pendingMessage = null;
 
   void clearError() => state = state.copyWith(error: null);
 

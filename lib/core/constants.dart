@@ -65,6 +65,9 @@ abstract class AppConstants {
   static const ttsModelFallback = 'sillytavern/kokoro-82m';
   static const openRouterTtsUrl = 'https://openrouter.ai/api/v1/audio/speech';
 
+  // OpenRouter fallback chat model
+  static const gpt4oMini = 'openai/gpt-4o-mini';
+
   // Legacy / Pro models
   static const mistralModel = 'mistralai/mistral-large-2407';
   static const visionModel = 'google/gemini-flash-1.5';

@@ -130,6 +130,8 @@ void main() {
         'monitor': BrowserActionType.extractText,
         'translate': BrowserActionType.getPageContent,
         'searchpage': BrowserActionType.getPageContent,
+        'docgen': BrowserActionType.getPageContent,
+        'scrape': BrowserActionType.getPageContent,
       };
 
       final missingCommands = <String>[];

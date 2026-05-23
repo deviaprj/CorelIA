@@ -13,6 +13,8 @@ import 'core/providers/app_providers.dart';
 import 'features/monetization/ads/ad_service.dart';
 import 'features/monetization/ads/consent_service.dart';
 import 'features/monetization/subscription/subscription_service.dart';
+import 'features/retention/data/streak_service.dart';
+import 'features/retention/data/daily_question_service.dart';
 import 'features/auth/data/user_profile_sync.dart';
 import 'features/settings/data/preferences_sync_service.dart';
 import 'firebase_options.dart';
@@ -130,6 +132,19 @@ Future<void> main() async {
     } catch (e) {
       debugPrint('[RevenueCat] Initialisation échouée : $e');
     }
+  }
+
+  // Retention : streak check + daily notification init
+  try {
+    await StreakService().checkAndUpdateStreak();
+    final dailyService = DailyQuestionService();
+    await dailyService.init();
+    final enabled = await dailyService.isEnabled();
+    if (enabled) {
+      await dailyService.scheduleDailyNotification();
+    }
+  } catch (e) {
+    debugPrint('[Retention] Initialisation échouée : $e');
   }
 
   // Zone protégée pour capturer les erreurs asynchrones sans crasher l'app

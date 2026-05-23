@@ -331,14 +331,24 @@ String _toNaturalFr(String cmd, List<String> a) {
     case 'links':
       final labels = {'all': '', 'video': ' vidéos', 'image': ' images',
           'audio': ' audios', 'document': ' documents'};
-      final filter = a.isNotEmpty ? a[0] : 'all';
+      final first = a.isNotEmpty ? a[0] : 'all';
+      final isUrl = first.startsWith('http');
+      final filter = isUrl ? (a.length > 1 ? a[1] : 'all') : first;
       final label = labels[filter];
+      if (isUrl) {
+        if (label != null) return 'Extrais tous les liens$label de l\'URL $first';
+        return 'Extrais tous les liens $filter de l\'URL $first';
+      }
       if (label != null) return 'Extrais tous les liens$label de la page courante';
       return 'Extrais tous les liens $filter de la page courante';
     case 'download': return 'Télécharge ${a.isNotEmpty ? a.join(' ') : 'un fichier'}';
     case 'pdf': return 'Convertir la page en PDF';
-    case 'summarize': return 'Résume la page courante';
-    case 'extract': return 'Extrais le contenu de ${a.isNotEmpty ? a[0] : 'la page'}';
+    case 'summarize':
+      if (a.isNotEmpty && a[0].startsWith('http')) return 'Résume le contenu de l\'URL ${a[0]}';
+      return 'Résume la page courante';
+    case 'extract':
+      if (a.isNotEmpty && a[0].startsWith('http')) return 'Extrais le contenu de l\'URL ${a[0]}';
+      return 'Extrais le contenu de ${a.isNotEmpty ? a[0] : 'la page'}';
     case 'scroll': return 'Fais défiler la page ${a.isNotEmpty ? 'de ${a[0]}px' : 'vers le bas'}';
     case 'open': return 'Ouvre ${a.isNotEmpty ? a[0] : 'une URL'}';
     case 'click': return 'Clique sur ${a.isNotEmpty ? a[0] : "l'élément"}';
@@ -351,7 +361,9 @@ String _toNaturalFr(String cmd, List<String> a) {
     case 'forms': return 'Extrais les formulaires de la page';
     case 'tables': return 'Extrais les tableaux de la page';
     case 'media': return 'Extrais les médias${a.isNotEmpty ? ' (${a[0]})' : ''} de la page';
-    case 'metadata': return 'Affiche les métadonnées de la page';
+    case 'metadata':
+      if (a.isNotEmpty && a[0].startsWith('http')) return 'Affiche les métadonnées de l\'URL ${a[0]}';
+      return 'Affiche les métadonnées de la page';
     case 'autofill': return 'Remplis automatiquement le formulaire';
     case 'inspect': return 'Inspecte ${a.isNotEmpty ? a[0] : "l'élément"}';
     case 'highlight': return 'Surligne ${a.isNotEmpty ? a[0] : "l'élément"}';
@@ -360,6 +372,18 @@ String _toNaturalFr(String cmd, List<String> a) {
     case 'monitor': return 'Surveille ${a.isNotEmpty ? a[0] : "l'élément"}';
     case 'translate': return 'Traduis la page en ${a.isNotEmpty ? _languageName(a[0], AppLanguage.fr) : 'français'}';
     case 'searchpage': return 'Cherche "${a.isNotEmpty ? a.join(' ') : ''}" dans la page';
+    case 'scrape':
+      if (a.isNotEmpty && a[0].startsWith('http')) {
+        return 'Scrape l\'URL ${a[0]} pour extraire les prix, liens et contenu';
+      }
+      return 'Scrape une URL pour extraire les prix, liens et contenu (usage: /scrape <url>)';
+    case 'docgen':
+      if (a.isNotEmpty) {
+        final format = a[0];
+        final topic = a.length > 1 ? a.sublist(1).join(' ') : '';
+        return 'Génère un document $format sur : $topic';
+      }
+      return 'Génère un document (usage: /docgen <format> <sujet>)';
     default: return cmd;
   }
 }
@@ -368,16 +392,26 @@ String _toNaturalFr(String cmd, List<String> a) {
 String _toNaturalEn(String cmd, List<String> a) {
   switch (cmd) {
     case 'links':
-      final filter = a.isNotEmpty ? a[0] : 'all';
+      final first = a.isNotEmpty ? a[0] : 'all';
+      final isUrl = first.startsWith('http');
+      final filter = isUrl ? (a.length > 1 ? a[1] : 'all') : first;
       final labels = {'all': '', 'video': ' videos', 'image': ' images',
           'audio': ' audios', 'document': ' documents'};
       final label = labels[filter];
+      if (isUrl) {
+        if (label != null) return 'Extract all$label links from URL $first';
+        return 'Extract all $filter links from URL $first';
+      }
       if (label != null) return 'Extract all$label links from the current page';
       return 'Extract all $filter links from the current page';
     case 'download': return 'Download ${a.isNotEmpty ? a.join(' ') : 'a file'}';
     case 'pdf': return 'Convert the page to PDF';
-    case 'summarize': return 'Summarize the current page';
-    case 'extract': return 'Extract content from ${a.isNotEmpty ? a[0] : 'the page'}';
+    case 'summarize':
+      if (a.isNotEmpty && a[0].startsWith('http')) return 'Summarize content from URL ${a[0]}';
+      return 'Summarize the current page';
+    case 'extract':
+      if (a.isNotEmpty && a[0].startsWith('http')) return 'Extract content from URL ${a[0]}';
+      return 'Extract content from ${a.isNotEmpty ? a[0] : 'the page'}';
     case 'scroll': return 'Scroll ${a.isNotEmpty ? a[0] : 'down'}';
     case 'open': return 'Open ${a.isNotEmpty ? a[0] : 'a URL'}';
     case 'click': return 'Click on ${a.isNotEmpty ? a[0] : 'the element'}';
@@ -390,7 +424,9 @@ String _toNaturalEn(String cmd, List<String> a) {
     case 'forms': return 'Extract forms from the page';
     case 'tables': return 'Extract tables from the page';
     case 'media': return 'Extract media${a.isNotEmpty ? ' (${a[0]})' : ''} from the page';
-    case 'metadata': return 'Show page metadata';
+    case 'metadata':
+      if (a.isNotEmpty && a[0].startsWith('http')) return 'Show metadata for URL ${a[0]}';
+      return 'Show page metadata';
     case 'autofill': return 'Auto-fill the form';
     case 'inspect': return 'Inspect ${a.isNotEmpty ? a[0] : 'the element'}';
     case 'highlight': return 'Highlight ${a.isNotEmpty ? a[0] : 'the element'}';
@@ -399,6 +435,18 @@ String _toNaturalEn(String cmd, List<String> a) {
     case 'monitor': return 'Monitor ${a.isNotEmpty ? a[0] : 'the element'}';
     case 'translate': return 'Translate the page to ${a.isNotEmpty ? _languageName(a[0], AppLanguage.en) : 'english'}';
     case 'searchpage': return 'Search for "${a.isNotEmpty ? a.join(' ') : ''}" on the page';
+    case 'scrape':
+      if (a.isNotEmpty && a[0].startsWith('http')) {
+        return 'Scrape URL ${a[0]} to extract prices, links and content';
+      }
+      return 'Scrape a URL to extract prices, links and content (usage: /scrape <url>)';
+    case 'docgen':
+      if (a.isNotEmpty) {
+        final format = a[0];
+        final topic = a.length > 1 ? a.sublist(1).join(' ') : '';
+        return 'Generate a $format document about: $topic';
+      }
+      return 'Generate a document (usage: /docgen <format> <topic>)';
     default: return cmd;
   }
 }
@@ -407,16 +455,26 @@ String _toNaturalEn(String cmd, List<String> a) {
 String _toNaturalEs(String cmd, List<String> a) {
   switch (cmd) {
     case 'links':
-      final filter = a.isNotEmpty ? a[0] : 'all';
+      final first = a.isNotEmpty ? a[0] : 'all';
+      final isUrl = first.startsWith('http');
+      final filter = isUrl ? (a.length > 1 ? a[1] : 'all') : first;
       final labels = {'all': '', 'video': ' videos', 'image': ' imágenes',
           'audio': ' audios', 'document': ' documentos'};
       final label = labels[filter];
+      if (isUrl) {
+        if (label != null) return 'Extrae todos los enlaces$label de la URL $first';
+        return 'Extrae todos los enlaces $filter de la URL $first';
+      }
       if (label != null) return 'Extrae todos los enlaces$label de la página actual';
       return 'Extrae todos los enlaces $filter de la página actual';
     case 'download': return 'Descarga ${a.isNotEmpty ? a.join(' ') : 'un archivo'}';
     case 'pdf': return 'Convertir la página a PDF';
-    case 'summarize': return 'Resume la página actual';
-    case 'extract': return 'Extrae el contenido de ${a.isNotEmpty ? a[0] : 'la página'}';
+    case 'summarize':
+      if (a.isNotEmpty && a[0].startsWith('http')) return 'Resume el contenido de la URL ${a[0]}';
+      return 'Resume la página actual';
+    case 'extract':
+      if (a.isNotEmpty && a[0].startsWith('http')) return 'Extrae el contenido de la URL ${a[0]}';
+      return 'Extrae el contenido de ${a.isNotEmpty ? a[0] : 'la página'}';
     case 'scroll': return 'Desplaza ${a.isNotEmpty ? a[0] : 'hacia abajo'}';
     case 'open': return 'Abre ${a.isNotEmpty ? a[0] : 'una URL'}';
     case 'click': return 'Haz clic en ${a.isNotEmpty ? a[0] : 'el elemento'}';
@@ -429,7 +487,9 @@ String _toNaturalEs(String cmd, List<String> a) {
     case 'forms': return 'Extrae los formularios de la página';
     case 'tables': return 'Extrae las tablas de la página';
     case 'media': return 'Extrae los medios${a.isNotEmpty ? ' (${a[0]})' : ''} de la página';
-    case 'metadata': return 'Muestra los metadatos de la página';
+    case 'metadata':
+      if (a.isNotEmpty && a[0].startsWith('http')) return 'Muestra los metadatos de la URL ${a[0]}';
+      return 'Muestra los metadatos de la página';
     case 'autofill': return 'Rellena automáticamente el formulario';
     case 'inspect': return 'Inspecciona ${a.isNotEmpty ? a[0] : 'el elemento'}';
     case 'highlight': return 'Resalta ${a.isNotEmpty ? a[0] : 'el elemento'}';
@@ -438,6 +498,18 @@ String _toNaturalEs(String cmd, List<String> a) {
     case 'monitor': return 'Monitoriza ${a.isNotEmpty ? a[0] : 'el elemento'}';
     case 'translate': return 'Traduce la página al ${a.isNotEmpty ? _languageName(a[0], AppLanguage.es) : 'español'}';
     case 'searchpage': return 'Busca "${a.isNotEmpty ? a.join(' ') : ''}" en la página';
+    case 'scrape':
+      if (a.isNotEmpty && a[0].startsWith('http')) {
+        return 'Scrape la URL ${a[0]} para extraer precios, enlaces y contenido';
+      }
+      return 'Scrape una URL para extraer precios, enlaces y contenido (uso: /scrape <url>)';
+    case 'docgen':
+      if (a.isNotEmpty) {
+        final format = a[0];
+        final topic = a.length > 1 ? a.sublist(1).join(' ') : '';
+        return 'Genera un documento $format sobre: $topic';
+      }
+      return 'Genera un documento (uso: /docgen <formato> <tema>)';
     default: return cmd;
   }
 }
@@ -446,16 +518,26 @@ String _toNaturalEs(String cmd, List<String> a) {
 String _toNaturalDe(String cmd, List<String> a) {
   switch (cmd) {
     case 'links':
-      final filter = a.isNotEmpty ? a[0] : 'all';
+      final first = a.isNotEmpty ? a[0] : 'all';
+      final isUrl = first.startsWith('http');
+      final filter = isUrl ? (a.length > 1 ? a[1] : 'all') : first;
       final labels = {'all': '', 'video': ' videos', 'image': ' bilder',
           'audio': ' audios', 'document': ' dokumente'};
       final label = labels[filter];
+      if (isUrl) {
+        if (label != null) return 'Extrahiere alle$label Links der URL $first';
+        return 'Extrahiere alle $filter Links der URL $first';
+      }
       if (label != null) return 'Extrahiere alle$label Links der aktuellen Seite';
       return 'Extrahiere alle $filter Links der aktuellen Seite';
     case 'download': return 'Lade ${a.isNotEmpty ? a.join(' ') : 'eine Datei'} herunter';
     case 'pdf': return 'Seite als PDF speichern';
-    case 'summarize': return 'Fasse die aktuelle Seite zusammen';
-    case 'extract': return 'Extrahiere Inhalt von ${a.isNotEmpty ? a[0] : 'der Seite'}';
+    case 'summarize':
+      if (a.isNotEmpty && a[0].startsWith('http')) return 'Fasse den Inhalt der URL ${a[0]} zusammen';
+      return 'Fasse die aktuelle Seite zusammen';
+    case 'extract':
+      if (a.isNotEmpty && a[0].startsWith('http')) return 'Extrahiere Inhalt von URL ${a[0]}';
+      return 'Extrahiere Inhalt von ${a.isNotEmpty ? a[0] : 'der Seite'}';
     case 'scroll': return 'Scrolle ${a.isNotEmpty ? a[0] : 'nach unten'}';
     case 'open': return 'Öffne ${a.isNotEmpty ? a[0] : 'eine URL'}';
     case 'click': return 'Klicke auf ${a.isNotEmpty ? a[0] : 'das Element'}';
@@ -468,7 +550,9 @@ String _toNaturalDe(String cmd, List<String> a) {
     case 'forms': return 'Extrahiere Formulare der Seite';
     case 'tables': return 'Extrahiere Tabellen der Seite';
     case 'media': return 'Extrahiere Medien${a.isNotEmpty ? ' (${a[0]})' : ''} der Seite';
-    case 'metadata': return 'Zeige Seitenmetadaten';
+    case 'metadata':
+      if (a.isNotEmpty && a[0].startsWith('http')) return 'Zeige Metadaten der URL ${a[0]}';
+      return 'Zeige Seitenmetadaten';
     case 'autofill': return 'Formular automatisch ausfüllen';
     case 'inspect': return 'Inspiziere ${a.isNotEmpty ? a[0] : 'das Element'}';
     case 'highlight': return 'Hebe ${a.isNotEmpty ? a[0] : 'das Element'} hervor';
@@ -477,6 +561,18 @@ String _toNaturalDe(String cmd, List<String> a) {
     case 'monitor': return 'Überwache ${a.isNotEmpty ? a[0] : 'das Element'}';
     case 'translate': return 'Übersetze die Seite ins ${a.isNotEmpty ? _languageName(a[0], AppLanguage.de) : 'Deutsche'}';
     case 'searchpage': return 'Suche "${a.isNotEmpty ? a.join(' ') : ''}" auf der Seite';
+    case 'scrape':
+      if (a.isNotEmpty && a[0].startsWith('http')) {
+        return 'Scrape die URL ${a[0]}, um Preise, Links und Inhalt zu extrahieren';
+      }
+      return 'Scrape eine URL, um Preise, Links und Inhalt zu extrahieren (Verwendung: /scrape <url>)';
+    case 'docgen':
+      if (a.isNotEmpty) {
+        final format = a[0];
+        final topic = a.length > 1 ? a.sublist(1).join(' ') : '';
+        return 'Generiere ein $format-Dokument über: $topic';
+      }
+      return 'Generiere ein Dokument (Verwendung: /docgen <format> <thema>)';
     default: return cmd;
   }
 }
@@ -485,16 +581,26 @@ String _toNaturalDe(String cmd, List<String> a) {
 String _toNaturalIt(String cmd, List<String> a) {
   switch (cmd) {
     case 'links':
-      final filter = a.isNotEmpty ? a[0] : 'all';
+      final first = a.isNotEmpty ? a[0] : 'all';
+      final isUrl = first.startsWith('http');
+      final filter = isUrl ? (a.length > 1 ? a[1] : 'all') : first;
       final labels = {'all': '', 'video': ' video', 'image': ' immagini',
           'audio': ' audio', 'document': ' documenti'};
       final label = labels[filter];
+      if (isUrl) {
+        if (label != null) return 'Estrai tutti i link$label dall\'URL $first';
+        return 'Estrai tutti i link $filter dall\'URL $first';
+      }
       if (label != null) return 'Estrai tutti i link$label dalla pagina corrente';
       return 'Estrai tutti i link $filter dalla pagina corrente';
     case 'download': return 'Scarica ${a.isNotEmpty ? a.join(' ') : 'un file'}';
     case 'pdf': return 'Converti la pagina in PDF';
-    case 'summarize': return 'Riassumi la pagina corrente';
-    case 'extract': return 'Estrai contenuto da ${a.isNotEmpty ? a[0] : 'la pagina'}';
+    case 'summarize':
+      if (a.isNotEmpty && a[0].startsWith('http')) return 'Riassumi il contenuto dell\'URL ${a[0]}';
+      return 'Riassumi la pagina corrente';
+    case 'extract':
+      if (a.isNotEmpty && a[0].startsWith('http')) return 'Estrai contenuto dall\'URL ${a[0]}';
+      return 'Estrai contenuto da ${a.isNotEmpty ? a[0] : 'la pagina'}';
     case 'scroll': return 'Scorri ${a.isNotEmpty ? a[0] : 'in basso'}';
     case 'open': return 'Apri ${a.isNotEmpty ? a[0] : 'un URL'}';
     case 'click': return 'Clicca su ${a.isNotEmpty ? a[0] : "l'elemento"}';
@@ -507,7 +613,9 @@ String _toNaturalIt(String cmd, List<String> a) {
     case 'forms': return 'Estrai i moduli della pagina';
     case 'tables': return 'Estrai le tabelle della pagina';
     case 'media': return 'Estrai i media${a.isNotEmpty ? ' (${a[0]})' : ''} della pagina';
-    case 'metadata': return 'Mostra i metadati della pagina';
+    case 'metadata':
+      if (a.isNotEmpty && a[0].startsWith('http')) return 'Mostra i metadati dell\'URL ${a[0]}';
+      return 'Mostra i metadati della pagina';
     case 'autofill': return 'Riempi automaticamente il modulo';
     case 'inspect': return 'Ispeziona ${a.isNotEmpty ? a[0] : "l'elemento"}';
     case 'highlight': return 'Evidenzia ${a.isNotEmpty ? a[0] : "l'elemento"}';
@@ -516,6 +624,18 @@ String _toNaturalIt(String cmd, List<String> a) {
     case 'monitor': return 'Monitora ${a.isNotEmpty ? a[0] : "l'elemento"}';
     case 'translate': return 'Traduci la pagina in ${a.isNotEmpty ? _languageName(a[0], AppLanguage.it) : 'italiano'}';
     case 'searchpage': return 'Cerca "${a.isNotEmpty ? a.join(' ') : ''}" nella pagina';
+    case 'scrape':
+      if (a.isNotEmpty && a[0].startsWith('http')) {
+        return 'Scrape l\'URL ${a[0]} per estrarre prezzi, link e contenuto';
+      }
+      return 'Scrape un URL per estrarre prezzi, link e contenuto (uso: /scrape <url>)';
+    case 'docgen':
+      if (a.isNotEmpty) {
+        final format = a[0];
+        final topic = a.length > 1 ? a.sublist(1).join(' ') : '';
+        return 'Genera un documento $format su: $topic';
+      }
+      return 'Genera un documento (uso: /docgen <formato> <argomento>)';
     default: return cmd;
   }
 }
@@ -524,16 +644,26 @@ String _toNaturalIt(String cmd, List<String> a) {
 String _toNaturalPt(String cmd, List<String> a) {
   switch (cmd) {
     case 'links':
-      final filter = a.isNotEmpty ? a[0] : 'all';
+      final first = a.isNotEmpty ? a[0] : 'all';
+      final isUrl = first.startsWith('http');
+      final filter = isUrl ? (a.length > 1 ? a[1] : 'all') : first;
       final labels = {'all': '', 'video': ' vídeos', 'image': ' imagens',
           'audio': ' áudios', 'document': ' documentos'};
       final label = labels[filter];
+      if (isUrl) {
+        if (label != null) return 'Extrai todos os links$label do URL $first';
+        return 'Extrai todos os links $filter do URL $first';
+      }
       if (label != null) return 'Extrai todos os links$label da página atual';
       return 'Extrai todos os links $filter da página atual';
     case 'download': return 'Baixa ${a.isNotEmpty ? a.join(' ') : 'um ficheiro'}';
     case 'pdf': return 'Converter a página para PDF';
-    case 'summarize': return 'Resume a página atual';
-    case 'extract': return 'Extrai conteúdo de ${a.isNotEmpty ? a[0] : 'a página'}';
+    case 'summarize':
+      if (a.isNotEmpty && a[0].startsWith('http')) return 'Resume o conteúdo do URL ${a[0]}';
+      return 'Resume a página atual';
+    case 'extract':
+      if (a.isNotEmpty && a[0].startsWith('http')) return 'Extrai conteúdo do URL ${a[0]}';
+      return 'Extrai conteúdo de ${a.isNotEmpty ? a[0] : 'a página'}';
     case 'scroll': return 'Rola ${a.isNotEmpty ? a[0] : 'para baixo'}';
     case 'open': return 'Abre ${a.isNotEmpty ? a[0] : 'uma URL'}';
     case 'click': return 'Clica em ${a.isNotEmpty ? a[0] : 'o elemento'}';
@@ -546,7 +676,9 @@ String _toNaturalPt(String cmd, List<String> a) {
     case 'forms': return 'Extrai os formulários da página';
     case 'tables': return 'Extrai as tabelas da página';
     case 'media': return 'Extrai os media${a.isNotEmpty ? ' (${a[0]})' : ''} da página';
-    case 'metadata': return 'Mostra os metadados da página';
+    case 'metadata':
+      if (a.isNotEmpty && a[0].startsWith('http')) return 'Mostra os metadados do URL ${a[0]}';
+      return 'Mostra os metadados da página';
     case 'autofill': return 'Preenche automaticamente o formulário';
     case 'inspect': return 'Inspeciona ${a.isNotEmpty ? a[0] : 'o elemento'}';
     case 'highlight': return 'Destaca ${a.isNotEmpty ? a[0] : 'o elemento'}';
@@ -555,6 +687,18 @@ String _toNaturalPt(String cmd, List<String> a) {
     case 'monitor': return 'Monitoriza ${a.isNotEmpty ? a[0] : 'o elemento'}';
     case 'translate': return 'Traduz a página para ${a.isNotEmpty ? _languageName(a[0], AppLanguage.pt) : 'português'}';
     case 'searchpage': return 'Procura "${a.isNotEmpty ? a.join(' ') : ''}" na página';
+    case 'scrape':
+      if (a.isNotEmpty && a[0].startsWith('http')) {
+        return 'Scrape o URL ${a[0]} para extrair preços, links e conteúdo';
+      }
+      return 'Scrape um URL para extrair preços, links e conteúdo (uso: /scrape <url>)';
+    case 'docgen':
+      if (a.isNotEmpty) {
+        final format = a[0];
+        final topic = a.length > 1 ? a.sublist(1).join(' ') : '';
+        return 'Gera um documento $format sobre: $topic';
+      }
+      return 'Gera um documento (uso: /docgen <formato> <tema>)';
     default: return cmd;
   }
 }

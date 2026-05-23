@@ -51,7 +51,9 @@ dependencies:
   # Storage
   flutter_secure_storage: ^9.2.0
   shared_preferences: ^2.3.0
+  flutter_local_notifications: ^18.0.1
   firebase_storage: ^13.3.0
+  timezone: ^0.10.0
 
   # Images & Files
   image_picker: ^1.1.2

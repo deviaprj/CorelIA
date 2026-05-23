@@ -69,7 +69,7 @@ void main() {
 
       test('null attachmentTypes falls back to text classification', () {
         expect(
-          ModelRouter.classifyTask('explain why', attachmentTypes: null),
+          ModelRouter.classifyTask('raisonner sur ce sujet', attachmentTypes: null),
           TaskType.reasoning,
         );
       });

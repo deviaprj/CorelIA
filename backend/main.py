@@ -1,7 +1,7 @@
 """FastAPI application entry point."""
 
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
+from typing import Any, AsyncGenerator
 
 import redis.asyncio as redis
 from fastapi import FastAPI, Request, status
@@ -31,14 +31,17 @@ _limiter = Limiter(
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan handler."""
     logger.info("Starting up", extra={"app": settings.app_name, "env": settings.app_env})
-    # Verify Redis connectivity on startup
-    try:
-        r = redis.from_url(settings.redis_url)
-        await r.ping()
-        await r.close()
-        logger.info("Redis connected")
-    except Exception as exc:
-        logger.warning("Redis not available; rate limiting may use memory fallback", extra={"error": str(exc)})
+    # Verify Redis connectivity on startup (skip for memory:// fallback)
+    if not settings.redis_url.startswith('memory://'):
+      try:
+          r = redis.from_url(settings.redis_url)
+          await r.ping()
+          await r.close()
+          logger.info("Redis connected")
+      except Exception as exc:
+          logger.warning("Redis not available; rate limiting may use memory fallback", extra={"error": str(exc)})
+    else:
+        logger.info("Rate limiting using in-memory fallback (no Redis)")
     yield
     logger.info("Shutting down")
 

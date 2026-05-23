@@ -428,17 +428,17 @@ class FileUploadService {
     // 1. Essayer de couper au dernier paragraphe complet avant la limite
     final paragraphBreak = text.lastIndexOf('\n\n', maxChars);
     if (paragraphBreak > maxChars * 0.5) {
-      return '\${text.substring(0, paragraphBreak)}\n\n[... contenu tronque — \${text.length - paragraphBreak} caracteres restants]';
+      return '${text.substring(0, paragraphBreak)}\n\n[... contenu tronque — ${text.length - paragraphBreak} caracteres restants]';
     }
 
     // 2. Essayer de couper a la derniere phrase complete
     final sentenceEnd = lastSentenceEnd(text, maxChars);
     if (sentenceEnd > maxChars * 0.5) {
-      return '\${text.substring(0, sentenceEnd)}\n\n[... contenu tronque — \${text.length - sentenceEnd} caracteres restants]';
+      return '${text.substring(0, sentenceEnd)}\n\n[... contenu tronque — ${text.length - sentenceEnd} caracteres restants]';
     }
 
     // 3. Dernier recours : coupe dure
-    return '\${text.substring(0, maxChars)}... [tronque]';
+    return '${text.substring(0, maxChars)}... [tronque]';
   }
 
   /// Trouve la position de la fin de la derniere phrase complete avant [limit].

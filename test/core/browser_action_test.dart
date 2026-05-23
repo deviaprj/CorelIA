@@ -6,8 +6,8 @@ void main() {
   // ── BrowserActionType ───────────────────────────────────────────────────────
 
   group('BrowserActionType', () {
-    test('has all 21 action types', () {
-      expect(BrowserActionType.values.length, equals(21));
+    test('has all 22 action types', () {
+      expect(BrowserActionType.values.length, equals(22));
     });
 
     test('each type has correct string value', () {
@@ -31,6 +31,7 @@ void main() {
       expect(BrowserActionType.waitForSelector.value, equals('WAIT_FOR_SELECTOR'));
       expect(BrowserActionType.getElementInfo.value, equals('GET_ELEMENT_INFO'));
       expect(BrowserActionType.download.value, equals('DOWNLOAD'));
+      expect(BrowserActionType.downloadData.value, equals('DOWNLOAD_DATA'));
       expect(BrowserActionType.saveAsPdf.value, equals('SAVE_AS_PDF'));
     });
 

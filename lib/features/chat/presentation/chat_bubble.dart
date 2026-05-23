@@ -115,7 +115,7 @@ class ChatBubble extends StatelessWidget {
                                     ),
                                   if (message.content.isNotEmpty)
                                     Text(
-                                      EmotionParser.stripEmotionTags(message.content),
+                                      EmotionParser.toUiText(message.content),
                                       style: TextStyle(
                                         color: colorScheme.onPrimary,
                                       ),
@@ -127,7 +127,7 @@ class ChatBubble extends StatelessWidget {
                               padding: const EdgeInsets.symmetric(
                                   horizontal: 14, vertical: 10),
                               child: MarkdownBody(
-                                data: EmotionParser.stripEmotionTags(message.content),
+                                data: EmotionParser.toUiText(message.content),
                                 selectable: true,
                                 onTapLink: (text, href, title) async {
                                   if (href == null) return;

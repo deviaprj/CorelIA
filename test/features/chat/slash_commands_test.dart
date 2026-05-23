@@ -467,13 +467,69 @@ void main() {
         equals('Surveille .price'),
       );
     });
+
+    test('/scrape avec URL → natural language', () {
+      final result = SlashCommands.parse('/scrape https://example.com')!;
+      expect(
+        result.toNaturalLanguage(),
+        equals('Scrape l\'URL https://example.com pour extraire les prix, liens et contenu'),
+      );
+    });
+
+    test('/scrape sans URL → usage hint', () {
+      final result = SlashCommands.parse('/scrape')!;
+      expect(
+        result.toNaturalLanguage(),
+        equals('Scrape une URL pour extraire les prix, liens et contenu (usage: /scrape <url>)'),
+      );
+    });
+
+    test('/docgen → natural language', () {
+      final result = SlashCommands.parse('/docgen pdf Guide Flutter')!;
+      expect(
+        result.toNaturalLanguage(),
+        equals('Génère un document pdf sur : Guide Flutter'),
+      );
+    });
+
+    test('/links avec URL → context-aware', () {
+      final result = SlashCommands.parse('/links https://example.com video')!;
+      expect(
+        result.toNaturalLanguage(),
+        equals('Extrais tous les liens vidéos de l\'URL https://example.com'),
+      );
+    });
+
+    test('/summarize avec URL → context-aware', () {
+      final result = SlashCommands.parse('/summarize https://example.com')!;
+      expect(
+        result.toNaturalLanguage(),
+        equals('Résume le contenu de l\'URL https://example.com'),
+      );
+    });
+
+    test('/extract avec URL → context-aware', () {
+      final result = SlashCommands.parse('/extract https://example.com')!;
+      expect(
+        result.toNaturalLanguage(),
+        equals('Extrais le contenu de l\'URL https://example.com'),
+      );
+    });
+
+    test('/metadata avec URL → context-aware', () {
+      final result = SlashCommands.parse('/metadata https://example.com')!;
+      expect(
+        result.toNaturalLanguage(),
+        equals('Affiche les métadonnées de l\'URL https://example.com'),
+      );
+    });
   });
 
   // ── SlashCommands.all completeness ─────────────────────────────────────────
 
   group('SlashCommands.all', () {
     test('contains exactly 25 commands', () {
-      expect(SlashCommands.all.length, equals(25));
+      expect(SlashCommands.all.length, equals(26));
     });
 
     test('all commands have non-empty names', () {

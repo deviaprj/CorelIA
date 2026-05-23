@@ -48,15 +48,16 @@ void main() {
   });
 
   group('EmotionTtsConfig', () {
-    test('neutral a rate 1.0 et pitch 1.0', () {
+    test('neutral a rate < 1.0 et pitch == 1.0', () {
       final neutral = emotionTtsConfigs[TtsEmotion.neutral]!;
-      expect(neutral.rate, 1.0);
+      expect(neutral.rate, lessThan(1.0));
       expect(neutral.pitch, 1.0);
     });
 
-    test('joyful a rate > 1.0 et pitch > 1.0', () {
+    test('joyful a rate > neutral.rate et pitch > 1.0', () {
       final joyful = emotionTtsConfigs[TtsEmotion.joyful]!;
-      expect(joyful.rate, greaterThan(1.0));
+      final neutral = emotionTtsConfigs[TtsEmotion.neutral]!;
+      expect(joyful.rate, greaterThan(neutral.rate));
       expect(joyful.pitch, greaterThan(1.0));
     });
 

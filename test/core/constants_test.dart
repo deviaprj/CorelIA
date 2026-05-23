@@ -31,13 +31,13 @@ void main() {
     test('should have correct model names', () {
       expect(AppConstants.deepSeekModel, equals('deepseek-v4-flash'));
       expect(AppConstants.mistralModel, equals('mistralai/mistral-large-2407'));
-      expect(AppConstants.groqModel, equals('meta-llama/llama-3.3-70b-instruct'));
+      expect(AppConstants.deepseekR1Free, equals('deepseek/deepseek-r1:free'));
     });
 
     test('should have correct API URLs', () {
       expect(
         AppConstants.deepSeekBaseUrl,
-        equals('https://api.deepseek.com/v1/chat/completions'),
+        equals('https://api.deepseek.com/chat/completions'),
       );
       expect(
         AppConstants.openRouterBaseUrl,

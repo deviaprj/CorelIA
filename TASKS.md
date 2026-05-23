@@ -1,6 +1,30 @@
 # TASKS.md — Suivi Corely
 
-Dernière mise à jour : 2026-05-22 — Session V16 : Simplification radicale du mode vocal (tour-par-tour, half-duplex)
+Dernière mise à jour : 2026-05-23 — Session V16 : Tests verts + fixes interpolation
+
+## Terminé — Session 2026-05-23 — Tests Non-Régression ✅
+
+### Problèmes résolus
+1. **Suite de tests cassée après V16** : 12 échecs de compilation/runtime réduits à 0.
+2. **Interpolation `$` échappée (`\$`) dans 3 fichiers** : `file_upload_service.dart`, `attachment.dart` retournaient des template strings littéraux au lieu de valeurs interpolées.
+3. **`model_router.dart` dépendait des clés API** : `resolveModel()` retournait `null` en test car les clés DeepSeek/OpenRouter étaient vides. Le check de clé a été déplacé dans `_buildStreamForModel()` (call site), ce qui permet de tester le routage indépendamment.
+4. **`SendCallback` manquait `attachments`** : `input_bar_test.dart` et `slash_command_handlers_test.dart` mis à jour pour refléter la nouvelle signature.
+5. **Constantes et enum obsolètes** : `constants_test.dart` (URL DeepSeek), `slash_commands_test.dart` (count 25→26), `browser_action_test.dart` (count 21→22).
+
+### Fichiers modifiés
+- `test/features/chat/input_bar_test.dart` — ajout `attachments = const []` dans les stubs `onSend`
+- `test/features/chat/slash_command_handlers_test.dart` — mapping `docgen`/`scrape` vers `BrowserActionType.getPageContent`
+- `test/features/chat/slash_commands_test.dart` — count 25→26
+- `test/features/chat/data/model_router_test.dart` — message `'explain why'` → `'raisonner sur ce sujet'` pour matcher keywords
+- `test/core/constants_test.dart` — URL DeepSeek corrigée (`/chat/completions` sans `/v1`)
+- `lib/features/chat/data/file_upload_service.dart` — suppression `\` avant `$` dans `truncateForContext()` (3 lignes)
+- `lib/features/chat/domain/attachment.dart` — suppression `\` avant `$` dans `toApiPart()`
+- `lib/features/chat/data/model_router.dart` — suppression checks clés API dans `resolveModel()`, ajout fallback `deepseek-v4-flash`
+
+### Résultat
+```
++602 tests passed, 0 failed
+```
 
 ## Terminé — Session V16 (2026-05-22) — Mode Vocal Simplifié ✅
 
