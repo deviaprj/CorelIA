@@ -117,5 +117,90 @@ void main() {
         expect(tracker.remainingSeconds('test'), greaterThan(0));
       });
     });
+
+    group('classifyTaskEnhanced', () {
+      test('detects document generation prompts', () {
+        expect(
+          ModelRouter.classifyTaskEnhanced('Genere un document complet sur le climat'),
+          TaskType.document,
+        );
+        expect(
+          ModelRouter.classifyTaskEnhanced('Rédige un rapport détaillé'),
+          TaskType.document,
+        );
+      });
+
+      test('detects extraction prompts', () {
+        expect(
+          ModelRouter.classifyTaskEnhanced('Nettoie et structure le texte extrait suivant'),
+          TaskType.document,
+        );
+      });
+
+      test('detects multi-step actions', () {
+        expect(
+          ModelRouter.classifyTaskEnhanced('Trouve un vol, réserve un hôtel et planifie un itinéraire'),
+          TaskType.document,
+        );
+      });
+
+      test('detects deep reasoning prompts', () {
+        expect(
+          ModelRouter.classifyTaskEnhanced('Prouve que la somme des angles est 180°'),
+          TaskType.reasoning,
+        );
+        expect(
+          ModelRouter.classifyTaskEnhanced('Démonstration du théorème de Pythagore'),
+          TaskType.reasoning,
+        );
+      });
+
+      test('falls back to general for simple queries', () {
+        expect(
+          ModelRouter.classifyTaskEnhanced('Bonjour, comment ça va ?'),
+          TaskType.general,
+        );
+      });
+
+      test('preserves attachment-based routing', () {
+        expect(
+          ModelRouter.classifyTaskEnhanced('hello', attachmentTypes: ['image']),
+          TaskType.vision,
+        );
+        expect(
+          ModelRouter.classifyTaskEnhanced('analyse', attachmentTypes: ['pdf']),
+          TaskType.document,
+        );
+      });
+    });
+
+    group('resolveParams', () {
+      test('reasoning uses thinking=true', () {
+        final p = ModelRouter.resolveParams(TaskType.reasoning);
+        expect(p.enableThinking, isTrue);
+        expect(p.temperature, 0.7);
+        expect(p.maxTokens, 4096);
+      });
+
+      test('document uses thinking=false', () {
+        final p = ModelRouter.resolveParams(TaskType.document);
+        expect(p.enableThinking, isFalse);
+        expect(p.temperature, 0.7);
+        expect(p.maxTokens, 4096);
+      });
+
+      test('general uses default params', () {
+        final p = ModelRouter.resolveParams(TaskType.general);
+        expect(p.enableThinking, isFalse);
+        expect(p.temperature, 0.7);
+        expect(p.maxTokens, 4096);
+      });
+
+      test('vocal uses higher temperature', () {
+        final p = ModelRouter.resolveParams(TaskType.vocal);
+        expect(p.temperature, 0.95);
+        expect(p.maxTokens, 2048);
+      });
+    });
   });
 }

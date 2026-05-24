@@ -205,13 +205,6 @@ class EnhancedSearchService {
     return d;
   }
 
-  /// Format date: yyyy-MM-dd → DD/MM/YYYY (Expedia)
-  static String _toExpediaDate(String yyyyMmDd) {
-    final parts = yyyyMmDd.split('-');
-    if (parts.length == 3) return '${parts[2]}/${parts[1]}/${parts[0]}';
-    return yyyyMmDd;
-  }
-
   static double _parseNum(String price) {
     return double.tryParse(
         price.replaceAll(RegExp(r'[^\d.,]'), '').replaceAll(',', '.')) ??
@@ -351,59 +344,8 @@ class EnhancedSearchService {
     final depart = departDate; // yyyy-MM-dd
     final retour = returnDate; // yyyy-MM-dd or null
 
-    // ── Tier 1: SerpAPI Google Flights ──
-    final key = _serpApiKey;
-    if (key != null && key.isNotEmpty) {
-      try {
-        final params = {
-          'engine': 'google_flights',
-          'departure_id': fromIata,
-          'arrival_id': toIata,
-          'outbound_date': depart,
-          'api_key': key,
-          'gl': gl,
-          'hl': hl,
-          'currency': 'EUR',
-        };
-        if (retour != null) params['return_date'] = retour;
-
-        final resp = await _dio.get(
-            'https://serpapi.com/search', queryParameters: params);
-        if (resp.statusCode == 200) {
-          final bestFlights = _list(resp.data, 'best_flights');
-          final otherFlights = _list(resp.data, 'other_flights');
-          for (final f in [...bestFlights, ...otherFlights].take(12)) {
-            final flights = _list(f, 'flights');
-            final firstLeg = flights.isNotEmpty ? flights.first : null;
-            final lastLeg = flights.isNotEmpty ? flights.last : null;
-            final airline = firstLeg != null
-                ? _s(firstLeg['airline'])
-                : _s(f['airline']);
-            final depAirport = firstLeg != null
-                ? _s(firstLeg['departure_airport']?['name'])
-                : from;
-            final arrAirport = lastLeg != null
-                ? _s(lastLeg['arrival_airport']?['name'])
-                : to;
-
-            results.add(FlightResult(
-              departure: depAirport,
-              arrival: arrAirport,
-              date: depart,
-              price: '${_s(f['price'].toString())} €',
-              airline: airline.isNotEmpty ? airline : 'Compagnie',
-              stops: _list(f, 'layovers').isNotEmpty
-                  ? _list(f, 'layovers').length
-                  : 0,
-              link: _s(f['link']),
-              source: 'Google Flights',
-            ));
-          }
-        }
-      } catch (_) {}
-    }
-
     // ── Tier 1.5: Scrape Google search results for real flight prices ──
+    final key = _serpApiKey;
     if (results.isEmpty || results.every((r) => r.price == 'Comparer')) {
       try {
         final searchQuery =
@@ -427,19 +369,6 @@ class EnhancedSearchService {
     }
 
     // ── Tier 2: Direct comparator links (ALWAYS added) ──
-
-    // Google Flights
-    final gfQuery = Uri.encodeComponent(
-        'Vols $from $to le $depart${retour != null ? ' retour le $retour' : ''}');
-    results.add(FlightResult(
-      departure: from,
-      arrival: to,
-      date: depart,
-      price: 'Comparer',
-      airline: 'Google Flights',
-      link: 'https://www.google.com/travel/flights?q=$gfQuery',
-      source: 'Google Flights',
-    ));
 
     // Skyscanner — uses IATA codes + yyMMdd dates
     final skyFrom = fromIata.toLowerCase();
@@ -471,59 +400,6 @@ class EnhancedSearchService {
       airline: 'Kayak',
       link: kayakUrl,
       source: 'Kayak',
-    ));
-
-    // Kiwi — uses city names in URL
-    final kiwiFrom = Uri.encodeComponent(from.toLowerCase());
-    final kiwiTo = Uri.encodeComponent(to.toLowerCase());
-    final kiwiUrl = retour != null
-        ? 'https://www.kiwi.com/fr/search/results/$kiwiFrom/$kiwiTo/$depart/$retour'
-        : 'https://www.kiwi.com/fr/search/results/$kiwiFrom/$kiwiTo/$depart';
-    results.add(FlightResult(
-      departure: from,
-      arrival: to,
-      date: depart,
-      price: 'Comparer',
-      airline: 'Kiwi.com',
-      link: kiwiUrl,
-      source: 'Kiwi.com',
-    ));
-
-    // Expedia
-    final expFrom = fromIata;
-    final expTo = toIata;
-    final expDepart = _toExpediaDate(depart);
-    final expReturn = retour != null ? _toExpediaDate(retour) : null;
-    final expediaUrl = StringBuffer('https://www.expedia.fr/lp/flights/'
-        '$expFrom/$expTo?leg1=from:$expFrom,to:$expTo,departure:'
-        '$expDepart');
-    if (expReturn != null) {
-      expediaUrl.write(
-          '&leg2=from:$expTo,to:$expFrom,departure:$expReturn');
-    }
-    results.add(FlightResult(
-      departure: from,
-      arrival: to,
-      date: depart,
-      price: 'Comparer',
-      airline: 'Expedia',
-      link: expediaUrl.toString(),
-      source: 'Expedia',
-    ));
-
-    // Opodo
-    final opodoUrl = StringBuffer(
-        'https://www.opodo.fr/flights/search?origin=$fromIata'
-        '&destination=$toIata&outboundDate=$depart&adults=1');
-    if (retour != null) opodoUrl.write('&inboundDate=$retour');
-    results.add(FlightResult(
-      departure: from,
-      arrival: to,
-      date: depart,
-      price: 'Comparer',
-      airline: 'Opodo',
-      link: opodoUrl.toString(),
-      source: 'Opodo',
     ));
 
     // Momondo

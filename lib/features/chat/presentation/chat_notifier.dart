@@ -40,6 +40,11 @@ import 'slash_commands.dart';
 import '../../retention/data/retention_providers.dart';
 import '../../retention/data/user_profile_service.dart';
 import '../../retention/data/usage_stats_service.dart';
+import '../data/learning_repository.dart';
+import '../data/knowledge_base_service.dart';
+import 'feedback_collector.dart';
+import '../../monetization/data/consent_data_service.dart';
+import '../../monetization/data/anonymized_insight_service.dart';
 
 // ── Conversations stream ───────────────────────────────────────────────────
 final conversationsStreamProvider =
@@ -158,8 +163,28 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
   String _lastLinksFilter = 'all';
   String? _lastUsedModelId;
 
+  // ── Apprentissage et feedback ───────────────────────────────────────────────
+  late final LearningRepository _learningRepo;
+  late final FeedbackCollector _feedback;
+  late final KnowledgeBaseService _knowledgeBase;
+  late final ConsentDataService _consentData;
+  late final AnonymizedInsightService _insights;
+
   @override
   ChatState build(String conversationId) {
+    // Initialiser les services d'apprentissage
+    final db = isDemoMode ? null : ref.read(firestoreProvider);
+    final userId = isDemoMode ? null : ref.read(currentUserProvider)?.uid;
+    _learningRepo = LearningRepository(db: db, userId: userId);
+    _feedback = FeedbackCollector(_learningRepo);
+    _knowledgeBase = KnowledgeBaseService();
+    _consentData = ConsentDataService();
+    _insights = AnonymizedInsightService(_consentData);
+    _knowledgeBase.init();
+
+    // Enregistrer le demarrage de session pour les insights
+    _insights.recordSessionStart();
+
     ref.listen(messagesStreamProvider(conversationId), (_, next) {
       // Hors streaming uniquement : sync depuis le repo Firestore/mock.
       // Pendant le streaming, on gère tout localement pour éviter les
@@ -1529,10 +1554,10 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
     }
 
     final normalizedFormat = _normalizeDocFormat(cmd.args[0]);
-    final allowed = {'pdf', 'word', 'powerpoint', 'excel', 'markdown', 'text'};
+    final allowed = {'pdf', 'word', 'powerpoint', 'excel', 'markdown', 'text', 'jpg', 'png'};
     if (!allowed.contains(normalizedFormat)) {
       state = state.copyWith(
-        error: 'Format non supporte: ${cmd.args[0]}. Utilisez pdf, word, powerpoint, excel, markdown, text.',
+        error: 'Format non supporte: ${cmd.args[0]}. Utilisez pdf, word, powerpoint, excel, markdown, text, jpg, png.',
         isStreaming: false,
       );
       return true;
@@ -1556,14 +1581,23 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
       }
 
       final isPro = await ref.read(isProProvider.future).catchError((_) => false);
-      final draft = await _generateDocumentDraft(
-        topic: topic,
-        format: normalizedFormat,
-        searchContext: searchContext,
-        isPro: isPro,
-      );
 
-      final title = _extractDocumentTitle(draft, fallbackTopic: topic);
+      // Image formats skip text draft generation — use the topic directly as prompt
+      final String draft;
+      final String title;
+      if (normalizedFormat == 'jpg' || normalizedFormat == 'png') {
+        draft = topic;
+        title = topic;
+      } else {
+        draft = await _generateDocumentDraft(
+          topic: topic,
+          format: normalizedFormat,
+          searchContext: searchContext,
+          isPro: isPro,
+        );
+        title = _extractDocumentTitle(draft, fallbackTopic: topic);
+      }
+
       final sources = searchResults
           .map((r) => '${r.title} — ${r.url}')
           .toList(growable: false);
@@ -1647,7 +1681,7 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
       await _persistAssistantMessage(
         '❌ Échec génération document\n\n'
         'Erreur : $e\n\n'
-        '💡 Réessayez avec un format supporté (word, excel, powerpoint, pdf, markdown, text).',
+        '💡 Réessayez avec un format supporté (word, excel, powerpoint, pdf, markdown, text, jpg, png).',
       );
       state = state.copyWith(isStreaming: false, isSearching: false);
     } finally {
@@ -1727,6 +1761,8 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
     if (lower == 'doc' || lower == 'docx' || lower == 'word') return 'word';
     if (lower == 'ppt' || lower == 'pptx' || lower == 'powerpoint') return 'powerpoint';
     if (lower == 'xls' || lower == 'xlsx' || lower == 'excel') return 'excel';
+    if (lower == 'jpg' || lower == 'jpeg') return 'jpg';
+    if (lower == 'png') return 'png';
     if (lower == 'pdf') return 'pdf';
     return lower;
   }
@@ -1803,6 +1839,14 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
       createdAt: DateTime.now(),
     );
     state = state.copyWith(messages: [...state.messages, msg]);
+
+    // Apprentissage : stocker la reponse slash dans la base de connaissances
+    try {
+      await _knowledgeBase.add(text, text);
+      await _insights.recordFeatureUsage('slash_command');
+    } catch (e) {
+      debugPrint('[ChatNotifier] Learning hook error in _persistAssistantMessage: $e');
+    }
     try {
       if (isDemoMode) {
         await mockChatRepository.addMessage(
@@ -2134,6 +2178,8 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
         }
         // Record successful extraction for learning
         extractor.memory.recordSuccess(intent, userMsg.content, searchParams);
+        // Record anonymized insight
+        await _insights.recordSearch(userMsg.content, intent);
       } catch (e) {
         debugPrint('[ChatNotifier] Recherche enrichie echouee : $e');
       }
@@ -2273,6 +2319,14 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
           model: model,
           searchSources: persistedSources,
         );
+      }
+
+      // 6. Apprentissage : stocker Q/R dans la base de connaissances
+      try {
+        await _knowledgeBase.add(userMsg.content, finalContent);
+        await _insights.recordFeatureUsage('chat_response');
+      } catch (e) {
+        debugPrint('[ChatNotifier] Learning hook error: $e');
       }
     } on AiException catch (e) {
       final msg = _formatAiError(e);
@@ -2520,10 +2574,11 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
       orElse: () => {'content': ''},
     )['content'];
     final userText = (lastUserContent is String) ? lastUserContent : '';
-    final taskType = ModelRouter.classifyTask(
+    final taskType = ModelRouter.classifyTaskEnhanced(
       userText,
       attachmentTypes: attachmentTypes,
     );
+    final params = ModelRouter.resolveParams(taskType);
     final effectiveOverride = modelOverride ?? state.selectedModel;
     final entry = ModelRouter.resolveModel(taskType, userOverride: effectiveOverride);
 
@@ -2531,9 +2586,15 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
       return _mockResponseStream();
     }
 
-    debugPrint('[ChatNotifier] ${taskType.name} → ${entry.modelId} (${entry.provider})');
+    debugPrint('[ChatNotifier] ${taskType.name} → ${entry.modelId} (${entry.provider}) | temp=${params.temperature} maxTokens=${params.maxTokens} thinking=${params.enableThinking}');
     _lastUsedModelId = entry.modelId;
-    return _buildStreamForModel(entry, history, isVoiceConversation: isVoiceConversation);
+    return _buildStreamForModel(
+      entry,
+      history,
+      isVoiceConversation: isVoiceConversation,
+      taskType: taskType,
+      params: params,
+    );
   }
 
   /// Construit le stream pour un modèle donné selon son provider.
@@ -2542,7 +2603,11 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
     List<Map<String, dynamic>> history, {
     String? systemPrompt,
     bool isVoiceConversation = false,
+    TaskType? taskType,
+    ModelParams? params,
   }) {
+    final effectiveParams = params ?? ModelRouter.resolveParams(taskType ?? TaskType.general);
+
     if (entry.provider == 'deepseek') {
       final key = AppConstants.deepSeekApiKey;
       if (key.isEmpty) return _mockResponseStream();
@@ -2551,6 +2616,8 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
         model: entry.modelId,
         systemPrompt: systemPrompt,
         enableSearch: entry.supportsSearch,
+        maxTokens: effectiveParams.maxTokens,
+        temperature: isVoiceConversation ? 0.95 : effectiveParams.temperature,
       );
     }
 
@@ -2561,7 +2628,8 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
       messages: history,
       model: entry.modelId,
       systemPrompt: systemPrompt,
-      temperature: isVoiceConversation ? 0.95 : null,
+      maxTokens: effectiveParams.maxTokens,
+      temperature: isVoiceConversation ? 0.95 : effectiveParams.temperature,
       topP: isVoiceConversation ? 0.95 : null,
       frequencyPenalty: isVoiceConversation ? 0.2 : null,
     );

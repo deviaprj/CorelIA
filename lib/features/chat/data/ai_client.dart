@@ -26,6 +26,7 @@ class DeepSeekClient {
     int maxTokens = AppConstants.maxTokens,
     bool enableSearch = true,
     String? model,
+    double? temperature,
   }) async* {
     if (apiKey.isEmpty) {
       throw const AiException('Clé API DeepSeek manquante', statusCode: 401);
@@ -47,6 +48,10 @@ class DeepSeekClient {
       bodyMap['max_completion_tokens'] = maxTokens;
     } else {
       bodyMap['max_tokens'] = maxTokens;
+    }
+
+    if (temperature != null) {
+      bodyMap['temperature'] = temperature;
     }
 
     if (enableSearch) {

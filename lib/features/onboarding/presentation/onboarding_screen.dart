@@ -22,8 +22,8 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
       icon: Icons.auto_awesome,
       title: 'IA à portée de main',
       description:
-          'Chattez avec DeepSeek-V3, un des meilleurs modèles IA '
-          'du moment — gratuitement, sans limite de tokens.',
+          'Votre assistant personnel ultra-performant '
+          '— gratuitement, sans limite de tokens.',
       gradient: [Color(0xFF6C63FF), Color(0xFF9C55FF)],
     ),
     _OnboardingPage(

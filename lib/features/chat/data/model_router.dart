@@ -56,6 +56,19 @@ class RateLimitTracker {
   }
 }
 
+/// Paramètres recommandés pour un modèle selon le type de tâche.
+class ModelParams {
+  final double temperature;
+  final int maxTokens;
+  final bool enableThinking;
+
+  const ModelParams({
+    this.temperature = 0.7,
+    this.maxTokens = 4096,
+    this.enableThinking = false,
+  });
+}
+
 /// Routage intelligent des modèles IA.
 class ModelRouter {
   static final rateLimiter = RateLimitTracker();
@@ -133,9 +146,9 @@ class ModelRouter {
       'mistral/mistral-7b-instruct:free',
     ],
     TaskType.reasoning: [
-      'deepseek-v4-pro',
-      'deepseek/deepseek-r1:free',
       'deepseek-reasoner',
+      'deepseek/deepseek-r1:free',
+      'deepseek-v4-pro',
     ],
     TaskType.vision: [
       'google/gemini-flash-1.5',
@@ -241,6 +254,144 @@ class ModelRouter {
 
   /// Retourne l'entrée du registre pour un modelId.
   static ModelEntry? getEntry(String modelId) => _registry[modelId];
+
+  // ── Complex task detection (cost optimization) ───────────────────────────
+
+  /// Version enrichie de [classifyTask] qui détecte les tâches complexes
+  /// nécessitant deepseek-v4-pro ou le mode thinking.
+  static TaskType classifyTaskEnhanced(
+    String message, {
+    bool hasImage = false,
+    bool hasFile = false,
+    bool isDocGen = false,
+    List<String>? attachmentTypes,
+  }) {
+    // Routage prioritaire inchangé (pièces jointes)
+    if (attachmentTypes != null && attachmentTypes.isNotEmpty) {
+      if (attachmentTypes.any((t) => t == 'image')) return TaskType.vision;
+      if (attachmentTypes.any((t) => t == 'pdf' || t == 'document' || t == 'spreadsheet' || t == 'presentation')) {
+        return TaskType.document;
+      }
+      if (attachmentTypes.any((t) => t == 'text')) return TaskType.longFile;
+    }
+
+    if (hasImage) return TaskType.vision;
+    if (isDocGen) return TaskType.document;
+    if (hasFile) return TaskType.longFile;
+
+    final lower = message.toLowerCase();
+
+    // Deep reasoning → thinking ON (deepseek-reasoner)
+    if (_isDeepReasoningPrompt(lower)) return TaskType.reasoning;
+
+    // Complex tasks → deepseek-v4-pro (document routing)
+    if (_isDocumentGenerationPrompt(lower) ||
+        _isExtractionPrompt(lower) ||
+        _isMultiStepAction(lower)) {
+      return TaskType.document;
+    }
+
+    // Fallback sur la classification existante
+    if (_containsCodeKeywords(lower)) return TaskType.code;
+    if (_containsReasoningKeywords(lower)) return TaskType.reasoning;
+    return TaskType.general;
+  }
+
+  /// Résout les paramètres (température, tokens, thinking) pour un type de tâche.
+  static ModelParams resolveParams(TaskType taskType) {
+    switch (taskType) {
+      case TaskType.reasoning:
+        return const ModelParams(
+          temperature: 0.7,
+          maxTokens: 4096,
+          enableThinking: true,
+        );
+      case TaskType.document:
+      case TaskType.longFile:
+      case TaskType.code:
+        return const ModelParams(
+          temperature: 0.7,
+          maxTokens: 4096,
+          enableThinking: false,
+        );
+      case TaskType.vocal:
+      case TaskType.vocalFast:
+        return const ModelParams(
+          temperature: 0.95,
+          maxTokens: 2048,
+          enableThinking: false,
+        );
+      case TaskType.vision:
+        return const ModelParams(
+          temperature: 0.7,
+          maxTokens: 4096,
+          enableThinking: false,
+        );
+      case TaskType.general:
+        return const ModelParams(
+          temperature: 0.7,
+          maxTokens: 4096,
+          enableThinking: false,
+        );
+    }
+  }
+
+  static bool _isDocumentGenerationPrompt(String text) {
+    const markers = [
+      'genere un document', 'génère un document', 'generate a document',
+      'redige un document', 'rédige un document', 'write a document',
+      'docgen', 'document complet', 'complete document',
+      'rapport detaille', 'rapport détaillé', 'detailed report',
+      'mémoire', 'memoire', 'these', 'thèse', 'dissertation',
+    ];
+    return markers.any((m) => text.contains(m));
+  }
+
+  static bool _isExtractionPrompt(String text) {
+    const markers = [
+      'nettoie et structure le texte extrait', 'clean and structure the extracted text',
+      'extrait suivant', 'extracted text', '/extract',
+      'analyse ce contenu', 'analyze this content',
+      'resume et structure', 'résume et structure',
+      'synthese de', 'synthèse de', 'summary of',
+    ];
+    return markers.any((m) => text.contains(m));
+  }
+
+  static bool _isMultiStepAction(String text) {
+    const stepMarkers = [
+      'etape 1', 'étape 1', 'step 1', 'phase 1',
+      'd\'abord', 'ensuite', 'puis', 'finalement',
+      'first', 'then', 'next', 'after that', 'finally',
+      'planifie', 'organise', 'coordonne',
+      'multi-step', 'plusieurs etapes', 'plusieurs étapes',
+    ];
+    final hasSteps = stepMarkers.any((m) => text.contains(m));
+
+    const actionVerbs = [
+      'trouve', 'cherche', 'recherche', 'reserve', 'réserve', 'achete', 'achète',
+      'planifie', 'organise', 'coordonne', 'genere', 'génère', 'redige', 'rédige',
+      'find', 'search', 'book', 'buy', 'plan', 'organize', 'generate', 'write',
+    ];
+    var verbCount = 0;
+    for (final verb in actionVerbs) {
+      if (text.contains(verb)) verbCount++;
+    }
+
+    return hasSteps || verbCount >= 3;
+  }
+
+  static bool _isDeepReasoningPrompt(String text) {
+    const markers = [
+      'prouve', 'prove', 'démonstration', 'demonstration',
+      'theorem', 'théorème', 'axiome', 'proof',
+      'raisonnement pas a pas', 'raisonnement pas à pas', 'step by step reasoning',
+      'chaine de pensee', 'chaîne de pensée', 'chain of thought',
+      'explique ton raisonnement', 'explain your reasoning',
+      'démontre', 'demontre', 'démontrer', 'demontrer',
+    ];
+    return markers.any((m) => text.contains(m));
+  }
 
   static bool _containsCodeKeywords(String text) {
     const keywords = [

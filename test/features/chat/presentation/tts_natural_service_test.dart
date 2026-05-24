@@ -44,7 +44,7 @@ void main() {
 
       test('supprime les blocs de code', () {
         final result = TtsNaturalService.cleanMarkdown('Du texte\n```\ncode ici\n```\nSuite');
-        expect(result, contains('[bloc de code]'));
+        expect(result, contains('bloc de code'));
         expect(result, isNot(contains('```')));
       });
 

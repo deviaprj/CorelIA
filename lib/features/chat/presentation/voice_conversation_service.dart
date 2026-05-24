@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'chat_notifier.dart';
 import '../domain/message.dart';
 import 'barge_in_intent_classifier.dart';
+import 'prosody_learning_service.dart';
 import 'tts_emotion.dart';
 import 'emotion_parser.dart';
 import 'voice_service.dart';
@@ -72,6 +73,9 @@ class VoiceConversationNotifier
 
   /// Garde contre les appels concurrents à _speakFullResponse.
   bool _isProcessingResponse = false;
+
+  /// Emotion du TTS en cours pour le prosody learning.
+  TtsEmotion _currentSpeakingEmotion = TtsEmotion.neutral;
 
   /// Heure de la dernière requête LLM envoyée par _sendToLLM.
   /// Utilisée pour identifier le message assistant qui correspond au tour
@@ -222,9 +226,11 @@ class VoiceConversationNotifier
     final emotion = parseResult.hasEmotionTag
         ? parseResult.emotion
         : EmotionParser.inferFromText(text);
+    _currentSpeakingEmotion = emotion;
 
     try {
       await _voice.speakWithEmotion(text, emotion);
+      ProsodyLearningService().recordCompletion(emotion);
     } catch (e) {
       debugPrint('[VoiceConversation] TTS error: $e');
     }
@@ -256,6 +262,7 @@ class VoiceConversationNotifier
     debugPrint('[VoiceConversation] Barge-in ($intent): $transcript');
 
     _voice.stopSpeaking();
+    ProsodyLearningService().recordBargeIn(_currentSpeakingEmotion);
 
     switch (intent) {
       case BargeInIntent.repeat:

@@ -9,7 +9,10 @@ import '../data/openrouter_tts_service.dart';
 import '../data/tts_cache_service.dart';
 import 'audio_player_factory.dart';
 import 'emotion_parser.dart';
+import 'phonetic_liaison_service.dart';
+import 'prosody_learning_service.dart';
 import 'tts_emotion.dart';
+import 'vocal_hesitation_injector.dart';
 
 /// Moteur TTS selectionne.
 enum TtsEngine {
@@ -37,13 +40,15 @@ class TtsNaturalService {
   TtsEngine _activeEngine = TtsEngine.flutterTts;
   TtsEmotion _currentEmotion = TtsEmotion.neutral;
   double _speechRate = 0.45;
-  double _pitch = 1.10;
+  double _pitch = 1.15;
   String _language = 'fr-FR';
 
   bool get isSpeaking => _isSpeaking;
   TtsEngine get activeEngine => _activeEngine;
   TtsEmotion get currentEmotion => _currentEmotion;
 
+  // ── Prosody learning ─────────────────────────────────────────────────────
+  final ProsodyLearningService _prosodyLearning = ProsodyLearningService();
   /// True si une voix premium (neural/premium/enhanced) a ete detectee.
   bool get hasPremiumVoice => _hasPremiumVoice;
   bool _hasPremiumVoice = false;
@@ -155,7 +160,16 @@ class TtsNaturalService {
 
     final parseResult = EmotionParser.parse(text);
     final emotion = parseResult.hasEmotionTag ? parseResult.emotion : _currentEmotion;
-    var cleanText = parseResult.hasEmotionTag ? parseResult.cleanText : cleanMarkdown(text);
+    // CRITICAL: always run cleanMarkdown, even when emotion tags were detected,
+    // so that markdown artifacts (asterisks, pipes, citations, URLs) are stripped.
+    var cleanText = cleanMarkdown(parseResult.cleanText);
+
+    // Apply phonetic liaisons for natural prosody
+    cleanText = PhoneticLiaisonService.apply(cleanText, _language);
+
+    // Inject natural hesitations based on learned intensity
+    final hesitationIntensity = await _prosodyLearning.getHesitationIntensity();
+    cleanText = VocalHesitationInjector.inject(cleanText, intensity: hesitationIntensity);
 
     if (cleanText.trim().isEmpty) return;
 
@@ -236,7 +250,7 @@ class TtsNaturalService {
       await _initFlutterTts();
     }
 
-    final config = emotionTtsConfigs[_currentEmotion] ?? emotionTtsConfigs[TtsEmotion.neutral]!;
+    final config = await _prosodyLearning.getConfigForEmotion(_currentEmotion);
     final adaptiveRate = text.length < 150
         ? config.rate * 1.05
         : config.rate * 0.95;
@@ -251,6 +265,14 @@ class TtsNaturalService {
       final chunks = _splitForNaturalSpeech(text);
       for (var i = 0; i < chunks.length; i++) {
         if (!_isSpeaking) break;
+        final chunk = chunks[i];
+
+        // Paragraph break: longer pause instead of speaking
+        if (chunk.isEmpty) {
+          await Future<void>.delayed(const Duration(milliseconds: 500));
+          continue;
+        }
+
         final completer = Completer<void>();
         _flutterTts.setCompletionHandler(() {
           if (!completer.isCompleted) completer.complete();
@@ -259,14 +281,15 @@ class TtsNaturalService {
           if (!completer.isCompleted) completer.complete();
         });
 
-        await _flutterTts.speak(chunks[i]);
+        await _flutterTts.speak(chunk);
         await completer.future.timeout(
           const Duration(seconds: 25),
           onTimeout: () {},
         );
 
         if (i < chunks.length - 1) {
-          await Future<void>.delayed(const Duration(milliseconds: 140));
+          // Longer pause between sentences for natural prosody
+          await Future<void>.delayed(const Duration(milliseconds: 250));
         }
       }
     } catch (e) {
@@ -371,7 +394,7 @@ class TtsNaturalService {
     // 5. Code blocks → hint, inline code → raw
     working = working.replaceAllMapped(
       RegExp(r'`{3}[\s\S]*?`{3}'),
-      (_) => ' [bloc de code] .\n\n',
+      (_) => ' bloc de code. \n\n',
     );
     working = working.replaceAllMapped(RegExp(r'`(.+?)`'), (m) => m.group(1) ?? '');
 
@@ -390,6 +413,8 @@ class TtsNaturalService {
       RegExp(r'^\s*\|?(.+?)\|?\s*$', multiLine: true),
       (m) {
         final raw = m.group(1) ?? '';
+        // Only process lines that actually contain table pipes
+        if (!raw.contains('|')) return m.group(0) ?? '';
         // Skip table header separator lines like |---|---|
         if (RegExp(r'^\s*[|:-\s]+\|\s*[|:-\s]+\s*$').hasMatch(raw)) {
           return '\n';
@@ -415,15 +440,7 @@ class TtsNaturalService {
     // 11. HTML tags
     working = working.replaceAll(RegExp(r'<[^>]+>'), '');
 
-    // 12. Trailing URLs / domains
-    working = working.replaceAll(RegExp(r'\bhttps?://\S+'), ' ');
-    working = working.replaceAll(RegExp(r'\bwww\.\S+'), ' ');
-    working = working.replaceAllMapped(
-      RegExp(r'\b[a-zA-Z0-9-]+\.(com|fr|org|net|io|co|app|dev|ai|eu|de|it|es|pt)\b', caseSensitive: false),
-      (_) => ' ',
-    );
-
-    // 13. Punctuation normalization for speech
+    // 12. Punctuation normalization for speech
     working = working.replaceAll(RegExp(r'(?<=\w);(?=\s|$)'), '. ');
     working = working.replaceAll(RegExp(r'(?<=\w):(?=\s|$)'), '. ');
     working = working.replaceAll(RegExp(r'\s+#\s+'), ' ');
@@ -432,22 +449,31 @@ class TtsNaturalService {
     working = working.replaceAll(RegExp(r'(?<=\w)\\(?=\w)'), ' ');
 
     // 14. Final aggressive pass — remove stray markdown artifacts
-    // Any remaining *, -, _, |, [ ], #, > at line start that are NOT part of words
+    // Any remaining *, -, _, |, #, >, ~, ` at line start that are NOT part of words
     working = working.replaceAllMapped(
-      RegExp(r'^\s*[-*_#>|]+\s*', multiLine: true),
+      RegExp(r'^\s*[-*_#>|~`]+\s*', multiLine: true),
       (_) => '',
     );
-    // Remove stray brackets that weren't links
+    // Remove stray brackets that weren't links (but keep link text handled above)
+    working = working.replaceAll(RegExp(r'(?<!\w)\[(\d+)\](?!\w)'), ' '); // citations missed earlier
     working = working.replaceAll(RegExp(r'\[|\]'), ' ');
-    // Remove stray asterisks / underscores inside text (not caught by above)
-    working = working.replaceAll(RegExp(r'(?<!\w)[*_]+(?!\w)'), ' ');
-    // Remove stray pipes
-    working = working.replaceAll('|', ' ');
+    // Remove stray asterisks / underscores / tildes inside text
+    working = working.replaceAll(RegExp(r'(?<!\w)[*_~`]+(?!\w)'), ' ');
+    // Remove stray pipes and hash signs
+    working = working.replaceAll(RegExp(r'(?<!\w)[|#]+(?!\w)'), ' ');
+    // Remove stray parentheses left from broken links
+    working = working.replaceAll(RegExp(r'\(\s*\)'), ' ');
+    // Remove any remaining single backticks
+    working = working.replaceAll('`', ' ');
 
-    // 15. Collapse whitespace for natural speech
+    // 15. Collapse whitespace BUT preserve paragraph breaks (\n\n) for natural pauses
     working = working.replaceAll(RegExp(r'[ \t]+'), ' ');
-    working = working.replaceAll(RegExp(r'\n{2,}'), ' ');
-    working = working.replaceAll('\n', ' ');
+    working = working.replaceAll(RegExp(r'\n{3,}'), '\n\n');
+    // Keep \n\n as paragraph markers; replace single \n with space
+    working = working.replaceAllMapped(
+      RegExp(r'(?<!\n)\n(?!\n)'),
+      (_) => ' ',
+    );
 
     return working.trim();
   }
@@ -511,13 +537,14 @@ class TtsNaturalService {
   }
 
   List<String> _splitForNaturalSpeech(String text) {
-    final normalized = text
-        .replaceAll(RegExp(r'\s+'), ' ')
+    // Preserve paragraph breaks (\n\n) for natural pauses between sections
+    final cleaned = text
+        .replaceAll(RegExp(r'[ \t]+'), ' ')
+        .replaceAll(RegExp(r'\n{3,}'), '\n\n')
         .trim();
-    if (normalized.isEmpty) return const [];
+    if (cleaned.isEmpty) return const [];
 
     const maxChunkLength = 120;
-    final sentenceChunks = normalized.split(RegExp(r'(?<=[\.!?;:])\s+'));
     final chunks = <String>[];
     final current = StringBuffer();
 
@@ -528,26 +555,42 @@ class TtsNaturalService {
       }
     }
 
-    for (final sentence in sentenceChunks) {
-      if (sentence.length > maxChunkLength) {
-        flush();
-        for (var i = 0; i < sentence.length; i += maxChunkLength) {
-          final end = math.min(i + maxChunkLength, sentence.length);
-          chunks.add(sentence.substring(i, end).trim());
+    final paragraphs = cleaned.split('\n\n');
+    for (var pIdx = 0; pIdx < paragraphs.length; pIdx++) {
+      final para = paragraphs[pIdx].trim();
+      if (para.isEmpty) continue;
+
+      final sentenceChunks = para.split(RegExp(r'(?<=[\.!?;:])\s+'));
+      for (final sentence in sentenceChunks) {
+        final trimmed = sentence.trim();
+        if (trimmed.isEmpty) continue;
+
+        if (trimmed.length > maxChunkLength) {
+          flush();
+          for (var i = 0; i < trimmed.length; i += maxChunkLength) {
+            final end = math.min(i + maxChunkLength, trimmed.length);
+            chunks.add(trimmed.substring(i, end).trim());
+          }
+          continue;
         }
-        continue;
+
+        final nextLength = current.length + (current.isNotEmpty ? 1 : 0) + trimmed.length;
+        if (nextLength > maxChunkLength) {
+          flush();
+        }
+        if (current.isNotEmpty) current.write(' ');
+        current.write(trimmed);
       }
 
-      final nextLength = current.length + (current.isNotEmpty ? 1 : 0) + sentence.length;
-      if (nextLength > maxChunkLength) {
-        flush();
+      flush();
+      // Insert a paragraph-break marker (empty chunk) between paragraphs
+      // so that _speakWithFlutterTts can insert a longer pause.
+      if (pIdx < paragraphs.length - 1) {
+        chunks.add('');
       }
-      if (current.isNotEmpty) current.write(' ');
-      current.write(sentence);
     }
 
-    flush();
-    return chunks.where((c) => c.isNotEmpty).toList(growable: false);
+    return chunks.where((c) => c.isNotEmpty || c == '').toList(growable: false);
   }
 
   Future<void> stop() async {

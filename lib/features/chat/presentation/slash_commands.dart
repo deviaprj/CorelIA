@@ -201,7 +201,7 @@ class SlashCommands {
     ),
     SlashCommand(
       name: 'docgen',
-      description: 'Générer un document riche (word, powerpoint, excel, pdf, markdown, texte) à partir d\'un sujet',
+      description: 'Générer un document riche (word, powerpoint, excel, pdf, markdown, texte) ou une image (jpg, png) à partir d\'un sujet',
       usage: '/docgen <format> <sujet> [nom_fichier]',
       params: ['format', 'sujet', 'nom_fichier'],
       icon: Icons.description,

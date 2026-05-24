@@ -289,26 +289,18 @@ async function handleBrowserAction(message, _sender, sendResponse) {
         }
 
         try {
-          // Decode base64 → binary → Blob → blob URL (avoids Chrome's ~2MB data URL limit)
-          var binaryStr = atob(contentBase64);
-          var bytes = new Uint8Array(binaryStr.length);
-          for (var bi = 0; bi < binaryStr.length; bi++) {
-            bytes[bi] = binaryStr.charCodeAt(bi);
-          }
-          var blob = new Blob([bytes], { type: mimeType });
-          var blobUrl = URL.createObjectURL(blob);
+          // Manifest V3 service workers have no DOM — URL.createObjectURL is unavailable.
+          // chrome.downloads.download() accepts data URLs directly (no 2 MB limit here).
+          var dataUrl = 'data:' + mimeType + ';base64,' + contentBase64;
 
           var id = await Promise.race([
             chrome.downloads.download({
-              url: blobUrl,
+              url: dataUrl,
               filename: filename,
               saveAs: false,
             }),
             new Promise((_, rej) => setTimeout(() => rej(new Error('Download timed out (10s)')), 10000)),
           ]);
-
-          // Clean up blob URL after download starts
-          setTimeout(function () { URL.revokeObjectURL(blobUrl); }, 5000);
 
           sendResponse({ success: true, data: { id: id, filename: filename } });
         } catch (dlErr) {

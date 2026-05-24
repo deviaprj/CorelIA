@@ -57,7 +57,7 @@ Chaque réponse IA peut être partagée sous forme d'image PNG générée côté
 #### Tactique E — "Corely Challenge"
 - Défi TikTok/Reels : "Montre la conversation la plus drôle/utile/surprenante avec ton IA"
 - Hashtag #CorelyChallenge
-- Prix chaque semaine : 1 an Pro gratuit (coût = 0, valeur perçue = 50 €)
+- Prix chaque semaine : 1 an Pro gratuit (coût = 0, valeur perçue = 80 €)
 
 #### Tactique F — Landing pages SEO auto-générées
 Chaque `/summarize https://...` crée une URL publique indexable :
@@ -109,7 +109,7 @@ Avec 0 € de budget média, les réseaux sociaux sont le seul canal scalable. L
 
 #### Stratégie de publication
 - **Lundi/Mercredi/Vendredi** à 12h30 ou 19h (heures de pause)
-- Hashtags : `#IA #IntelligenceArtificielle #Productivite #Chatbot #Corely #DeepSeek #TechFr`
+- Hashtags : `#IA #IntelligenceArtificielle #Productivite #Chatbot #Corely #CorelyApp #TechFr`
 - CTA : "Lien dans la bio pour tester gratuit" (linktree vers Play Store + site web)
 
 #### Astuce algorithmique
@@ -286,7 +286,7 @@ L'utilisateur gratuit a **10 messages gratuits par jour**. Après :
 
 Les 3 options proposées à chaque palier :
 1. **Regarder une/des pubs** → +5 messages immédiats
-2. **Passer Pro** (4,99 €/mois) → illimité
+2. **Passer Pro** (9,99 €/mois) → illimité
 3. **Partager Corely** → +3 messages bonus (viralité)
 
 ### A/B Testing du paywall
@@ -295,18 +295,32 @@ Les 3 options proposées à chaque palier :
 
 | Variante | Prix affiché | Conversion estimée |
 |----------|-------------|-------------------|
-| A (contrôle) | 4,99 €/mois | 1,2% |
-| B (lancement) | 3,49 €/mois (-30%) | 2,1% |
-| C (annual) | 39,99 €/an (vs 59,88) | 0,8% mais LTV ×2 |
-| D (trial) | Gratuit 7 jours | 4,5% mais churn ×3 |
+| A (contrôle) | 9,99 €/mois | 2,5% |
+| B (lancement) | 7,99 €/mois (-20%) | 3,8% |
+| C (annual) | 79,99 €/an (vs 119,88) | 1,2% mais LTV ×2,2 |
+| D (trial) | Gratuit 7 jours | 5,2% mais churn ×2,5 |
 
-**Recommandation** : commencer par la variante B (prix lancement bas) pour maximiser la base Pro, puis remonter progressivement.
+**Recommandation** : commencer par la variante B (7,99 € lancement 3 mois) pour maximiser la base Pro, puis remonter à 9,99 € au mois 4. Ne JAMAIS descendre sous 7,99 € car en dessous de ce seuil chaque abonné Pro devient déficitaire (~10 € de coûts API + infra par mois).
 
 ### Friction réduite
 - Paiement via Google Play / App Store (1 clic)
 - Fallback Stripe sur extension web (pas de Store)
 - Pas de création de compte obligatoire pour tester
 - Restauration achats cross-plateforme (RevenueCat)
+
+### Option : le tier "Pro Lite" (4,99 €)
+
+Pour capturer les utilisateurs price-sensitive sans vendre à perte, un tier intermédiaire "Pro Lite" à **4,99 €/mois** avec quota élevé mais non illimité :
+
+| Feature | Gratuit | Pro Lite (4,99 €) | Pro (9,99 €) |
+|---------|---------|-------------------|--------------|
+| Messages/jour | 10 + pub | 40 | Illimité |
+| Mode vocal | 5 min/jour | 15 min/jour | Illimité |
+| Scraping | 3/jour | 10/jour | Illimité |
+| Fichiers | 5 MB | 20 MB | 50 MB |
+| Modèle IA | Flash (gratuit) | Flash + Pro | Flash + Pro + Reasoner |
+
+**Pourquoi c'est rentable** : 40 messages/jour × 30j = 1 200 msg/mois, majoritairement sur le modèle gratuit (Flash). Le coût API d'un utilisateur Pro Lite est ~3 €/mois, laissant une marge de 2 €/mois (40 %). Cela évite de perdre des utilisateurs qui trouvent 9,99 € trop cher tout en ne subventionnant personne.
 
 ---
 
@@ -364,7 +378,7 @@ Les 3 options proposées à chaque palier :
 | 9 | Extension du marché (BE, CH, CA) | 30% users hors France |
 | 10 | API créateurs de contenu | 50 intégrations |
 | 11 | Features B2B (API entreprise) | Premiers clients payants B2B |
-| 12 | Série A ou bootstrap (option) | 400k users, 50k€ MRR |
+| 12 | Série A ou bootstrap (option) | 400k users, 120k€ MRR |
 
 ---
 
@@ -387,17 +401,89 @@ Les 3 options proposées à chaque palier :
 ## 8. Unit Economics (Optimiste — Année 1)
 
 ```
-Revenu total            : 859 000 €
-Coûts API IA (DeepSeek)   : -120 000 €  (15% du revenu)
-Coûts API OpenRouter      : -85 000 €   (10% du revenu)
-AdMob / RevenueCat fees   : -86 000 €   (10% du revenu)
-Infra (Firebase, etc.)  : -15 000 €   (2% du revenu)
-Marketing (UAC + micro)   : -20 000 €   (2% du revenu)
+Revenu total            : 3 518 000 €
+Coûts API IA (DeepSeek)   : -28 000 €   (0,8% du revenu)
+Coûts API OpenRouter      : -55 000 €   (1,6% du revenu)
+AdMob / RevenueCat fees   : -352 000 €  (10% du revenu)
+Infra (Firebase, etc.)  : -35 000 €   (1,0% du revenu)
+Marketing (UAC + micro)   : -20 000 €   (0,6% du revenu)
 ────────────────────────────────────────────
-Marge brute estimée       : 533 000 €   (62%)
+Marge brute estimée       : 3 028 000 €   (86%)
 ```
 
-DeepSeek V4 Flash est gratuit (texte), ce qui réduit drastiquement les coûts API. OpenRouter est utilisé pour les utilisateurs Pro uniquement.
+**Pourquoi la marge passe de 62 % à 86 % :**
+1. **deepseek-v4-flash gratuit** → 77 % de réduction sur les coûts DeepSeek (120k → 28k €)
+2. **Meilleur routing vocal** (arcee/trinity, ring-2.6) → 35 % de réduction OpenRouter (85k → 55k €)
+3. **Prix Pro passé à 9,99 €** → les abonnements couvrent réellement les coûts, plus de subvention des free users vers les Pro users
+
+**Point critique** : À 4,99 €, l'utilisateur Pro coûtait ~10 €/mois (API + infra) pour 4,99 € de revenu = **perte de 5 €/user/mois**. À 9,99 €, l'utilisateur Pro moyen génère un profit d'environ **0 €** (seuil) à **3 €** (utilisateur léger). La rentabilité réelle vient du fait que la majorité des utilisateurs restent en free tier (publicité) et que seuls les heavy users convertissent Pro — ceux qui auraient coûté le plus cher en API gratuite.
+
+**Pour aller plus loin** : un tier "Pro Lite" à 4,99 € avec quota limité (ex: 20 msg/jour) et le vrai "Pro" illimité à 9,99 € permettrait de capturer les utilisateurs price-sensitive sans vendre à perte.
+
+## 8. Monétisation des Données Consenties (RGPD)
+
+### Philosophie : la donnée est un revenu, pas un vol
+
+Contrairement aux modèles opaques de Meta ou Google, Corely propose un **échange transparent** :
+- L'utilisateur choisit explicitement de partager ses habitudes anonymisées
+- En échange : bonus messages, réductions Pro, et une IA plus personnalisée
+- Les données sont **jamais vendues individuellement**, uniquement sous forme d'**insights agrégés**
+
+### Comment ça marche
+
+**Étape 1 — Opt-in explicite**
+- Écran dédié lors du 3ème jour d'usage (après la confiance établie)
+- Explication simple : "Aide Corely à s'améliorer et gagne des messages bonus"
+- Deux niveaux clairs avec récompenses concrètes :
+  - **Niveau 1** : +5 messages/jour
+  - **Niveau 2** : +10 messages/jour + 20% de réduction Pro
+
+**Étape 2 — Anonymisation automatique**
+- L'app collecte localement les métriques (types de requêtes, features utilisées)
+- Un service interne (`AnonymizedInsightService`) agrège par cohorte :
+  - Tranche horaire + langue + device (jamais de nom, email, téléphone)
+  - Hash SHA-256 de la cohorte (non réversible)
+  - Règle K-anonymity : chaque cohorte a au moins 5 utilisateurs
+
+**Étape 3 — Export périodique**
+- Une fois par semaine, l'app envoie un batch d'insights au backend
+- Les données brutes sont immédiatement supprimées du téléphone
+- Le backend stocke uniquement les agrégations
+
+**Étape 4 — Vente d'insights**
+- API REST `/insights/trends` et `/insights/demographics`
+- Authentification par clé API par acheteur
+- Pas d'accès aux données brutes jamais
+
+### Modèle économique
+
+| Acheteur | Prix annuel | Données fournies |
+|----------|-------------|------------------|
+| Agence média | 5 000 € | Tendances search par région |
+| Institut de sondage | 10 000 € | Intent mapping + démographie |
+| E-commerçant | 3 000 € | Saisons + produits recherchés |
+| Éditeur d'app | 2 000 € | Benchmark usage features |
+
+### Projections (scénario optimiste)
+
+| Année | Utilisateurs actifs | Consentants (25%) | Revenu Data (€) |
+|-------|--------------------|-------------------|-----------------|
+| Y1    | 400 000            | 100 000           | 96 000          |
+| Y2    | 1 200 000          | 300 000           | 288 000         |
+| Y3    | 3 000 000          | 750 000           | 720 000         |
+| Y4    | 6 000 000          | 1 500 000         | 1 440 000       |
+| Y5    | 10 000 000         | 2 500 000         | 2 400 000       |
+
+**Marge** : ~95% (coût quasi nul, infrastructure déjà amortie)
+
+### Conformité légale
+
+| Réglementation | Conformité |
+|----------------|------------|
+| **RGPD (Europe)** | Consentement explicite, révocable, droit à l'effacement |
+| **CCPA (Californie)** | Opt-in obligatoire pour la vente de données |
+| **Google Play / App Store** | Déclaration dans la fiche app, opt-in explicite |
+| **Firebase** | Règles Firestore restrictives, pas de PII |
 
 ---
 
@@ -406,7 +492,7 @@ DeepSeek V4 Flash est gratuit (texte), ce qui réduit drastiquement les coûts A
 ### Option A — Bootstrap (recommandé jusqu'à 100k users)
 - Avantages : contrôle total, pas de dilution, validation par le marché
 - Inconvénients : croissance plus lente, pas de salaires cofondateurs
-- Seuil : bootstrap viable jusqu'à ~50k€ MRR
+- Seuil : bootstrap viable jusqu'à ~100k€ MRR (grâce au prix 9,99 € et marge 86 %)
 
 ### Option B — Pré-seed (500k €) à 100k users
 - Avantages : recrutement 2 devs, marketing accéléré
@@ -432,7 +518,7 @@ DeepSeek V4 Flash est gratuit (texte), ce qui réduit drastiquement les coûts A
 - [ ] Identifier 5 micro-influenceurs tech francophones
 - [ ] Préparer 10 vidéos TikTok (screen recordings + voix off)
 - [ ] Activer streak + push notifications quotidiennes
-- [ ] Mettre en place A/B testing paywall (Firebase Remote Config)
+- [ ] Mettre en place A/B testing paywall : 7,99 € vs 9,99 € vs 12,99 € (Firebase Remote Config)
 - [ ] Récolter 20 témoignages vidéo des beta-testeurs
 
 ---

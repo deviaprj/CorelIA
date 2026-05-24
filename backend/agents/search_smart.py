@@ -54,7 +54,6 @@ _LEARNED_SELECTORS: dict[str, dict[str, str]] = {
 # Mapping: intent → list of (domain, url_template, selectors_key)
 _INTENT_SOURCES: dict[str, list[dict[str, str]]] = {
     "flights": [
-        {"domain": "www.google.com", "template": "https://www.google.com/search?q={query} vol prix", "key": "www.google.com"},
         {"domain": "www.skyscanner.fr", "template": "https://www.skyscanner.fr/transport/flights/{from_iata}/{to_iata}/{depart}/{return}/", "key": "www.skyscanner.fr"},
         {"domain": "www.kayak.fr", "template": "https://www.kayak.fr/flights/{from_iata}-{to_iata}/{depart}/{return}", "key": "www.google.com"},
     ],
@@ -490,16 +489,9 @@ def _add_direct_links(
         from_city = params.get("from", "")
         to_city = params.get("to", "")
         if from_city and to_city:
-            q = f"{from_city} {to_city}"
             aggregated["results"].append({
                 "type": "link",
-                "title": f"Google Flights — {q}",
-                "url": f"https://www.google.com/travel/flights?q={q.replace(' ', '+')}",
-                "source_url": "",
-            })
-            aggregated["results"].append({
-                "type": "link",
-                "title": f"Skyscanner — {q}",
+                "title": f"Skyscanner — {from_city} → {to_city}",
                 "url": f"https://www.skyscanner.fr/transport/flights/{from_city.lower()[:3]}/{to_city.lower()[:3]}/",
                 "source_url": "",
             })

@@ -12,6 +12,7 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
 from backend.agents.chat_router import router as chat_router
+from backend.agents.data_insights import router as insights_router
 from backend.agents.search_engine import search
 from backend.core.config import settings
 from backend.core.logging import get_logger, set_request_id
@@ -129,3 +130,4 @@ async def search_smart_endpoint(request: Request, q: str) -> dict[str, Any]:
 
 # Include routers
 app.include_router(chat_router)
+app.include_router(insights_router)
