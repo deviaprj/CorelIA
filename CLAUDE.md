@@ -63,7 +63,10 @@ lib/
 backend/
 ├── agents/
 │   ├── chat_router.py           # AI stream routing (DeepSeek + OpenRouter + tools)
-│   └── search_engine.py         # DuckDuckGo + SerpAPI search
+│   ├── search_engine.py         # DuckDuckGo + SerpAPI search + scrape_url()
+│   ├── search_smart.py          # Unified smart search (intent + parallel scraping)
+│   ├── download_service.py      # yt-dlp + page scraper for media extraction
+│   └── crawl_service.py         # Recursive BFS crawler (HTTrack-style)
 ├── core/                        # Config, auth, logging
 └── schemas/                     # Pydantic models
 ```
@@ -97,6 +100,7 @@ web/
 5. Voice dictation → SpeechToText → text input → ChatNotifier
 6. Voice conversation loop → VoiceConversationNotifier (listening → thinking → speaking → idle → repeat)
 7. Extension build → Flutter Web + base href patch + SW removal + manifest fix
+8. Slash commands → `_handleSlashCommand()` → backend `/scrape`, `/download_media`, `/crawl` or extension DOM actions
 
 ## Commands
 
@@ -330,7 +334,7 @@ flutter build web --dart-define=DEEPSEEK_API_KEY=sk-xxx --dart-define=OPENROUTER
 - Instruction explicite : "Ne dis JAMAIS que tu n'as pas accès aux systèmes de réservation"
 - Pattern à suivre pour tout nouveau type : intent → extraction params → fallback → injection → markdown
 
-## Scraping Intelligent (Nouveau — Session V14)
+## Scraping Intelligent (Session V14)
 
 **Backend `/search_smart`** (`backend/agents/search_smart.py`):
 1. **Intent classification** : LLM (DeepSeek/OpenRouter) classifie la requête utilisateur en intents : `flights`, `hotels`, `products`, `secondhand`, `restaurants`, `events`, `weather`, `general`
@@ -338,6 +342,56 @@ flutter build web --dart-define=DEEPSEEK_API_KEY=sk-xxx --dart-define=OPENROUTER
 3. **Construction d'URLs** : comparateurs avec paramètres pré-remplis (Skyscanner, Booking, Back Market, etc.)
 4. **Parallel scraping** : BeautifulSoup scrape chaque comparateur en parallèle (~5 sources max)
 5. **Agrégation** : résultats structurés (`SmartSearchResult` type: price/card/link) retournés en JSON
+
+## Universal Media Download (Session V17)
+
+**Backend `/download_media`** (`backend/agents/download_service.py`):
+- **yt-dlp extraction** : 1000+ sites (YouTube, Vimeo, TikTok, Twitch, etc.)
+  - `extract_media(url)` → `type: video` avec `direct_url`, `formats[]`, `title`, `thumbnail`
+  - `format_id` / `ext` / `quality` / `resolution` / `has_audio` / `has_video`
+- **Page scraper fallback** : BeautifulSoup pour sites sans yt-dlp
+  - `<video>` tags, `<source>`, `<iframe>` (YouTube/Vimeo)
+  - OpenGraph meta (`og:video`), JSON-LD `VideoObject`
+  - `<img>` tags, CSS backgrounds, gallery patterns
+- **Usage** : `POST /download_media {url, media_type}`
+
+**Flutter `SearchServiceGlobal.downloadMedia()`** :
+- `dio.post()` avec 30s receive timeout
+- Called from `_handleSlashDownload()` for video sites (YouTube, Vimeo, etc.)
+
+## Recursive Crawler (Session V17)
+
+**Backend `/crawl`** (`backend/agents/crawl_service.py`):
+- **BFS crawling** : queue with `(url, depth)`, max_depth (default 2), max_pages (default 20)
+- **Same-domain filter** : optional, enabled by default
+- **Extracts per page** :
+  - Videos : `<video>`, `<iframe>`, meta tags, JSON-LD, direct `.mp4`/`.webm` links
+  - Images : `<img>`, CSS backgrounds, galleries
+  - All anchor links for further crawling
+- **Deduplication** : global by URL across all pages
+- **Usage** : `POST /crawl {url, max_depth, max_pages, same_domain}`
+
+**Flutter `/crawl` slash command** :
+- `/_handleSlashCrawl()` → `SearchServiceGlobal.crawl()`
+- Displays aggregated results : videos, images, errors
+- Stores video links in `_lastLinksForDownload` for bulk `/download`
+
+## Slash Commands Architecture
+
+**26 commands** defined in `slash_commands.dart` :
+- **Extension-only** : `scroll`, `open`, `click`, `fill`, `screenshot`, `back`, `forward`, `forms`, `tables`, `media`, `autofill`, `inspect`, `highlight`, `waitfor`, `monitor`, `translate`, `searchpage`
+- **Universal (cross-platform)** : `download`, `links`, `pdf`, `summarize`, `extract`, `metadata`, `export`, `docgen`, `scrape`, `crawl`
+
+**Routing logic** (`_handleSlashCommand()` in `chat_notifier.dart`):
+1. Parse command + args via `SlashCommands.parse()`
+2. Check if universal → call handler directly (works on mobile/web/extension)
+3. If extension-only → check `bridge.isExtension`, return error on mobile
+4. Universal commands with URL arg → try backend first, fallback to extension DOM
+
+**Known limitations** (V17):
+- `/download https://youtube.com/@channel` → yt-dlp times out on channel pages (fix: use per-video URLs)
+- `/links video` on YouTube → DOM extraction fails (SPA), backend fallback works but slow
+- Extension requires backend tunnel (ngrok/localtunnel) for universal commands to work outside localhost
 
 **Backend `/scrape`** (`backend/agents/search_engine.py:scrape_url()`):
 - Auto-extraction : metadata (title, OG tags), prix (regex `\d[\.,]\d{2}\s?[€$£]`), cartes produits (class heuristiques), liens

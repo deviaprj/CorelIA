@@ -88,33 +88,44 @@ LISTENING → THINKING → SPEAKING → LISTENING
 
 ---
 
-## TODO next-session (2026-05-24) — Priorité CRITIQUE
+## TODO next-session (2026-05-26) — Priorité CRITIQUE
 
-### 1. Tester mode vocal V16 sur Xiaomi 12
+### 1. Fix slash commands — `/download` et `/links` sur YouTube
+- [ ] **yt-dlp timeout sur chaînes YouTube** : `/download https://youtube.com/@channel` → "Le backend a mis trop de temps à répondre"
+  - **Cause** : yt-dlp essaie d'extraire TOUTES les vidéos de la chaîne (très lent)
+  - **Solutions possibles** :
+    - Limiter yt-dlp à l'extraction rapide (pas de playlist/chaîne complète)
+    - Détecter les URLs de chaîne vs vidéo et refuser les chaînes avec message explicite
+    - Utiliser l'API YouTube Data v3 pour lister les vidéos (nécessite clé API)
+    - Scraper la page HTML pour extraire les liens vidéo sans yt-dlp
+- [ ] **`/links video` timeout sur YouTube** : DOM extraction échoue (SPA), backend fallback trop lent
+  - **Cause** : BeautifulSoup sur YouTube ne trouve pas les vidéos (chargement dynamique JS)
+  - **Solutions possibles** :
+    - Scraper l'HTML initial pour les meta `og:video` et JSON-LD
+    - Utiliser `youtube-dl --flat-playlist` pour lister les URLs sans télécharger
+    - Intégrer l'API YouTube Data v3
+- [ ] **Tester avec une URL de vidéo directe** : `/download https://youtube.com/watch?v=xxx` doit fonctionner
+
+### 2. Déployer le backend cloud
+- [ ] `bash scripts/deploy_backend.sh` sur machine avec internet (Docker pull + push)
+- [ ] Vérifier `api.aironbot.app` répond sur `/health`, `/search_smart`, `/download_media`, `/crawl`
+- [ ] Mettre à jour `.env` avec `BACKEND_URL=https://api.aironbot.app` et rebuild extension/APK
+
+### 3. Tester mode vocal V16 sur Xiaomi 12
 - [ ] 5 tours complets : aucun blocage, micro redémarre à chaque fois
 - [ ] TTS naturel : pas de sources, asterisques, tirets, tableaux lus à voix haute
 - [ ] Quota retry : demander vol Paris→Marseille en vocal, atteindre quota, regarder vidéo, vérifier que Corely répond au vol automatiquement
 - [ ] Barge-in : parler pendant que Corely parle (> 3 mots) → TTS s'arrête, Corely répond au nouveau message
 - [ ] Pas de monologue : Corely ne doit pas répondre à sa propre voix
 
-### 2. Tester slash commands mobile avec backend local
-- [ ] `/scrape https://example.com` → annonce + résultat/erreur persistant
-- [ ] `/links https://example.com` → liste liens sans crash
-- [ ] `/summarize https://example.com` → résumé persistant
-- [ ] Backend `192.168.1.38:8000` opérationnel via `adb reverse tcp:8000`
+### 4. Tester `/crawl` commande
+- [ ] `/crawl https://example.com` → résultat avec liens, vidéos, images
+- [ ] `/crawl https://youtube.com/@channel 1 10` → profondeur 1, max 10 pages
+- [ ] Vérifier que les liens vidéo sont stockés pour `/download` bulk
 
-### 3. Déployer le backend cloud
-- [ ] `bash scripts/deploy_backend.sh` sur machine avec internet (Docker pull + push)
-- [ ] Vérifier `api.aironbot.app` répond sur `/health` et `/search_smart`
-
-### 4. Évaluer la recherche avancée
+### 5. Évaluer la recherche avancée
 - [ ] Tester `searchFlights`, `searchHotels`, `searchProducts`, `searchWeather`
 - [ ] Vérifier le parsing des paramètres (`parseFlightParams`, etc.)
-- [ ] Évaluer si l'architecture actuelle suffit ou si une revue est nécessaire
-
-### 5. Évaluer l'analyse de fichiers et images
-- [ ] Tester l'extraction de texte de PDF, DOCX, XLSX
-- [ ] Tester la vision (images envoyées au LLM)
 - [ ] Évaluer si l'architecture actuelle suffit ou si une revue est nécessaire
 
 ### 6. Décision architecture globale

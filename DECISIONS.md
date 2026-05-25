@@ -617,3 +617,52 @@ Le taux de rétention D7/D30 est critique pour atteindre 1M+ utilisateurs. Actue
 ---
 
 *Dernière mise à jour : 2026-05-23*
+
+## ADR-021 : Téléchargement Universel de Médias + Crawler Récursif (Session V17)
+
+**Date** : 2026-05-24
+**Statut** : Accepté
+
+### Contexte
+Les utilisateurs demandent fréquemment de télécharger des vidéos depuis YouTube et d'autres sites, ou de récupérer tous les médias d'une page web. Les commandes `/download` et `/links` ne supportaient que les fichiers directs (MP4, PDF). De plus, il n'existait aucun moyen de crawler récursivement un site pour en extraire les vidéos, images et liens.
+
+### Décision
+**Architecture backend-first avec yt-dlp + BFS crawler** :
+
+1. **Backend `/download_media`** (`backend/agents/download_service.py`) :
+   - **yt-dlp** pour 1000+ sites (YouTube, Vimeo, TikTok, Twitch, etc.) — extraction metadata + formats sans téléchargement binaire
+   - **Page scraper fallback** pour sites sans yt-dlp : BeautifulSoup extrait `<video>`, `<iframe>`, `og:video`, JSON-LD `VideoObject`, `<img>`, CSS backgrounds
+   - Paramètre `media_type` : `auto` (détecte), `video`, `image`, `audio`
+
+2. **Backend `/crawl`** (`backend/agents/crawl_service.py`) :
+   - **BFS** : queue `(url, depth)`, `max_depth` (1-5), `max_pages` (1-50)
+   - **Same-domain filter** : optionnel, activé par défaut
+   - **Extracts par page** : vidéos (5 extracteurs), images (3 extracteurs), liens
+   - **Dédoublonnage global** par URL sur toutes les pages
+
+3. **Flutter `SearchServiceGlobal`** :
+   - `downloadMedia(url, mediaType)` → POST `/download_media` (30s timeout)
+   - `crawl(url, maxDepth, maxPages)` → POST `/crawl` (45s timeout)
+   - Appelé par `_handleSlashDownload()`, `_handleSlashLinks()` (fallback video), `_handleSlashCrawl()`
+
+4. **Slash commands** :
+   - `/download <url> [filename]` : appelle `downloadMedia()` si domaine vidéo (YouTube, Vimeo, etc.), sinon téléchargement direct
+   - `/links <url> [filter]` : DOM local (extension) ou backend `/scrape`. Si `filter=video` et aucun lien, fallback `downloadMedia()`
+   - `/crawl <url> [max_depth] [max_pages]` : nouveau, appelle `crawl()` et stocke les vidéos dans `_lastLinksForDownload` pour `/download` bulk
+
+### Alternatives Considérées
+- **Téléchargement côté client avec dio** : impossible sur web (CORS), impossible pour les sites protégés (YouTube blocks direct video URLs)
+- **APIs tierces** (SaveFrom, Y2Mate) : instables, rate-limitées, pas de contrôle
+- **Pas de yt-dlp** : uniquement BeautifulSoup → échoue sur les SPAs (YouTube)
+
+### Conséquences
+- ✅ Support de 1000+ sites via yt-dlp
+- ✅ Crawler récursif type HTTrack pour archivage média
+- ✅ Cross-platform (mobile + extension) grâce au backend
+- ⚠️ yt-dlp peut être lent sur les chaînes YouTube (extraction complète de la playlist/chaîne)
+- ⚠️ Dépendance au backend cloud pour les commandes universelles
+- ⚠️ Pas de téléchargement binaire — seulement les URLs et metadata sont retournées (le client télécharge séparément)
+
+---
+
+*Dernière mise à jour : 2026-05-24*
