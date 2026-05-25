@@ -213,6 +213,13 @@ class SlashCommands {
       params: ['url', 'selectors'],
       icon: Icons.web,
     ),
+    SlashCommand(
+      name: 'crawl',
+      description: 'Crawler récursivement un site pour trouver vidéos, images et liens (HTTrack-style)',
+      usage: '/crawl <url> [max_depth] [max_pages]',
+      params: ['url', 'max_depth', 'max_pages'],
+      icon: Icons.account_tree,
+    ),
   ];
 
   /// Recherche les commandes correspondant à un préfixe.
@@ -242,7 +249,7 @@ class SlashCommands {
   }
 
   /// Commandes universelles (fonctionnent sur toutes les plateformes).
-  static const Set<String> universalCommandNames = {'docgen', 'scrape', 'summarize', 'extract', 'links', 'metadata'};
+  static const Set<String> universalCommandNames = {'docgen', 'scrape', 'summarize', 'extract', 'links', 'metadata', 'export', 'crawl'};
 
   /// Parse une commande slash depuis le texte de l'utilisateur.
   /// Retourne null si ce n'est pas une commande slash valide.

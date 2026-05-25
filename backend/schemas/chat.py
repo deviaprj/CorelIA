@@ -69,3 +69,48 @@ class ToolCall(BaseModel):
     id: str
     name: str
     arguments: dict[str, Any]
+
+
+class DownloadMediaRequest(BaseModel):
+    """Request body for the /download_media endpoint."""
+
+    url: str = Field(..., description="Target URL to extract media from")
+    media_type: str = Field(default="auto", description="auto, video, or gallery")
+
+
+class DownloadMediaResponse(BaseModel):
+    """Response from the media download endpoint."""
+
+    success: bool
+    type: str = Field(default="", description="video | page_media")
+    title: str | None = None
+    thumbnail: str | None = None
+    duration: int | None = None
+    uploader: str | None = None
+    webpage_url: str | None = None
+    direct_url: str | None = None
+    formats: list[dict[str, Any]] | None = None
+    videos: list[dict[str, Any]] | None = None
+    images: list[dict[str, Any]] | None = None
+    error: str | None = None
+
+
+class CrawlRequest(BaseModel):
+    """Request body for the /crawl endpoint."""
+
+    url: str = Field(..., description="Starting URL to crawl")
+    max_depth: int = Field(default=2, ge=1, le=5, description="How many link hops deep")
+    max_pages: int = Field(default=20, ge=1, le=50, description="Max pages to fetch")
+    same_domain: bool = Field(default=True, description="Stay within the same domain")
+
+
+class CrawlResponse(BaseModel):
+    """Response from the crawl endpoint."""
+
+    success: bool
+    pages_crawled: int = 0
+    total_links_found: int = 0
+    videos: list[dict[str, Any]] = Field(default_factory=list)
+    images: list[str] = Field(default_factory=list)
+    errors: list[str] = Field(default_factory=list)
+    pages: list[dict[str, Any]] = Field(default_factory=list)

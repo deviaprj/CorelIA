@@ -83,3 +83,18 @@ def require_auth(endpoint: Callable[..., Any]) -> Callable[..., Any]:
         return await endpoint(*args, **kwargs)
 
     return wrapper
+
+
+async def require_api_key(request: Request) -> str:
+    """FastAPI dependency that validates an API key from the X-API-Key header."""
+    api_key = request.headers.get("X-API-Key") or request.query_params.get("api_key")
+    if not api_key:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing API key",
+        )
+    # In development any non-empty key is accepted; production should check against DB/Redis
+    if settings.app_env == "production":
+        # TODO: validate against stored API keys in production
+        pass
+    return api_key

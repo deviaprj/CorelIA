@@ -315,6 +315,8 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
         return await _handleSlashDocgen(parsed, bridge);
       case 'scrape':
         return await _handleSlashScrape(parsed, bridge);
+      case 'crawl':
+        return await _handleSlashCrawl(parsed, bridge);
       default:
         return false;
     }
@@ -338,6 +340,167 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
       filename = cmd.args.length > 1 ? cmd.args[1] : null;
     }
 
+    final targetUrl = urlsToDownload.firstOrNull;
+    if (targetUrl == null) {
+      await _persistAssistantMessage('❌ Aucune URL à télécharger.');
+      state = state.copyWith(isStreaming: false);
+      return true;
+    }
+
+    // Detect video/gallery sites that need backend extraction
+    final videoHosts = RegExp(
+      r'(youtube\.com|youtu\.be|vimeo\.com|dailymotion\.com|tiktok\.com|'
+      r'twitch\.tv|facebook\.com/watch|instagram\.com/reel|soundcloud\.com|'
+      r'reddit\.com|twitter\.com|x\.com|streamable\.com|rumble\.com)',
+      caseSensitive: false,
+    );
+    final isVideoSite = videoHosts.hasMatch(targetUrl);
+    final hasFileExt = RegExp(r'\.(mp4|webm|mkv|avi|mov|mp3|wav|ogg|pdf|zip|rar|jpg|jpeg|png|webp|gif)$', caseSensitive: false)
+        .hasMatch(Uri.parse(targetUrl).path);
+
+    // Try backend media extraction for video sites and pages without direct file extensions
+    if (isVideoSite || !hasFileExt) {
+      final backendUrl = AppConstants.backendBaseUrl;
+      if (backendUrl.isNotEmpty && !backendUrl.contains('localhost')) {
+        try {
+          final globalService = ref.read(searchServiceGlobalProvider);
+          final mediaResult = await globalService.downloadMedia(targetUrl);
+
+          if (mediaResult['success'] == true) {
+            final mediaType = mediaResult['type'] as String? ?? '';
+
+            if (mediaType == 'video') {
+              // Video from yt-dlp — pick best merged format
+              final title = mediaResult['title'] as String? ?? 'Vidéo';
+              final thumbnail = mediaResult['thumbnail'] as String? ?? '';
+              final duration = mediaResult['duration'] as int?;
+              final directUrl = mediaResult['direct_url'] as String? ?? '';
+              final formats = (mediaResult['formats'] as List<dynamic>? ?? []).cast<Map<String, dynamic>>();
+
+              if (directUrl.isNotEmpty) {
+                // Trigger download with the direct URL
+                final dlAction = BrowserAction(
+                  action: BrowserActionType.download,
+                  params: {'url': directUrl, if (filename != null) 'filename': filename},
+                );
+                final dlResult = await bridge.executeAction(dlAction);
+                final ok = dlResult.success;
+
+                final durationStr = duration != null
+                    ? '${duration ~/ 60}m${duration % 60}s'
+                    : '';
+                final msg = StringBuffer()
+                  ..writeln('📹 **$title**')
+                  ..writeln()
+                  ..writeln('Téléchargement ${ok ? "lancé" : "échoué"} ${durationStr.isNotEmpty ? "($durationStr)" : ""}.')
+                  ..writeln()
+                  ..writeln('Formats extraits : ${formats.length}');
+                if (formats.isNotEmpty) {
+                  msg.writeln('\\n| Qualité | Format | Audio+Vidéo |');
+                  msg.writeln('|--------|--------|-------------|');
+                  for (final f in formats.take(8)) {
+                    final q = f['quality'] ?? f['format_id'] ?? '?';
+                    final ext = f['ext'] ?? '?';
+                    final av = (f['has_audio'] == true && f['has_video'] == true) ? '✅' : '⚠️';
+                    msg.writeln('| $q | $ext | $av |');
+                  }
+                }
+                await _persistAssistantMessage(msg.toString());
+                state = state.copyWith(error: null, isStreaming: false);
+                return true;
+              }
+            }
+
+            if (mediaType == 'page_media') {
+              // Generic page — show images and videos found
+              final title = mediaResult['title'] as String? ?? 'Page';
+              final videos = (mediaResult['videos'] as List<dynamic>? ?? []).cast<Map<String, dynamic>>();
+              final images = (mediaResult['images'] as List<dynamic>? ?? []).cast<Map<String, dynamic>>();
+
+              final msg = StringBuffer()
+                ..writeln('🌐 **$title**')
+                ..writeln()
+                ..writeln('Médias trouvés sur la page :');
+
+              if (videos.isNotEmpty) {
+                msg.writeln('\\n**Vidéos (${videos.length})**');
+                for (var i = 0; i < videos.length && i < 10; i++) {
+                  final v = videos[i];
+                  msg.writeln('${i + 1}. [${v['tag'] ?? 'video'}](${v['url']})');
+                }
+                if (videos.length > 10) {
+                  msg.writeln('... et ${videos.length - 10} autres');
+                }
+              }
+
+              if (images.isNotEmpty) {
+                msg.writeln('\\n**Images (${images.length})**');
+                for (var i = 0; i < images.length && i < 15; i++) {
+                  final img = images[i];
+                  final alt = (img['alt'] as String? ?? '').isNotEmpty ? ' — ${img['alt']}' : '';
+                  msg.writeln('${i + 1}. [Image ${i + 1}$alt](${img['url']})');
+                }
+                if (images.length > 15) {
+                  msg.writeln('... et ${images.length - 15} autres');
+                }
+              }
+
+              if (videos.isEmpty && images.isEmpty) {
+                msg.writeln('\\n_Aucun média trouvé._');
+              }
+
+              await _persistAssistantMessage(msg.toString());
+              state = state.copyWith(error: null, isStreaming: false);
+              return true;
+            }
+          }
+        } catch (e) {
+          debugPrint('[Download] Backend extraction failed: $e');
+          final errStr = e.toString();
+          final isTimeout = errStr.contains('timeout') || errStr.contains('Timed out');
+          final is404 = errStr.contains('404') || errStr.contains('Not Found');
+          final isConn = errStr.contains('Connection') || errStr.contains('SocketException') || errStr.contains('refused');
+
+          String detail;
+          if (is404) {
+            detail = 'Le endpoint `/download_media` n\'est pas disponible sur le backend. '
+                'Vérifiez que le backend a été redémarré après `pip install -r requirements.txt`.';
+          } else if (isTimeout) {
+            detail = 'Le backend a mis trop de temps à répondre. '
+                'yt-dlp peut être lent sur les chaînes YouTube avec beaucoup de vidéos. '
+                'Essayez avec une URL de vidéo directe (pas une chaîne).';
+          } else if (isConn) {
+            detail = 'Impossible de joindre le backend à `$backendUrl`. '
+                'Vérifiez que le serveur est démarré et accessible.';
+          } else {
+            detail = 'Erreur backend : $errStr';
+          }
+
+          await _persistAssistantMessage(
+            '❌ Échec extraction vidéo\n\n'
+            '$detail\n\n'
+            '💡 **Solutions** :\n'
+            '- Redémarrez le backend : `cd backend && uvicorn backend.main:app --reload`\n'
+            '- Vérifiez que yt-dlp est installé : `pip show yt-dlp`\n'
+            '- Pour les fichiers directs (MP4, WebM, etc.), utilisez `/download <url_directe>`\n'
+            '- Sur desktop, utilisez une extension comme "Video DownloadHelper"',
+          );
+          state = state.copyWith(isStreaming: false);
+          return true;
+        }
+      } else if (isVideoSite) {
+        // Backend URL vide ou localhost
+        await _persistAssistantMessage(
+          '❌ Backend non configuré\n\n'
+          'BACKEND_URL est vide ou contient localhost. '
+          'Ajoutez `BACKEND_URL=https://api.aironbot.app` dans `.env` et recompilez.',
+        );
+        state = state.copyWith(isStreaming: false);
+        return true;
+      }
+    }
+
+    // Direct file download (existing behavior)
     final action = BrowserAction(
       action: BrowserActionType.download,
       params: {
@@ -364,6 +527,98 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
         '❌ Échec téléchargement\n\n'
         'Erreur : ${result.error}\n\n'
         '💡 Vérifiez que les URLs sont valides et accessibles.',
+      );
+      state = state.copyWith(isStreaming: false);
+    }
+    return true;
+  }
+
+  Future<bool> _handleSlashCrawl(ParsedSlashCommand cmd, ExtensionBridge bridge) async {
+    if (cmd.args.isEmpty) {
+      await _persistAssistantMessage(
+        '❌ Usage incorrect\n\n'
+        'Commande `/crawl` nécessite une URL.\n\n'
+        '💡 **Usage** : `/crawl <url> [max_depth] [max_pages]`',
+      );
+      state = state.copyWith(isStreaming: false);
+      return true;
+    }
+    final url = cmd.args[0];
+    final maxDepth = cmd.args.length > 1 ? int.tryParse(cmd.args[1]) ?? 2 : 2;
+    final maxPages = cmd.args.length > 2 ? int.tryParse(cmd.args[2]) ?? 20 : 20;
+
+    final globalService = ref.read(searchServiceGlobalProvider);
+    try {
+      await _persistAssistantMessage(
+        '🔍 Crawling de `$url` en cours...\n'
+        'Profondeur: $maxDepth | Pages max: $maxPages\n\n'
+        '_Cela peut prendre quelques secondes..._',
+      );
+      final data = await globalService.crawl(url, maxDepth: maxDepth, maxPages: maxPages);
+      final pagesCrawled = data['pages_crawled'] as int? ?? 0;
+      final totalLinks = data['total_links_found'] as int? ?? 0;
+      final videos = (data['videos'] as List<dynamic>? ?? []).cast<Map<String, dynamic>>();
+      final images = (data['images'] as List<dynamic>? ?? []).cast<String>();
+      final errors = (data['errors'] as List<dynamic>? ?? []).cast<String>();
+
+      final buf = StringBuffer();
+      buf.writeln('🕸️ **Résultat du crawl**\n');
+      buf.writeln('- Pages parcourues : $pagesCrawled');
+      buf.writeln('- Liens découverts : $totalLinks');
+      buf.writeln('- Vidéos trouvées : ${videos.length}');
+      buf.writeln('- Images trouvées : ${images.length}');
+      if (errors.isNotEmpty) {
+        buf.writeln('- Erreurs : ${errors.length}');
+      }
+      buf.writeln();
+
+      if (videos.isNotEmpty) {
+        buf.writeln('## 🎬 Vidéos (${videos.length})');
+        for (var i = 0; i < videos.length && i < 15; i++) {
+          final v = videos[i];
+          buf.writeln('${i + 1}. [${v['tag'] ?? 'vidéo'}](${v['url']})');
+        }
+        if (videos.length > 15) {
+          buf.writeln('... et ${videos.length - 15} autres');
+        }
+        buf.writeln();
+      }
+
+      if (images.isNotEmpty) {
+        buf.writeln('## 🖼️ Images (${images.length})');
+        for (var i = 0; i < images.length && i < 10; i++) {
+          buf.writeln('${i + 1}. [Image ${i + 1}](${images[i]})');
+        }
+        if (images.length > 10) {
+          buf.writeln('... et ${images.length - 10} autres');
+        }
+        buf.writeln();
+      }
+
+      if (errors.isNotEmpty) {
+        buf.writeln('## ⚠️ Erreurs');
+        for (final err in errors.take(5)) {
+          buf.writeln('- $err');
+        }
+        buf.writeln();
+      }
+
+      buf.writeln('💡 Lancez `/download <url>` sur un lien vidéo pour le télécharger.');
+
+      // Store video links for bulk download
+      _lastLinksForDownload = videos
+          .map((v) => v['url'] as String?)
+          .whereType<String>()
+          .where((u) => u.isNotEmpty)
+          .toList(growable: false);
+      _lastLinksFilter = 'video';
+
+      await _persistAssistantMessage(buf.toString());
+    } catch (e) {
+      await _persistAssistantMessage(
+        '❌ Échec crawl\n\n'
+        'Erreur : $e\n\n'
+        '💡 Vérifiez que l\'URL est accessible et que le backend est disponible.',
       );
       state = state.copyWith(isStreaming: false);
     }
@@ -404,6 +659,7 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
     if (url != null) {
       final globalService = ref.read(searchServiceGlobalProvider);
       try {
+        // 1. Try scrape for anchor links
         final data = await globalService.scrape(url);
         final allLinks = (data['data'] as List? ?? [])
             .where((d) => d['field'] == 'links')
@@ -424,6 +680,39 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
           }
         });
         final links = filtered.map((m) => '- [${m['text'] ?? 'Lien'}](${m['url']})').join('\n');
+
+        // 2. Fallback: for video filter, also extract embedded media via downloadMedia
+        if (links.isEmpty && rawFilter.toLowerCase() == 'video') {
+          final media = await globalService.downloadMedia(url, mediaType: 'video');
+          if (media['success'] == true) {
+            final videos = (media['videos'] as List<dynamic>? ?? []).cast<Map<String, dynamic>>();
+            final title = media['title'] as String? ?? 'Page';
+            if (videos.isNotEmpty) {
+              final buf = StringBuffer()
+                ..writeln('🎬 **$title**')
+                ..writeln()
+                ..writeln('Vidéos trouvées (${videos.length}) :');
+              for (var i = 0; i < videos.length && i < 15; i++) {
+                final v = videos[i];
+                buf.writeln('${i + 1}. [${v['tag'] ?? 'vidéo'}](${v['url']})');
+              }
+              if (videos.length > 15) {
+                buf.writeln('... et ${videos.length - 15} autres');
+              }
+              buf.writeln('\n💡 Lancez `/download <url>` sur un lien pour le télécharger.');
+              await _persistAssistantMessage(buf.toString());
+              // Store links for bulk download
+              _lastLinksForDownload = videos
+                  .map((v) => v['url'] as String?)
+                  .whereType<String>()
+                  .where((u) => u.isNotEmpty)
+                  .toList(growable: false);
+              _lastLinksFilter = 'video';
+              return true;
+            }
+          }
+        }
+
         if (links.isEmpty) {
           await _persistAssistantMessage('Aucun lien trouvé sur $url (filtre: $rawFilter).');
           return true;
@@ -1319,63 +1608,120 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
   }
 
   Future<bool> _handleSlashExport(ParsedSlashCommand cmd, ExtensionBridge bridge) async {
-    final format = cmd.args.isNotEmpty ? cmd.args[0] : 'json';
+    // Parse args: [/export [url] [format]] or [/export [format]]
+    final firstArg = cmd.args.isNotEmpty ? cmd.args[0] : 'json';
+    final String? url = firstArg.startsWith('http') ? firstArg : null;
+    final format = url != null
+        ? (cmd.args.length > 1 ? cmd.args[1] : 'json')
+        : firstArg;
 
-    // Récupérer d'abord le contenu de la page
-    final contentAction = BrowserAction(
-      action: BrowserActionType.getPageContent,
-      params: {},
-    );
-    final contentResult = await bridge.executeAction(contentAction);
+    String title;
+    String content;
+    String pageUrl;
 
-    if (!contentResult.success) {
+    if (url != null) {
+      // Backend fallback: scrape the URL directly
+      final globalService = ref.read(searchServiceGlobalProvider);
+      try {
+        final data = await globalService.scrape(url);
+        title = data['title'] as String? ?? url;
+        final contentItems = (data['data'] as List? ?? [])
+            .where((d) => d['field'] == 'cards' || d['field'] == 'prices' || d['field'] == 'metadata')
+            .expand((d) => (d['values'] as List? ?? []).map((v) => v is Map ? v['text'] ?? v.toString() : v.toString()))
+            .where((t) => t.toString().isNotEmpty)
+            .join('\n');
+        content = contentItems.isNotEmpty
+            ? contentItems
+            : (data['data'] as List? ?? [])
+                .where((d) => d['field'] == 'content')
+                .expand((d) => (d['values'] as List? ?? []))
+                .where((t) => t.toString().isNotEmpty)
+                .join('\n');
+        if (content.isEmpty) {
+          content = '_Aucun contenu extrait._';
+        }
+        pageUrl = url;
+      } catch (e) {
+        await _persistAssistantMessage(
+          '❌ Échec export\n\n'
+          'Erreur backend : $e\n\n'
+          '💡 Vérifiez que l\'URL est accessible ou utilisez l\'extension Chrome.',
+        );
+        state = state.copyWith(isStreaming: false);
+        return true;
+      }
+    } else if (bridge.isExtension) {
+      // Extension mode: extract current page content
+      final contentAction = BrowserAction(
+        action: BrowserActionType.getPageContent,
+        params: {},
+      );
+      final contentResult = await bridge.executeAction(contentAction);
+
+      if (!contentResult.success) {
+        await _persistAssistantMessage(
+          '❌ Échec export\n\n'
+          'Erreur : ${contentResult.error}\n\n'
+          '💡 Vérifiez que la page est chargée dans l\'extension.',
+        );
+        state = state.copyWith(isStreaming: false);
+        return true;
+      }
+
+      title = contentResult.data!['title'] as String? ?? 'page';
+      content = contentResult.data!['content'] as String? ?? '';
+      pageUrl = contentResult.data!['url'] as String? ?? '';
+    } else {
       await _persistAssistantMessage(
-        '❌ Échec export\n\n'
-        'Erreur : ${contentResult.error}\n\n'
-        '💡 Vérifiez que la page est chargée dans l\'extension.',
+        '❌ Usage incorrect\n\n'
+        'Commande `/export` sur mobile nécessite une URL.\n\n'
+        '💡 **Usage** : `/export <url> [json|csv|md]`',
       );
       state = state.copyWith(isStreaming: false);
       return true;
     }
 
-    final title = contentResult.data!['title'] as String? ?? 'page';
-    final content = contentResult.data!['content'] as String? ?? '';
-    final url = contentResult.data!['url'] as String? ?? '';
-
     final safeTitle = title.replaceAll(RegExp(r'[^a-zA-Z0-9À-ɏ\s-]'), '_').trim();
 
     switch (format) {
       case 'json':
-        final json = '{\n  "title": ${_jsonStr(title)},\n  "url": ${_jsonStr(url)},\n'
+        final json = '{\n  "title": ${_jsonStr(title)},\n  "url": ${_jsonStr(pageUrl)},\n'
             '  "content": ${_jsonStr(content.substring(0, content.length > 10000 ? 10000 : content.length))}\n}';
         await _persistAssistantMessage('**Export JSON :**\n```json\n$json\n```\n\n'
             '💡 Copiez ce contenu ou utilisez `/download <url>` pour des fichiers distants.');
         break;
       case 'md':
       case 'markdown':
-        final md = '# $title\n\n> Source : $url\n\n$content';
+        final md = '# $title\n\n> Source : $pageUrl\n\n$content';
         await _persistAssistantMessage('**Export Markdown :**\n```markdown\n${md.substring(0, md.length > 3000 ? 3000 : md.length)}\n```\n\n'
             '${md.length > 3000 ? '(tronqué à 3000 caractères)\n\n' : ''}'
             '💡 `/pdf` pour imprimer la page. `/download` pour fichiers distants.');
         break;
       case 'csv':
-        // Exporter les tableaux comme CSV
-        final tableAction = BrowserAction(action: BrowserActionType.extractTables, params: {});
-        final tableResult = await bridge.executeAction(tableAction);
-        if (tableResult.success && tableResult.data != null) {
-          final tables = tableResult.data!['tables'] as List? ?? [];
-          final csvBuffer = StringBuffer();
-          for (final t in tables.cast<Map>()) {
-            final rows = t['rows'] as List? ?? [];
-            for (final row in rows.cast<List>()) {
-              csvBuffer.writeln(row.map((c) => '"${c.toString().replaceAll('"', '""')}"').join(','));
+        if (bridge.isExtension && url == null) {
+          // Exporter les tableaux comme CSV (extension only, current page)
+          final tableAction = BrowserAction(action: BrowserActionType.extractTables, params: {});
+          final tableResult = await bridge.executeAction(tableAction);
+          if (tableResult.success && tableResult.data != null) {
+            final tables = tableResult.data!['tables'] as List? ?? [];
+            final csvBuffer = StringBuffer();
+            for (final t in tables.cast<Map>()) {
+              final rows = t['rows'] as List? ?? [];
+              for (final row in rows.cast<List>()) {
+                csvBuffer.writeln(row.map((c) => '"${c.toString().replaceAll('"', '""')}"').join(','));
+              }
+              csvBuffer.writeln();
             }
-            csvBuffer.writeln();
+            await _persistAssistantMessage('**Export CSV (tableaux) :**\n```csv\n${csvBuffer.toString().substring(0, 3000)}\n```\n\n'
+                '💡 Les données CSV peuvent être ouvertes dans Excel / Google Sheets.');
+          } else {
+            await _persistAssistantMessage('Aucun tableau trouvé pour l\'export CSV. Utilisez `/export json` ou `/export md`.');
           }
-          await _persistAssistantMessage('**Export CSV (tableaux) :**\n```csv\n${csvBuffer.toString().substring(0, 3000)}\n```\n\n'
-              '💡 Les données CSV peuvent être ouvertes dans Excel / Google Sheets.');
         } else {
-          await _persistAssistantMessage('Aucun tableau trouvé pour l\'export CSV. Utilisez `/export json` ou `/export md`.');
+          await _persistAssistantMessage(
+            'Export CSV depuis une URL : le contenu textuel a été extrait. '
+            'Pour les tableaux, utilisez `/extract <url> table` ou l\'extension Chrome.',
+          );
         }
         break;
       default:
@@ -1595,7 +1941,11 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
           searchContext: searchContext,
           isPro: isPro,
         );
-        title = _extractDocumentTitle(draft, fallbackTopic: topic);
+        // For PowerPoint, force the title to be the exact user topic to avoid
+        // generic LLM-generated titles like "Voici un document complet..."
+        title = normalizedFormat == 'powerpoint'
+            ? topic
+            : _extractDocumentTitle(draft, fallbackTopic: topic);
       }
 
       final sources = searchResults
@@ -1773,17 +2123,44 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
     required String searchContext,
     required bool isPro,
   }) async {
-    final system = 'Tu es un redacteur expert. Tu produis des documents finalisables '
-      'avec structure claire, sections numerotees, contenu factuel verifiable, '
-        'et un bloc "Images suggerees" qui decrit les visuels utiles.';
+    final isPowerpoint = format == 'powerpoint';
 
-    final user = 'Genere un document complet sur: "$topic". '
-      'Format cible: $format. '
-      'Utilise a la fois tes connaissances et le contexte web ci-dessous. '
-      'Le document doit inclure: titre, resume executif, sections detaillees, '
-      'plan d\'actions, references et images suggerees (description + utilite). '
-        'Ecris en francais sauf si le sujet impose une autre langue.\n\n'
-        'Contexte web:\n$searchContext';
+    final system = isPowerpoint
+        ? 'Tu es un concepteur de presentations PowerPoint expert. '
+            'Tu produis des presentations avec structure claire, sections numerotees, '
+            'contenu concis et percutant adapte aux diapositives. '
+            'NE mets PAS de \"DIAPOSITIVE X\" dans les titres. '
+            'Pour chaque section importante, suggere une illustration via un bloc '
+            '\"Image suggeree : Description : [description detaillee]. Utilite : [but].\" '
+            'apres le contenu de la section.'
+        : 'Tu es un redacteur expert. Tu produis des documents finalisables '
+            'avec structure claire, sections numerotees, contenu factuel verifiable, '
+            'et un bloc "Images suggerees" qui decrit les visuels utiles.';
+
+    final user = isPowerpoint
+        ? 'Genere une presentation complete sur: "$topic". '
+            'Format: presentation PowerPoint. '
+            'Structure requise:\n'
+            '1. TITRE (une seule ligne, le sujet exact: "$topic")\n'
+            '2. SOMMAIRE (liste des sections)\n'
+            '3. INTRODUCTION (contexte et objectifs)\n'
+            '4. SECTIONS DETAILLEES (4-6 sections max, titres courts et percutants, '
+            'PAS de numeros de diapositives, chaque section suivie d\'un bloc "Image suggeree")\n'
+            '5. CONCLUSION / PLAN D\'ACTIONS\n'
+            '6. SOURCES (URLs des references)\n\n'
+            'Regles:\n'
+            '- Les titres de sections doivent etre courts (pas de "DIAPOSITIVE X –")\n'
+            '- Chaque section doit etre suivie d\'un bloc "Image suggeree : Description : [description]. Utilite : [but]."\n'
+            '- Contenu concis, adapte a une presentation orale\n'
+            '- Ecris en francais sauf si le sujet impose une autre langue.\n\n'
+            'Contexte web:\n$searchContext'
+        : 'Genere un document complet sur: "$topic". '
+            'Format cible: $format. '
+            'Utilise a la fois tes connaissances et le contexte web ci-dessous. '
+            'Le document doit inclure: titre, resume executif, sections detaillees, '
+            'plan d\'actions, references et images suggerees (description + utilite). '
+            'Ecris en francais sauf si le sujet impose une autre langue.\n\n'
+            'Contexte web:\n$searchContext';
 
     final history = <Map<String, dynamic>>[
       {'role': 'system', 'content': system},

@@ -122,6 +122,48 @@ Après les tests, décider :
 - **Continuer à patcher** les mécanismes existants pour un résultat optimal
 - **Revoir l'architecture** de certains mécanismes (slash, recherche, fichiers) si les patchs ne suffisent pas
 
+---
+
+## Terminé — Session 2026-05-24 — DocGen Multimedia Overhaul ✅
+
+### Améliorations `/docgen`
+1. **Illustrations AI (Pollinations)** : génération d'images professionnelles pour couverture et chaque section. Support JPG/PNG natif via `_toImage()`.
+2. **PPTX enrichi** :
+   - Image de fond pleine page par slide (cover + sections) avec `a:blipFill` + `r:embed`
+   - Overlay semi-transparent blanc (`a:alpha val="55000"`) pour lisibilité du texte
+   - Transitions fade entre slides (`p:transition spd="slow"`)
+   - Animations fade-in par élément (`p:animEffect filter="fade"` avec délais staggered)
+   - Relations images par slide (`_pptxSlideRelsXml` avec `rId2` image)
+   - Content types déclarent `image/jpeg` et `image/png`
+3. **DOCX enrichi** :
+   - Passage `async` pour fetch illustrations
+   - Images inline via DrawingML (`w:drawing` → `wp:inline` → `a:graphic` → `pic:pic`)
+   - Hyperliens fonctionnels : `w:hyperlink r:id="..."` avec relations `TargetMode="External"` dans `word/_rels/document.xml.rels`
+   - `_docxDocumentRels` gère à la fois images et hyperliens externes
+4. **PDF enrichi** :
+   - Illustrations cover et par section avec `pw.ClipRRect` (coins arrondis)
+   - Contenu restructuré par sections avec `_splitSections` (détecte préambule → "Introduction")
+5. **Hyperliens universels** : toutes les sources affichent le domaine cliquable au lieu de l'URL brute (PDF annotation URL, DOCX hyperlink, PPTX texte plat, MD/TXT domaine)
+6. **Robustesse `_splitSections`** : détecte préambule avant premier `## `, crée section "Introduction", évite sections vides
+
+### Fichiers modifiés
+- `lib/features/chat/data/document_generation_service.dart` — refactoring complet (~1200 lignes ajoutées)
+- `lib/features/chat/presentation/slash_commands.dart` — params `jpg`/`png` déjà présents
+
+### Tests
+- `flutter analyze` : non exécuté (flutter non dispo dans l'environnement), mais `debugPrint` remplacé par `print` pour compatibilité sans import Flutter
+- Compilation syntaxique vérifiée manuellement (pas d'erreurs évidentes)
+
+### Reste à faire — Prochaine session
+- [ ] **PPTX inline images** : ajouter une image illustrative à côté du contenu texte dans chaque slide (layout 2 colonnes : texte à gauche, illustration à droite)
+- [ ] **PDF inline images** : illustrations entre les paragraphes (pas seulement en début de section)
+- [ ] **DOCX inline images** : illustrations à côté des paragraphes pertinents (pas seulement en début de section)
+- [ ] **PNG génération d'images** rajouter la génération de fichiers images docgen png "logo castor marrant fond transparent" logo_corely` et vérifier le fichiers générés`
+- [ ] **JPG génération d'images** rajouter la génération de fichiers images docgen jpg "logo castor marrant fond transparent" logo_corely` et vérifier le fichiers générés`
+- [ ] **Tests de génération réels** : exécuter `/docgen pptx "Les castors du Canada"`, `/docgen pdf "..."`, `/docgen jpg "logo castor marrant fond transparent" logo_corely` et vérifier les fichiers générés
+- [ ] **Validation PPTX** : ouvrir dans PowerPoint/Google Slides et vérifier que les fonds, transitions et animations fonctionnent
+- [ ] **Validation DOCX** : ouvrir dans Word/LibreOffice et vérifier que les images et hyperliens sont fonctionnels
+
 ## Termine — Session V14 (2026-05-21) — Vocal UX : Bips, Latence, Qualité, Full-Duplex ✅
 
 ## Termine — Session V14 (2026-05-21) — Vocal UX : Bips, Latence, Qualité, Full-Duplex ✅

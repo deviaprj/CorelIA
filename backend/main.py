@@ -16,7 +16,7 @@ from backend.agents.data_insights import router as insights_router
 from backend.agents.search_engine import search
 from backend.core.config import settings
 from backend.core.logging import get_logger, set_request_id
-from backend.schemas.chat import SearchResponse
+from backend.schemas.chat import SearchResponse, DownloadMediaRequest, DownloadMediaResponse, CrawlRequest, CrawlResponse
 
 logger = get_logger(__name__)
 
@@ -126,6 +126,62 @@ async def search_smart_endpoint(request: Request, q: str) -> dict[str, Any]:
     """
     from backend.agents.search_smart import search_smart
     return await search_smart(q)
+
+
+@app.post("/download_media", response_model=DownloadMediaResponse)
+@_limiter.limit(settings.rate_limit)
+async def download_media_endpoint(
+    request: Request,
+    body: DownloadMediaRequest,
+) -> DownloadMediaResponse:
+    """Extract direct media URLs from a webpage or video site.
+
+    - **Video sites** (YouTube, Vimeo, TikTok, etc.): uses yt-dlp to resolve
+      direct stream URLs and available quality formats.
+    - **Generic pages**: scrapes `<video>`, `<img>`, OpenGraph tags, JSON-LD,
+      CSS backgrounds, and common gallery patterns for images and videos.
+    """
+    from backend.agents.download_service import DownloadService
+
+    service = DownloadService()
+    try:
+        result = service.extract_media(body.url)
+        return DownloadMediaResponse(success=True, **result)
+    except Exception as exc:
+        logger.error("download_media failed", extra={"url": body.url, "error": str(exc)})
+        return DownloadMediaResponse(
+            success=False,
+            error=f"Extraction failed: {exc}",
+        )
+
+
+@app.post("/crawl", response_model=CrawlResponse)
+@_limiter.limit(settings.rate_limit)
+async def crawl_endpoint(
+    request: Request,
+    body: CrawlRequest,
+) -> CrawlResponse:
+    """Recursively crawl a website and extract media links.
+
+    HTTrack-style crawler that follows links up to `max_depth` and
+    collects videos, images, and direct media URLs.
+    """
+    from backend.agents.crawl_service import CrawlService
+
+    service = CrawlService(
+        max_depth=body.max_depth,
+        max_pages=body.max_pages,
+        same_domain=body.same_domain,
+    )
+    try:
+        result = service.crawl(body.url)
+        return CrawlResponse(success=True, **result)
+    except Exception as exc:
+        logger.error("crawl failed", extra={"url": body.url, "error": str(exc)})
+        return CrawlResponse(
+            success=False,
+            errors=[f"Crawl failed: {exc}"],
+        )
 
 
 # Include routers

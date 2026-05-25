@@ -131,7 +131,26 @@
               document: ['.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.csv', '.txt', '.zip', '.rar', '.7z'],
             };
             const exts = extensions[filter] || [];
-            links = links.filter(a => exts.some(ext => a.href.toLowerCase().includes(ext)));
+            // Enhanced video detection: file extensions + known video hosts + iframe embeds
+            if (filter === 'video') {
+              const videoHosts = [
+                'youtube.com/watch', 'youtube.com/shorts', 'youtu.be/',
+                'vimeo.com/', 'dailymotion.com/', 'tiktok.com/',
+                'twitch.tv/', 'facebook.com/watch', 'instagram.com/reel'
+              ];
+              links = links.filter(a => {
+                const href = a.href.toLowerCase();
+                return exts.some(ext => href.includes(ext)) ||
+                       videoHosts.some(host => href.includes(host));
+              });
+              // Also collect video src from <video> and <iframe> elements
+              const videoSrcs = Array.from(document.querySelectorAll('video, iframe'))
+                .filter(el => el.src && el.src.length > 0)
+                .map(el => ({ text: (el.title || el.id || 'Video element').trim().substring(0, 200), href: el.src }));
+              links = links.concat(videoSrcs);
+            } else {
+              links = links.filter(a => exts.some(ext => a.href.toLowerCase().includes(ext)));
+            }
           }
 
           const result = links.slice(0, 100).map(a => ({

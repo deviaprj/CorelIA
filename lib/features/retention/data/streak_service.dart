@@ -10,8 +10,8 @@ class StreakService {
   static const String _prefsKeyStreak = 'streak_days';
   static const String _prefsKeyLastOpen = 'streak_last_open';
   static const String _prefsKeyBonusGranted = 'streak_bonus_granted';
-  static const int _streakThreshold = 3;
-  static const int _bonusMessages = 2;
+  static const int streakThreshold = 3;
+  static const int bonusMessages = 2;
   static const int _resetHours = 48;
 
   /// Verifie et met a jour le streak lors de l'ouverture de l'app.
@@ -47,7 +47,7 @@ class StreakService {
     final bonusAlreadyGranted = prefs.getBool(_prefsKeyBonusGranted) ?? false;
 
     // Verifier si le seuil de 3 jours est atteint et si le bonus n'a pas encore ete accorde pour cette serie
-    final shouldGrantBonus = currentStreak >= _streakThreshold && !bonusAlreadyGranted;
+    final shouldGrantBonus = currentStreak >= streakThreshold && !bonusAlreadyGranted;
 
     await _saveStreak(
       prefs,
@@ -72,9 +72,9 @@ class StreakService {
   Future<String?> getStreakMessage() async {
     final data = await getStreakData();
     if (data.streak == 0) return null;
-    if (data.streak < _streakThreshold) {
-      final remaining = _streakThreshold - data.streak;
-      return '$remaining jour${remaining > 1 ? 's' : ''} avant le bonus +$_bonusMessages messages !';
+    if (data.streak < streakThreshold) {
+      final remaining = streakThreshold - data.streak;
+      return '$remaining jour${remaining > 1 ? 's' : ''} avant le bonus +$bonusMessages messages !';
     }
     return 'Serie de $data.streak jours 🔥';
   }
@@ -109,5 +109,5 @@ class StreakData {
 
   const StreakData({required this.streak, required this.bonusGranted});
 
-  bool get isBonusEligible => streak >= StreakService._streakThreshold && !bonusGranted;
+  bool get isBonusEligible => streak >= StreakService.streakThreshold && !bonusGranted;
 }

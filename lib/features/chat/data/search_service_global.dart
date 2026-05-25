@@ -168,6 +168,44 @@ class SearchServiceGlobal {
     throw Exception('Scrape failed: ${resp.statusCode}');
   }
 
+  /// Extract media (video/image) from a URL via the backend /download_media endpoint.
+  Future<Map<String, dynamic>> downloadMedia(String url, {String mediaType = 'auto'}) async {
+    if (_backendUrl.isEmpty || _backendUrl.contains('localhost')) {
+      throw Exception('Backend URL not configured');
+    }
+    final resp = await _dio.post<Map<String, dynamic>>(
+      '$_backendUrl/download_media',
+      data: {'url': url, 'media_type': mediaType},
+      options: Options(
+        sendTimeout: const Duration(seconds: 10),
+        receiveTimeout: const Duration(seconds: 30),
+      ),
+    );
+    if (resp.statusCode == 200 && resp.data != null) {
+      return resp.data!;
+    }
+    throw Exception('Download media failed: ${resp.statusCode}');
+  }
+
+  /// Crawl a website recursively via the backend /crawl endpoint.
+  Future<Map<String, dynamic>> crawl(String url, {int maxDepth = 2, int maxPages = 20}) async {
+    if (_backendUrl.isEmpty || _backendUrl.contains('localhost')) {
+      throw Exception('Backend URL not configured');
+    }
+    final resp = await _dio.post<Map<String, dynamic>>(
+      '$_backendUrl/crawl',
+      data: {'url': url, 'max_depth': maxDepth, 'max_pages': maxPages, 'same_domain': true},
+      options: Options(
+        sendTimeout: const Duration(seconds: 10),
+        receiveTimeout: const Duration(seconds: 45),
+      ),
+    );
+    if (resp.statusCode == 200 && resp.data != null) {
+      return resp.data!;
+    }
+    throw Exception('Crawl failed: ${resp.statusCode}');
+  }
+
   // ── Formatters (remplacent les anciens format* de EnhancedSearchService) ──
 
   static String formatMarkdown(SmartSearchResponse response, String originalQuery) {

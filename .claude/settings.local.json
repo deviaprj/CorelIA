@@ -51,7 +51,12 @@
       "Bash(chmod +x /home/geekai/Documents/GitHub/AironBot/.git/hooks/pre-commit)",
       "Read(//tmp/apk_extract/**)",
       "Bash(rm -rf *)",
-      "Bash(unzip -q /home/geekai/Documents/GitHub/AironBot/build/app/outputs/flutter-apk/app-release.apk)"
+      "Bash(unzip -q /home/geekai/Documents/GitHub/AironBot/build/app/outputs/flutter-apk/app-release.apk)",
+      "Bash(mkdir -p /tmp/pptx_inspect)",
+      "Read(//tmp/**)",
+      "Bash(unzip -q /home/geekai/Documents/GitHub/AironBot/docs/pres_2nd_guerre_mondial2.pptx)",
+      "Bash(rtk ls *)",
+      "Bash(unzip /home/geekai/Documents/GitHub/AironBot/docs/pres_2nd_guerre_mondial2.pptx)"
     ]
   }
 }

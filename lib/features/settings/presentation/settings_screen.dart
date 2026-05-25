@@ -12,6 +12,7 @@ import '../../auth/presentation/auth_notifier.dart';
 import '../../monetization/subscription/subscription_service.dart';
 import '../../referral/data/referral_service.dart';
 import '../../retention/data/retention_providers.dart';
+import '../../retention/data/streak_service.dart';
 import '../../monetization/data/consent_data_service.dart';
 import '../../monetization/data/anonymized_insight_service.dart';
 
@@ -210,6 +211,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           // ── Statistiques & Rétention ─────────────────────────────────────
           _SectionTitle('Statistiques'),
           _StatsSection(),
+          _StreakSection(),
 
           _SectionTitle('Rétention'),
           _DailyQuestionToggle(),
@@ -530,6 +532,45 @@ class _StatsSection extends ConsumerWidget {
           child: CircularProgressIndicator(strokeWidth: 2),
         ),
         title: Text('Chargement des statistiques...'),
+      ),
+      error: (_, __) => const SizedBox.shrink(),
+    );
+  }
+}
+
+class _StreakSection extends ConsumerWidget {
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final streakAsync = ref.watch(streakDataProvider);
+
+    return streakAsync.when(
+      data: (data) {
+        if (data.streak == 0) return const SizedBox.shrink();
+        final bool bonusActive = data.streak >= StreakService.streakThreshold && data.bonusGranted;
+        final String subtitle = bonusActive
+            ? 'Bonus +2 messages actif'
+            : data.streak < StreakService.streakThreshold
+                ? '${StreakService.streakThreshold - data.streak} jour${(StreakService.streakThreshold - data.streak) > 1 ? 's' : ''} avant le bonus'
+                : 'Serie en cours';
+        return ListTile(
+          leading: Icon(
+            Icons.local_fire_department,
+            color: bonusActive ? Colors.orange : Theme.of(context).colorScheme.onSurfaceVariant,
+          ),
+          title: Text('Serie de ${data.streak} jour${data.streak > 1 ? 's' : ''}'),
+          subtitle: Text(subtitle),
+          trailing: bonusActive
+              ? Chip(
+                  label: const Text('+2'),
+                  backgroundColor: Colors.orange.shade100,
+                  labelStyle: TextStyle(color: Colors.orange.shade800, fontWeight: FontWeight.bold),
+                )
+              : null,
+        );
+      },
+      loading: () => const ListTile(
+        leading: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)),
+        title: Text('Chargement du streak...'),
       ),
       error: (_, __) => const SizedBox.shrink(),
     );

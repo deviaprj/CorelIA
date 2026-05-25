@@ -23,6 +23,23 @@ class GeneratedDocument {
   });
 }
 
+/// Internal section model for PPTX generation.
+class _PptxSection {
+  final String title;
+  final String content;
+  final String? imageDescription;
+
+  _PptxSection({required this.title, required this.content, this.imageDescription});
+}
+
+/// Internal hyperlink model for PPTX sources slide.
+class _SourceLink {
+  final String text;
+  final String url;
+
+  _SourceLink({required this.text, required this.url});
+}
+
 class DocumentGenerationService {
   Future<GeneratedDocument> generate({
     required String format,
@@ -131,12 +148,14 @@ class DocumentGenerationService {
   }) {
     final now = DateTime.now();
     final dateStr = '${now.day.toString().padLeft(2, '0')}/${now.month.toString().padLeft(2, '0')}/${now.year}';
-    final cleanBody = _stripLeadingTitle(body, title);
+    final cleanBody = _cleanBodyForDocgen(_stripLeadingTitle(body, title));
 
     final sourceLines = sources.isEmpty
         ? 'Aucune source web explicite.'
         : sources.map((s) {
-            final decoded = _decodeRedirectUrl(s);
+            final emDashIdx = s.indexOf(' — ');
+            final urlPart = emDashIdx != -1 ? s.substring(emDashIdx + 3).trim() : s;
+            final decoded = _decodeRedirectUrl(urlPart);
             final domain = _extractDomain(decoded);
             return '- $domain : $decoded';
           }).join('\n');
@@ -155,12 +174,14 @@ class DocumentGenerationService {
   String _toMarkdown(String title, String body, List<String> sources) {
     final now = DateTime.now();
     final dateStr = '${now.day.toString().padLeft(2, '0')}/${now.month.toString().padLeft(2, '0')}/${now.year}';
-    final cleanBody = _stripLeadingTitle(body, title);
+    final cleanBody = _cleanBodyForDocgen(_stripLeadingTitle(body, title));
 
     final sourceLines = sources.isEmpty
         ? '- Aucune source web explicite.'
         : sources.map((s) {
-            final decoded = _decodeRedirectUrl(s);
+            final emDashIdx = s.indexOf(' — ');
+            final urlPart = emDashIdx != -1 ? s.substring(emDashIdx + 3).trim() : s;
+            final decoded = _decodeRedirectUrl(urlPart);
             final domain = _extractDomain(decoded);
             return '- [$domain]($decoded)';
           }).join('\n');
@@ -186,8 +207,8 @@ class DocumentGenerationService {
     final now = DateTime.now();
     final dateStr = '${now.day.toString().padLeft(2, '0')}/${now.month.toString().padLeft(2, '0')}/${now.year}';
 
-    // Remove duplicated title heading from the body so it only appears on cover
-    final cleanBody = _stripLeadingTitle(body, title);
+    // Remove duplicated title heading and image-suggestion blocks from the body
+    final cleanBody = _cleanBodyForDocgen(_stripLeadingTitle(body, title));
     final sections = _splitSections(cleanBody);
 
     // Fetch illustrations in parallel
@@ -297,7 +318,8 @@ class DocumentGenerationService {
           ),
         ),
       );
-      contentWidgets.addAll(_parseMarkdownToPdfWidgets(entry.value));
+      final sectionWidgets = _parseMarkdownToPdfWidgets(entry.value);
+      contentWidgets.addAll(_insertInlineImage(sectionWidgets, secImage));
       contentWidgets.add(pw.SizedBox(height: 20));
       sectionIdx++;
     }
@@ -343,11 +365,48 @@ class DocumentGenerationService {
 
   /// Removes the duplicated title heading that the LLM often injects at the
   /// very beginning of the body (e.g. "Titre: X" or "# X").
+  /// Distribute an inline image at multiple points through a list of PDF widgets
+  /// so that every page/section gets visual coverage.
+  List<pw.Widget> _insertInlineImage(List<pw.Widget> widgets, Uint8List? image) {
+    if (image == null || widgets.length < 3) return widgets;
+    final result = List<pw.Widget>.from(widgets);
+
+    // Determine insertion points: 1/3 and 2/3 (and middle for very long sections)
+    final positions = <int>[
+      result.length ~/ 3,
+      if (result.length > 6) 2 * result.length ~/ 3,
+    ];
+
+    // Sort descending so indices don't shift during insertions
+    positions.sort((a, b) => b.compareTo(a));
+
+    for (final idx in positions) {
+      result.insert(
+        idx.clamp(1, result.length - 1),
+        pw.Container(
+          margin: const pw.EdgeInsets.symmetric(vertical: 10),
+          alignment: pw.Alignment.center,
+          child: pw.ClipRRect(
+            horizontalRadius: 8,
+            verticalRadius: 8,
+            child: pw.Image(
+              pw.MemoryImage(image),
+              width: 300,
+              height: 170,
+              fit: pw.BoxFit.cover,
+            ),
+          ),
+        ),
+      );
+    }
+    return result;
+  }
+
   String _stripLeadingTitle(String body, String title) {
     var clean = body.trim();
 
-    // "Titre: ... \n" prefix
-    if (clean.startsWith('Titre:')) {
+    // "Titre: ... \n" prefix (case insensitive)
+    if (RegExp(r'^Titre\s*:', caseSensitive: false).hasMatch(clean)) {
       final nl = clean.indexOf('\n');
       if (nl != -1) clean = clean.substring(nl + 1).trim();
     }
@@ -362,6 +421,29 @@ class DocumentGenerationService {
     }
 
     return clean;
+  }
+
+  /// Strips image-suggestion blocks (Description, Utilité, Image suggérée)
+  /// from the document body so they don't leak into visible text output.
+  String _cleanBodyForDocgen(String body) {
+    final lines = body.split('\n');
+    final result = <String>[];
+    for (final rawLine in lines) {
+      final line = rawLine.trimRight();
+      final lowered = line.toLowerCase();
+      if (lowered.startsWith('image suggérée') ||
+          lowered.startsWith('**image suggérée') ||
+          lowered.startsWith('image suggeree') ||
+          lowered.startsWith('**image suggeree')) {
+        continue;
+      }
+      if (RegExp(r'^Description\s*:', caseSensitive: false).hasMatch(line) ||
+          RegExp(r'^Utilit[ée]\s*:', caseSensitive: false).hasMatch(line)) {
+        continue;
+      }
+      result.add(rawLine);
+    }
+    return result.join('\n');
   }
 
   /// Converts markdown-like text into richly-styled PDF widgets.
@@ -387,27 +469,11 @@ class DocumentGenerationService {
         continue;
       }
 
-      // Image suggestion box
+      // Strip image-suggestion and metadata lines from visible output
       final lowered = line.toLowerCase();
-      if (lowered.startsWith('image suggérée') || lowered.startsWith('**image suggérée')) {
-        widgets.add(pw.Container(
-          padding: const pw.EdgeInsets.all(10),
-          margin: const pw.EdgeInsets.symmetric(vertical: 8),
-          decoration: pw.BoxDecoration(
-            color: _lightBgColor,
-            border: pw.Border.all(color: _primaryColor, width: 0.5),
-            borderRadius: pw.BorderRadius.circular(6),
-          ),
-          child: pw.Row(
-            crossAxisAlignment: pw.CrossAxisAlignment.start,
-            children: [
-              pw.Text('🖼 ', style: pw.TextStyle(fontSize: 12)),
-              pw.Expanded(
-                child: _buildRichParagraph(_stripMarkdownMarkers(line)),
-              ),
-            ],
-          ),
-        ));
+      if (lowered.startsWith('image suggérée') || lowered.startsWith('**image suggérée')) continue;
+      if (RegExp(r'^Description\s*:', caseSensitive: false).hasMatch(line) ||
+          RegExp(r'^Utilit[ée]\s*:', caseSensitive: false).hasMatch(line)) {
         continue;
       }
 
@@ -681,7 +747,7 @@ class DocumentGenerationService {
   // ── DOCX (real OOXML) ──────────────────────────────────────────────────────
 
   Future<Uint8List> _toDocx(String title, String body, List<String> sources) async {
-    final cleanBody = _stripLeadingTitle(body, title);
+    final cleanBody = _cleanBodyForDocgen(_stripLeadingTitle(body, title));
     final sections = _splitSections(cleanBody);
     final now = DateTime.now();
     final dateStr = '${now.day.toString().padLeft(2, '0')}/${now.month.toString().padLeft(2, '0')}/${now.year}';
@@ -735,31 +801,47 @@ class DocumentGenerationService {
     var sectionIdx = 0;
     for (final entry in sections.entries) {
       final secRid = registerImage(sectionImages[sectionIdx]);
-      if (secRid != null) {
-        paragraphs.add(_docxImageParagraph(secRid, 4572000, 3429000));
-      }
       paragraphs.add(_docxParagraph(entry.key, bold: true, size: 18, color: '6C63FF', spacingBefore: 240, spacingAfter: 120));
+
+      // Build text paragraphs for this section
+      final textParagraphs = <String>[];
       final lines = entry.value.split('\n');
       for (final raw in lines) {
         final line = raw.trim();
         if (line.isEmpty) continue;
         if (line.startsWith('---') || line.startsWith('***')) {
-          paragraphs.add(_docxHorizontalRule());
+          textParagraphs.add(_docxHorizontalRule());
+          continue;
+        }
+        if (RegExp(r'^Description\\s*:', caseSensitive: false).hasMatch(line) ||
+            RegExp(r'^Utilit[ée]\\s*:', caseSensitive: false).hasMatch(line)) {
           continue;
         }
         if (line.startsWith('- ') || line.startsWith('* ')) {
-          paragraphs.add(_docxBullet(line.substring(2).trim(), level: 0));
+          textParagraphs.add(_docxBullet(line.substring(2).trim(), level: 0));
           continue;
         }
         if (line.startsWith('## ')) {
-          paragraphs.add(_docxParagraph(line.substring(3).trim(), bold: true, size: 16, color: '6C63FF', spacingBefore: 200, spacingAfter: 80));
+          textParagraphs.add(_docxParagraph(line.substring(3).trim(), bold: true, size: 16, color: '6C63FF', spacingBefore: 200, spacingAfter: 80));
           continue;
         }
         if (line.startsWith('### ')) {
-          paragraphs.add(_docxParagraph(line.substring(4).trim(), bold: true, size: 14, color: '6C63FF', spacingBefore: 160, spacingAfter: 60));
+          textParagraphs.add(_docxParagraph(line.substring(4).trim(), bold: true, size: 14, color: '6C63FF', spacingBefore: 160, spacingAfter: 60));
           continue;
         }
-        paragraphs.add(_docxRichParagraph(line));
+        textParagraphs.add(_docxRichParagraph(line));
+      }
+
+      // Distribute inline images throughout the section (every ~3 paragraphs)
+      if (secRid != null && textParagraphs.isNotEmpty) {
+        for (var i = 0; i < textParagraphs.length; i++) {
+          paragraphs.add(textParagraphs[i]);
+          if ((i + 1) % 3 == 0) {
+            paragraphs.add(_docxImageParagraph(secRid, 3200000, 1800000));
+          }
+        }
+      } else {
+        paragraphs.addAll(textParagraphs);
       }
       sectionIdx++;
     }
@@ -771,7 +853,9 @@ class DocumentGenerationService {
     for (var i = 0; i < sources.length; i++) {
       final source = sources[i].trim();
       if (source.isEmpty) continue;
-      final decoded = _decodeRedirectUrl(source);
+      final emDashIdx = source.indexOf(' — ');
+      final urlPart = emDashIdx != -1 ? source.substring(emDashIdx + 3).trim() : source;
+      final decoded = _decodeRedirectUrl(urlPart);
       final domain = _extractDomain(decoded);
       final linkRid = getHyperlinkRelId(decoded);
       paragraphs.add(_docxHyperlinkParagraph('${i + 1}. $domain', linkRid));
@@ -917,6 +1001,42 @@ class DocumentGenerationService {
         '$hyperlinkRelsXml</Relationships>';
   }
 
+  String _docxTwoColumnTable(String imageRid, String textXml) {
+    // 2-column table: 55% text (left) | 45% image (right)
+    return '<w:tbl>'
+        '<w:tblPr><w:tblW w:w="5000" w:type="pct"/>'
+        '<w:tblBorders><w:top w:val="none"/><w:left w:val="none"/><w:bottom w:val="none"/><w:right w:val="none"/><w:insideH w:val="none"/><w:insideV w:val="none"/></w:tblBorders>'
+        '<w:tblCellMar><w:top w:w="72" w:type="dxa"/><w:left w:w="72" w:type="dxa"/><w:bottom w:w="72" w:type="dxa"/><w:right w:w="72" w:type="dxa"/></w:tblCellMar>'
+        '</w:tblPr>'
+        '<w:tblGrid><w:gridCol w:w="5490"/><w:gridCol w:w="5490"/></w:tblGrid>'
+        '<w:tr>'
+        '<w:trPr><w:trHeight w:hRule="atLeast" w:val="400"/></w:trPr>'
+        // Left cell: text
+        '<w:tc><w:tcPr><w:tcW w:w="5490" w:type="dxa"/><w:vAlign w:val="top"/></w:tcPr>'
+        '$textXml</w:tc>'
+        // Right cell: image
+        '<w:tc><w:tcPr><w:tcW w:w="5490" w:type="dxa"/><w:vAlign w:val="top"/></w:tcPr>'
+        '<w:p><w:r><w:drawing>'
+        '<wp:inline xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" distT="0" distB="0" distL="0" distR="0">'
+        '<wp:extent cx="3200000" cy="2400000"/>'
+        '<wp:effectExtent l="0" t="0" r="0" b="0"/>'
+        '<wp:docPr id="1" name="Illustration"/>'
+        '<wp:cNvGraphicFramePr><a:graphicFrameLocks xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" noChangeAspect="1"/></wp:cNvGraphicFramePr>'
+        '<a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">'
+        '<a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">'
+        '<pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">'
+        '<pic:nvPicPr><pic:cNvPr id="0" name="image.jpg"/><pic:cNvPicPr/></pic:nvPicPr>'
+        '<pic:blipFill><a:blip r:embed="$imageRid"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>'
+        '<pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="3200000" cy="2400000"/></a:xfrm><a:prstGeom prst="rect"/></pic:spPr>'
+        '</pic:pic>'
+        '</a:graphicData>'
+        '</a:graphic>'
+        '</wp:inline>'
+        '</w:drawing></w:r></w:p>'
+        '</w:tc>'
+        '</w:tr></w:tbl>';
+  }
+
   String _docxImageParagraph(String rId, int widthEmu, int heightEmu) {
     return '<w:p><w:r><w:drawing>'
         '<wp:inline xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" distT="0" distB="0" distL="0" distR="0">'
@@ -948,15 +1068,49 @@ class DocumentGenerationService {
 
   Future<Uint8List> _toPptx(String title, String body, List<String> sources) async {
     final cleanBody = _stripLeadingTitle(body, title);
-    final sections = _splitSections(cleanBody);
+    final sections = _splitPptxSections(cleanBody);
     final now = DateTime.now();
     final dateStr = '${now.day.toString().padLeft(2, '0')}/${now.month.toString().padLeft(2, '0')}/${now.year}';
 
-    // Pre-generate background illustrations in parallel
+    // Identify special sections
+    _PptxSection? tocSection;
+    _PptxSection? introSection;
+    _PptxSection? conclusionSection;
+    final contentSections = <_PptxSection>[];
+
+    for (final section in sections) {
+      final lower = section.title.toLowerCase().trim();
+      if (lower == 'titre' || lower.startsWith('titre :')) {
+        // Skip LLM-generated duplicate title section — cover already shows the title
+        continue;
+      } else if (lower.contains('sommaire') || lower.contains('table des matières') || lower.contains('table des matieres')) {
+        tocSection = section;
+      } else if (lower.contains('introduction')) {
+        introSection = section;
+      } else if (lower.contains('conclusion') || lower.contains('plan d\'action') || lower.contains('plan dactions')) {
+        conclusionSection = section;
+      } else if (lower.contains('source') ||
+          lower.contains('référence') ||
+          lower.contains('reference') ||
+          lower.contains('bibliographie')) {
+        // Skip LLM-generated sources sections — sources are rendered on a dedicated slide
+        continue;
+      } else {
+        contentSections.add(section);
+      }
+    }
+
+    // Pre-generate images in parallel
     final coverImageFuture = _fetchIllustration(title);
-    final sectionImageFutures = sections.keys.map((s) => _fetchIllustration(s)).toList();
+    final imageFutures = <Future<Uint8List?>>[];
+    for (final section in contentSections) {
+      final prompt = section.imageDescription?.isNotEmpty == true
+          ? section.imageDescription!
+          : section.title;
+      imageFutures.add(_fetchIllustration(prompt));
+    }
     final coverImage = await coverImageFuture;
-    final sectionImages = await Future.wait(sectionImageFutures);
+    final sectionImages = await Future.wait(imageFutures);
 
     final slideXmls = <String, List<int>>{};
     final slideRelsXmls = <String, List<int>>{};
@@ -964,6 +1118,7 @@ class DocumentGenerationService {
     final partFiles = <String, List<int>>{};
     var slideNum = 1;
     var imageNum = 1;
+    var nextRelId = 10; // Reserve rId1-9 for standard rels
 
     // ── Cover slide ─────────────────────────────────────────────────────────────
     final coverFileName = 'ppt/slides/slide$slideNum.xml';
@@ -986,44 +1141,107 @@ class DocumentGenerationService {
     relTargets.add('<Relationship Id="rId$slideNum" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide$slideNum.xml"/>');
     slideNum++;
 
-    // ── Content slides ────────────────────────────────────────────────────────
+    // ── Table of Contents slide ─────────────────────────────────────────────────
+    if (tocSection != null || contentSections.isNotEmpty) {
+      final tocItems = contentSections.map((s) => s.title).toList();
+      if (introSection != null) tocItems.insert(0, introSection.title);
+      if (conclusionSection != null) tocItems.add(conclusionSection.title);
+      final tocFileName = 'ppt/slides/slide$slideNum.xml';
+      final tocRelFileName = 'ppt/slides/_rels/slide$slideNum.xml.rels';
+      slideXmls[tocFileName] = utf8.encode(_pptxTocSlideXml('Sommaire', tocItems));
+      slideRelsXmls[tocRelFileName] = utf8.encode(_pptxSlideRelsXml());
+      relTargets.add('<Relationship Id="rId$slideNum" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide$slideNum.xml"/>');
+      slideNum++;
+    }
+
+    // ── Introduction slide ─────────────────────────────────────────────────────
+    if (introSection != null) {
+      final introFileName = 'ppt/slides/slide$slideNum.xml';
+      final introRelFileName = 'ppt/slides/_rels/slide$slideNum.xml.rels';
+      slideXmls[introFileName] = utf8.encode(_pptxContentSlideXml(
+        introSection.title,
+        introSection.content,
+      ));
+      slideRelsXmls[introRelFileName] = utf8.encode(_pptxSlideRelsXml());
+      relTargets.add('<Relationship Id="rId$slideNum" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide$slideNum.xml"/>');
+      slideNum++;
+    }
+
+    // ── Content slides (two-column: text + image on every slide) ───────────────
     var sectionIdx = 0;
-    for (final entry in sections.entries) {
-      final contentFileName = 'ppt/slides/slide$slideNum.xml';
-      final contentRelFileName = 'ppt/slides/_rels/slide$slideNum.xml.rels';
-      final sectionImage = sectionImages[sectionIdx];
-      String? sectionImagePath;
-      if (sectionImage != null) {
-        sectionImagePath = 'ppt/media/image_$imageNum.jpg';
-        partFiles[sectionImagePath] = sectionImage;
+    for (final section in contentSections) {
+      final image = sectionImages[sectionIdx];
+      String? imagePath;
+      if (image != null) {
+        imagePath = 'ppt/media/image_$imageNum.jpg';
+        partFiles[imagePath] = image;
         imageNum++;
       }
-      slideXmls[contentFileName] = utf8.encode(_pptxContentSlideXml(
-        entry.key,
-        entry.value,
-        backgroundRid: sectionImagePath != null ? 'rId2' : null,
-        hasBgRect: sectionImagePath != null,
+      // Two-column slide: text left + illustration right
+      final textFileName = 'ppt/slides/slide$slideNum.xml';
+      final textRelFileName = 'ppt/slides/_rels/slide$slideNum.xml.rels';
+      slideXmls[textFileName] = utf8.encode(_pptxTwoColumnSlideXml(
+        section.title,
+        section.content,
+        imageRid: imagePath != null ? 'rId2' : null,
+        hasImage: imagePath != null,
       ));
-      slideRelsXmls[contentRelFileName] = utf8.encode(_pptxSlideRelsXml(
-        imagePath: sectionImagePath != null ? '../media/image_${imageNum - 1}.jpg' : null,
+      slideRelsXmls[textRelFileName] = utf8.encode(_pptxSlideRelsXml(
+        imagePath: imagePath != null ? '../media/image_${imageNum - 1}.jpg' : null,
       ));
       relTargets.add('<Relationship Id="rId$slideNum" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide$slideNum.xml"/>');
       slideNum++;
+
+      // Full-page image slide (kept for visual impact)
+      if (image != null) {
+        final fullImageFileName = 'ppt/slides/slide$slideNum.xml';
+        final fullImageRelFileName = 'ppt/slides/_rels/slide$slideNum.xml.rels';
+        slideXmls[fullImageFileName] = utf8.encode(_pptxFullImageSlideXml(
+          'Illustration : ${section.title}',
+          imageRid: 'rId2',
+        ));
+        slideRelsXmls[fullImageRelFileName] = utf8.encode(_pptxSlideRelsXml(
+          imagePath: '../media/image_${imageNum - 1}.jpg',
+        ));
+        relTargets.add('<Relationship Id="rId$slideNum" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide$slideNum.xml"/>');
+        slideNum++;
+      }
       sectionIdx++;
     }
 
-    // ── Sources slide ───────────────────────────────────────────────────────────
-    final sourceText = sources.isEmpty
-        ? 'Aucune source web explicite.'
-        : sources.map((s) {
-            final decoded = _decodeRedirectUrl(s);
-            final domain = _extractDomain(decoded);
-            return '$domain — $decoded';
-          }).join('\n');
+    // ── Conclusion slide ────────────────────────────────────────────────────────
+    if (conclusionSection != null) {
+      final conclusionFileName = 'ppt/slides/slide$slideNum.xml';
+      final conclusionRelFileName = 'ppt/slides/_rels/slide$slideNum.xml.rels';
+      slideXmls[conclusionFileName] = utf8.encode(_pptxContentSlideXml(
+        conclusionSection.title,
+        conclusionSection.content,
+      ));
+      slideRelsXmls[conclusionRelFileName] = utf8.encode(_pptxSlideRelsXml());
+      relTargets.add('<Relationship Id="rId$slideNum" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide$slideNum.xml"/>');
+      slideNum++;
+    }
+
+    // ── Sources slide with hyperlinks ───────────────────────────────────────────
     final sourcesFileName = 'ppt/slides/slide$slideNum.xml';
     final sourcesRelFileName = 'ppt/slides/_rels/slide$slideNum.xml.rels';
-    slideXmls[sourcesFileName] = utf8.encode(_pptxSourcesSlideXml(sourceText));
-    slideRelsXmls[sourcesRelFileName] = utf8.encode(_pptxSlideRelsXml());
+    final sourceLinks = <_SourceLink>[];
+    for (final s in sources) {
+      // Extract URL part from "Title — URL" format before decoding
+      final emDashIdx = s.indexOf(' — ');
+      final urlPart = emDashIdx != -1 ? s.substring(emDashIdx + 3).trim() : s;
+      final decoded = _decodeRedirectUrl(urlPart);
+      final titlePart = emDashIdx != -1 ? s.substring(0, emDashIdx).trim() : '';
+      final domain = _extractDomain(decoded);
+      final displayText = titlePart.isNotEmpty ? titlePart : domain;
+      sourceLinks.add(_SourceLink(text: displayText, url: decoded));
+    }
+    final sourceHyperlinkRels = <String, String>{};
+    for (var i = 0; i < sourceLinks.length; i++) {
+      sourceHyperlinkRels['rId${nextRelId + i}'] = sourceLinks[i].url;
+    }
+    slideXmls[sourcesFileName] = utf8.encode(_pptxSourcesSlideXmlWithLinks(sourceLinks, nextRelId));
+    slideRelsXmls[sourcesRelFileName] = utf8.encode(_pptxSlideRelsXmlWithHyperlinks(sourceHyperlinkRels));
     relTargets.add('<Relationship Id="rId$slideNum" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide$slideNum.xml"/>');
     slideNum++;
 
@@ -1095,7 +1313,7 @@ class DocumentGenerationService {
         '<a:solidFill><a:srgbClr val="999999"/></a:solidFill>'
         '</a:rPr><a:t>$date</a:t></a:r></a:p></p:txBody></p:sp>'
         '</p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr>'
-        '<p:transition spd="slow" advClick="1"><p:fade/></p:transition>'
+        '<p:transition spd="slow" advClick="1" advTm="5000"><p:fade/></p:transition>'
         '<p:timing><p:tnLst><p:par><p:cTn id="1" dur="indefinite" restart="never" nodeType="tmRoot"/><p:childTnLst><p:seq concurrent="1" nextAc="seek"><p:cTn id="2" dur="indefinite" nodeType="mainSeq"/><p:childTnLst><p:par><p:cTn id="3" fill="hold"><p:stCondLst><p:cond delay="0"/></p:stCondLst></p:cTn><p:childTnLst><p:animEffect transition="in" filter="fade"><p:cBhvr><p:cTn id="4" dur="1000" fill="hold"/><p:tgtEl><p:spTgt spid="2"/></p:tgtEl></p:cBhvr></p:animEffect></p:childTnLst></p:par><p:par><p:cTn id="5" fill="hold"><p:stCondLst><p:cond delay="400"/></p:stCondLst></p:cTn><p:childTnLst><p:animEffect transition="in" filter="fade"><p:cBhvr><p:cTn id="6" dur="1000" fill="hold"/><p:tgtEl><p:spTgt spid="3"/></p:tgtEl></p:cBhvr></p:animEffect></p:childTnLst></p:par><p:par><p:cTn id="7" fill="hold"><p:stCondLst><p:cond delay="800"/></p:stCondLst></p:cTn><p:childTnLst><p:animEffect transition="in" filter="fade"><p:cBhvr><p:cTn id="8" dur="1000" fill="hold"/><p:tgtEl><p:spTgt spid="4"/></p:tgtEl></p:cBhvr></p:animEffect></p:childTnLst></p:par></p:childTnLst></p:seq></p:childTnLst></p:par></p:tnLst></p:timing></p:sld>';
   }
 
@@ -1105,7 +1323,13 @@ class DocumentGenerationService {
     String? backgroundRid,
     bool hasBgRect = false,
   }) {
-    final escapedTitle = _xmlEscape(title);
+    // Strip "DIAPOSITIVE X –" prefix if present
+    var cleanTitle = title;
+    cleanTitle = cleanTitle.replaceFirst(
+      RegExp(r'^DIAPOSITIVE\s+\d+\s*[-–—]\s*', caseSensitive: false),
+      '',
+    );
+    final escapedTitle = _xmlEscape(cleanTitle);
     final paragraphsXml = _pptxContentParagraphs(content);
     final bgXml = backgroundRid != null
         ? '<p:bg><p:bgPr><a:blipFill rotWithShape="1"><a:blip r:embed="$backgroundRid"/><a:stretch><a:fillRect/></a:stretch></a:blipFill><a:effectLst/></p:bgPr></p:bg>'
@@ -1137,7 +1361,58 @@ class DocumentGenerationService {
         '<p:txBody><a:bodyPr/><a:lstStyle/>'
         '$paragraphsXml</p:txBody></p:sp>'
         '</p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr>'
-        '<p:transition spd="slow" advClick="1"><p:fade/></p:transition>'
+        '<p:transition spd="slow" advClick="1" advTm="5000"><p:fade/></p:transition>'
+        '<p:timing><p:tnLst><p:par><p:cTn id="1" dur="indefinite" restart="never" nodeType="tmRoot"/><p:childTnLst><p:seq concurrent="1" nextAc="seek"><p:cTn id="2" dur="indefinite" nodeType="mainSeq"/><p:childTnLst><p:par><p:cTn id="3" fill="hold"><p:stCondLst><p:cond delay="0"/></p:stCondLst></p:cTn><p:childTnLst><p:animEffect transition="in" filter="fade"><p:cBhvr><p:cTn id="4" dur="1000" fill="hold"/><p:tgtEl><p:spTgt spid="2"/></p:tgtEl></p:cBhvr></p:animEffect></p:childTnLst></p:par><p:par><p:cTn id="5" fill="hold"><p:stCondLst><p:cond delay="300"/></p:stCondLst></p:cTn><p:childTnLst><p:animEffect transition="in" filter="fade"><p:cBhvr><p:cTn id="6" dur="1000" fill="hold"/><p:tgtEl><p:spTgt spid="3"/></p:tgtEl></p:cBhvr></p:animEffect></p:childTnLst></p:par></p:childTnLst></p:seq></p:childTnLst></p:par></p:tnLst></p:timing></p:sld>';
+  }
+
+  String _pptxTwoColumnSlideXml(
+    String title,
+    String content, {
+    String? imageRid,
+    bool hasImage = false,
+  }) {
+    // Strip "DIAPOSITIVE X –" prefix if present
+    var cleanTitle = title;
+    cleanTitle = cleanTitle.replaceFirst(
+      RegExp(r'^DIAPOSITIVE\s+\d+\s*[-–—]\s*', caseSensitive: false),
+      '',
+    );
+    final escapedTitle = _xmlEscape(cleanTitle);
+    final paragraphsXml = _pptxContentParagraphs(content);
+    final leftColWidth = hasImage ? 4572000 : 8229600;
+    final rightColX = hasImage ? 5029200 : 0;
+    final rightColWidth = hasImage ? 3657600 : 0;
+
+    // Image shape on the right
+    final imageShapeXml = hasImage
+        ? '<p:sp><p:nvSpPr><p:cNvPr id="5" name="ImageShape"/><p:cNvSpPr><a:spLocks noGrp="1" noSelect="1"/></p:cNvSpPr><p:nvPr/></p:nvSpPr><p:spPr><a:xfrm><a:off x="$rightColX" y="1200000"/><a:ext cx="$rightColWidth" cy="5000000"/></a:xfrm><a:prstGeom prst="rect"/></p:spPr><p:txBody><a:bodyPr/><a:lstStyle/></p:txBody></p:sp><p:pic><p:nvPicPr><p:cNvPr id="6" name="Illustration"/><p:cNvPicPr><a:picLocks noChangeAspect="1"/></p:cNvPicPr></p:nvPicPr><p:blipFill><a:blip r:embed="$imageRid"/><a:stretch><a:fillRect/></a:stretch></p:blipFill><p:spPr><a:xfrm><a:off x="$rightColX" y="1200000"/><a:ext cx="$rightColWidth" cy="3429000"/></a:xfrm><a:prstGeom prst="rect"/></p:spPr></p:pic>'
+        : '';
+
+    return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" '
+        'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" '
+        'xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">'
+        '<p:cSld><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/>'
+        '<p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr/>'
+        '<p:sp><p:nvSpPr><p:cNvPr id="2" name="Title"/>'
+        '<p:cNvSpPr><a:spLocks noGrp="1"/></p:cNvSpPr><p:nvPr/></p:nvSpPr>'
+        '<p:spPr><a:xfrm><a:off x="457200" y="274630"/>'
+        '<a:ext cx="8229600" cy="800000"/></a:xfrm>'
+        '<a:prstGeom prst="rect"/></p:spPr>'
+        '<p:txBody><a:bodyPr/><a:lstStyle/>'
+        '<a:p><a:r><a:rPr lang="fr-FR" sz="2400" b="1">'
+        '<a:solidFill><a:srgbClr val="6C63FF"/></a:solidFill>'
+        '</a:rPr><a:t>$escapedTitle</a:t></a:r></a:p></p:txBody></p:sp>'
+        '<p:sp><p:nvSpPr><p:cNvPr id="3" name="Content"/>'
+        '<p:cNvSpPr><a:spLocks noGrp="1"/></p:cNvSpPr><p:nvPr/></p:nvSpPr>'
+        '<p:spPr><a:xfrm><a:off x="457200" y="1200000"/>'
+        '<a:ext cx="$leftColWidth" cy="5000000"/></a:xfrm>'
+        '<a:prstGeom prst="rect"/></p:spPr>'
+        '<p:txBody><a:bodyPr/><a:lstStyle/>'
+        '$paragraphsXml</p:txBody></p:sp>'
+        '$imageShapeXml'
+        '</p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr>'
+        '<p:transition spd="slow" advClick="1" advTm="5000"><p:fade/></p:transition>'
         '<p:timing><p:tnLst><p:par><p:cTn id="1" dur="indefinite" restart="never" nodeType="tmRoot"/><p:childTnLst><p:seq concurrent="1" nextAc="seek"><p:cTn id="2" dur="indefinite" nodeType="mainSeq"/><p:childTnLst><p:par><p:cTn id="3" fill="hold"><p:stCondLst><p:cond delay="0"/></p:stCondLst></p:cTn><p:childTnLst><p:animEffect transition="in" filter="fade"><p:cBhvr><p:cTn id="4" dur="1000" fill="hold"/><p:tgtEl><p:spTgt spid="2"/></p:tgtEl></p:cBhvr></p:animEffect></p:childTnLst></p:par><p:par><p:cTn id="5" fill="hold"><p:stCondLst><p:cond delay="300"/></p:stCondLst></p:cTn><p:childTnLst><p:animEffect transition="in" filter="fade"><p:cBhvr><p:cTn id="6" dur="1000" fill="hold"/><p:tgtEl><p:spTgt spid="3"/></p:tgtEl></p:cBhvr></p:animEffect></p:childTnLst></p:par></p:childTnLst></p:seq></p:childTnLst></p:par></p:tnLst></p:timing></p:sld>';
   }
 
@@ -1166,8 +1441,220 @@ class DocumentGenerationService {
         '<p:txBody><a:bodyPr/><a:lstStyle/>'
         '$paragraphsXml</p:txBody></p:sp>'
         '</p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr>'
-        '<p:transition spd="slow" advClick="1"><p:fade/></p:transition>'
+        '<p:transition spd="slow" advClick="1" advTm="5000"><p:fade/></p:transition>'
         '<p:timing><p:tnLst><p:par><p:cTn id="1" dur="indefinite" restart="never" nodeType="tmRoot"/><p:childTnLst><p:seq concurrent="1" nextAc="seek"><p:cTn id="2" dur="indefinite" nodeType="mainSeq"/><p:childTnLst><p:par><p:cTn id="3" fill="hold"><p:stCondLst><p:cond delay="0"/></p:stCondLst></p:cTn><p:childTnLst><p:animEffect transition="in" filter="fade"><p:cBhvr><p:cTn id="4" dur="1000" fill="hold"/><p:tgtEl><p:spTgt spid="2"/></p:tgtEl></p:cBhvr></p:animEffect></p:childTnLst></p:par><p:par><p:cTn id="5" fill="hold"><p:stCondLst><p:cond delay="300"/></p:stCondLst></p:cTn><p:childTnLst><p:animEffect transition="in" filter="fade"><p:cBhvr><p:cTn id="6" dur="1000" fill="hold"/><p:tgtEl><p:spTgt spid="3"/></p:tgtEl></p:cBhvr></p:animEffect></p:childTnLst></p:par></p:childTnLst></p:seq></p:childTnLst></p:par></p:tnLst></p:timing></p:sld>';
+  }
+
+  /// Splits PPTX body into ordered sections, extracting image suggestions.
+  List<_PptxSection> _splitPptxSections(String body) {
+    final sections = <_PptxSection>[];
+    final lines = body.split('\n');
+
+    String? currentTitle;
+    final currentContent = StringBuffer();
+    String? currentImageDesc;
+
+    for (final rawLine in lines) {
+      final line = rawLine.trimRight();
+      if (line.isEmpty) {
+        if (currentTitle != null) currentContent.writeln();
+        continue;
+      }
+
+      // Detect heading (#, ##, ###)
+      final headingMatch = RegExp(r'^(#{1,3})\s+(.+)$').firstMatch(line);
+      if (headingMatch != null) {
+        // Save previous section
+        if (currentTitle != null) {
+          sections.add(_PptxSection(
+            title: currentTitle,
+            content: currentContent.toString().trim(),
+            imageDescription: currentImageDesc,
+          ));
+        }
+        currentTitle = headingMatch.group(2)!.trim();
+        currentContent.clear();
+        currentImageDesc = null;
+        continue;
+      }
+
+      // Detect image suggestion block (explicit "Image suggérée" marker)
+      final lowered = line.toLowerCase();
+      if (lowered.startsWith('image suggérée') ||
+          lowered.startsWith('**image suggérée') ||
+          lowered.startsWith('image suggeree') ||
+          lowered.startsWith('**image suggeree')) {
+        // Try to parse Description : ... Utilite : ...
+        final descMatch = RegExp(
+          r'Description\s*:\s*(.+?)(?:\s*Utilit[ée]\s*:\s*(.+))?',
+          caseSensitive: false,
+        ).firstMatch(line);
+        if (descMatch != null) {
+          currentImageDesc = descMatch.group(1)!.trim();
+          if (descMatch.group(2) != null) {
+            currentImageDesc = '$currentImageDesc. ${descMatch.group(2)!.trim()}';
+          }
+        } else {
+          // Fallback: extract everything after the marker
+          final markerIdx = lowered.indexOf('image suggérée');
+          final fallback = markerIdx != -1
+              ? line.substring(markerIdx + 'image suggérée'.length).trim()
+              : line;
+          currentImageDesc = _stripMarkdownMarkers(fallback);
+        }
+        continue;
+      }
+
+      // Detect standalone Description / Utilité lines (LLM often skips "Image suggérée")
+      final descStandalone = RegExp(
+        r'^Description\s*:\s*(.+)$',
+        caseSensitive: false,
+      ).firstMatch(line);
+      if (descStandalone != null) {
+        currentImageDesc = descStandalone.group(1)!.trim();
+        continue;
+      }
+
+      final utilStandalone = RegExp(
+        r'^Utilit[ée]\s*:\s*(.+)$',
+        caseSensitive: false,
+      ).firstMatch(line);
+      if (utilStandalone != null) {
+        final utilText = utilStandalone.group(1)!.trim();
+        currentImageDesc = currentImageDesc != null
+            ? '$currentImageDesc. $utilText'
+            : utilText;
+        continue;
+      }
+
+      if (currentTitle != null) {
+        currentContent.writeln(line);
+      }
+    }
+
+    // Save last section
+    if (currentTitle != null) {
+      sections.add(_PptxSection(
+        title: currentTitle,
+        content: currentContent.toString().trim(),
+        imageDescription: currentImageDesc,
+      ));
+    }
+
+    return sections;
+  }
+
+  // ── PPTX slide XML helpers ──────────────────────────────────────────────────
+
+  String _pptxTocSlideXml(String title, List<String> items) {
+    final escapedTitle = _xmlEscape(title);
+    final itemsXml = items.asMap().entries.map((e) {
+      final text = _xmlEscape('${e.key + 1}. ${e.value}');
+      return '<a:p><a:pPr><a:buChar char="•"/></a:pPr><a:r><a:rPr lang="fr-FR" sz="1600"/><a:t>$text</a:t></a:r></a:p>';
+    }).join();
+
+    return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" '
+        'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" '
+        'xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">'
+        '<p:cSld><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/>'
+        '<p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr/>'
+        '<p:sp><p:nvSpPr><p:cNvPr id="2" name="Title"/>'
+        '<p:cNvSpPr><a:spLocks noGrp="1"/></p:cNvSpPr><p:nvPr/></p:nvSpPr>'
+        '<p:spPr><a:xfrm><a:off x="457200" y="274630"/>'
+        '<a:ext cx="8229600" cy="800000"/></a:xfrm>'
+        '<a:prstGeom prst="rect"/></p:spPr>'
+        '<p:txBody><a:bodyPr/><a:lstStyle/>'
+        '<a:p><a:r><a:rPr lang="fr-FR" sz="2400" b="1">'
+        '<a:solidFill><a:srgbClr val="6C63FF"/></a:solidFill>'
+        '</a:rPr><a:t>$escapedTitle</a:t></a:r></a:p></p:txBody></p:sp>'
+        '<p:sp><p:nvSpPr><p:cNvPr id="3" name="Content"/>'
+        '<p:cNvSpPr><a:spLocks noGrp="1"/></p:cNvSpPr><p:nvPr/></p:nvSpPr>'
+        '<p:spPr><a:xfrm><a:off x="457200" y="1200000"/>'
+        '<a:ext cx="8229600" cy="5000000"/></a:xfrm>'
+        '<a:prstGeom prst="rect"/></p:spPr>'
+        '<p:txBody><a:bodyPr/><a:lstStyle/>'
+        '$itemsXml</p:txBody></p:sp>'
+        '</p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr>'
+        '<p:transition spd="slow" advClick="1" advTm="5000"><p:fade/></p:transition>'
+        '<p:timing><p:tnLst><p:par><p:cTn id="1" dur="indefinite" restart="never" nodeType="tmRoot"/><p:childTnLst><p:seq concurrent="1" nextAc="seek"><p:cTn id="2" dur="indefinite" nodeType="mainSeq"/><p:childTnLst><p:par><p:cTn id="3" fill="hold"><p:stCondLst><p:cond delay="0"/></p:stCondLst></p:cTn><p:childTnLst><p:animEffect transition="in" filter="fade"><p:cBhvr><p:cTn id="4" dur="1000" fill="hold"/><p:tgtEl><p:spTgt spid="2"/></p:tgtEl></p:cBhvr></p:animEffect></p:childTnLst></p:par><p:par><p:cTn id="5" fill="hold"><p:stCondLst><p:cond delay="300"/></p:stCondLst></p:cTn><p:childTnLst><p:animEffect transition="in" filter="fade"><p:cBhvr><p:cTn id="6" dur="1000" fill="hold"/><p:tgtEl><p:spTgt spid="3"/></p:tgtEl></p:cBhvr></p:animEffect></p:childTnLst></p:par></p:childTnLst></p:seq></p:childTnLst></p:par></p:tnLst></p:timing></p:sld>';
+  }
+
+  String _pptxFullImageSlideXml(String caption, {required String imageRid}) {
+    final escapedCaption = _xmlEscape(caption);
+    return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" '
+        'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" '
+        'xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">'
+        '<p:cSld><p:bg><p:bgPr><a:blipFill rotWithShape="1"><a:blip r:embed="$imageRid"/><a:stretch><a:fillRect/></a:stretch></a:blipFill><a:effectLst/></p:bgPr></p:bg>'
+        '<p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/>'
+        '<p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr/>'
+        '<p:sp><p:nvSpPr><p:cNvPr id="2" name="Caption"/>'
+        '<p:cNvSpPr><a:spLocks noGrp="1"/></p:cNvSpPr><p:nvPr/></p:nvSpPr>'
+        '<p:spPr><a:xfrm><a:off x="457200" y="6000000"/>'
+        '<a:ext cx="8229600" cy="600000"/></a:xfrm>'
+        '<a:prstGeom prst="rect"/></p:spPr>'
+        '<p:txBody><a:bodyPr/><a:lstStyle/>'
+        '<a:p><a:pPr><a:fontAlgn b="1"/></a:pPr>'
+        '<a:r><a:rPr lang="fr-FR" sz="1200" i="1">'
+        '<a:solidFill><a:srgbClr val="FFFFFF"/></a:solidFill>'
+        '</a:rPr><a:t>$escapedCaption</a:t></a:r></a:p></p:txBody></p:sp>'
+        '</p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr>'
+        '<p:transition spd="slow" advClick="1" advTm="5000"><p:fade/></p:transition></p:sld>';
+  }
+
+  String _pptxSourcesSlideXmlWithLinks(List<_SourceLink> links, int baseRelId) {
+    final paragraphs = <String>[];
+    for (var i = 0; i < links.length; i++) {
+      final text = _xmlEscape(links[i].text);
+      final relId = 'rId${baseRelId + i}';
+      paragraphs.add(
+        '<a:p><a:r><a:rPr lang="fr-FR" sz="1400">'
+        '<a:solidFill><a:srgbClr val="6C63FF"/></a:solidFill>'
+        '<a:hlink r:id="$relId"/>'
+        '</a:rPr><a:t>$text</a:t></a:r></a:p>',
+      );
+    }
+    if (paragraphs.isEmpty) {
+      paragraphs.add('<a:p><a:r><a:rPr lang="fr-FR" sz="1400"/><a:t>Aucune source web explicite.</a:t></a:r></a:p>');
+    }
+
+    return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" '
+        'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" '
+        'xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">'
+        '<p:cSld><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/>'
+        '<p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr/>'
+        '<p:sp><p:nvSpPr><p:cNvPr id="2" name="Title"/>'
+        '<p:cNvSpPr><a:spLocks noGrp="1"/></p:cNvSpPr><p:nvPr/></p:nvSpPr>'
+        '<p:spPr><a:xfrm><a:off x="457200" y="274630"/>'
+        '<a:ext cx="8229600" cy="800000"/></a:xfrm>'
+        '<a:prstGeom prst="rect"/></p:spPr>'
+        '<p:txBody><a:bodyPr/><a:lstStyle/>'
+        '<a:p><a:r><a:rPr lang="fr-FR" sz="2400" b="1">'
+        '<a:solidFill><a:srgbClr val="6C63FF"/></a:solidFill>'
+        '</a:rPr><a:t>Sources</a:t></a:r></a:p></p:txBody></p:sp>'
+        '<p:sp><p:nvSpPr><p:cNvPr id="3" name="Content"/>'
+        '<p:cNvSpPr><a:spLocks noGrp="1"/></p:cNvSpPr><p:nvPr/></p:nvSpPr>'
+        '<p:spPr><a:xfrm><a:off x="457200" y="1200000"/>'
+        '<a:ext cx="8229600" cy="5000000"/></a:xfrm>'
+        '<a:prstGeom prst="rect"/></p:spPr>'
+        '<p:txBody><a:bodyPr/><a:lstStyle/>'
+        '${paragraphs.join()}</p:txBody></p:sp>'
+        '</p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr>'
+        '<p:transition spd="slow" advClick="1" advTm="5000"><p:fade/></p:transition>'
+        '<p:timing><p:tnLst><p:par><p:cTn id="1" dur="indefinite" restart="never" nodeType="tmRoot"/><p:childTnLst><p:seq concurrent="1" nextAc="seek"><p:cTn id="2" dur="indefinite" nodeType="mainSeq"/><p:childTnLst><p:par><p:cTn id="3" fill="hold"><p:stCondLst><p:cond delay="0"/></p:stCondLst></p:cTn><p:childTnLst><p:animEffect transition="in" filter="fade"><p:cBhvr><p:cTn id="4" dur="1000" fill="hold"/><p:tgtEl><p:spTgt spid="2"/></p:tgtEl></p:cBhvr></p:animEffect></p:childTnLst></p:par><p:par><p:cTn id="5" fill="hold"><p:stCondLst><p:cond delay="300"/></p:stCondLst></p:cTn><p:childTnLst><p:animEffect transition="in" filter="fade"><p:cBhvr><p:cTn id="6" dur="1000" fill="hold"/><p:tgtEl><p:spTgt spid="3"/></p:tgtEl></p:cBhvr></p:animEffect></p:childTnLst></p:par></p:childTnLst></p:seq></p:childTnLst></p:par></p:tnLst></p:timing></p:sld>';
+  }
+
+  String _pptxSlideRelsXmlWithHyperlinks(Map<String, String> hyperlinkRels) {
+    final hyperlinksXml = hyperlinkRels.entries.map((e) {
+      return '<Relationship Id="${e.key}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="${_xmlEscape(e.value)}" TargetMode="External"/>';
+    }).join();
+
+    return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout" Target="../slideLayouts/slideLayout1.xml"/>'
+        '$hyperlinksXml</Relationships>';
   }
 
   String _pptxContentParagraphs(String content) {
@@ -1179,23 +1666,41 @@ class DocumentGenerationService {
       if (line.isEmpty) continue;
       if (line.startsWith('---') || line.startsWith('***')) continue;
 
+      // Strip image suggestion blocks from visible content
+      final lowered = line.toLowerCase();
+      if (lowered.startsWith('image suggérée') ||
+          lowered.startsWith('**image suggérée') ||
+          lowered.startsWith('image suggeree') ||
+          lowered.startsWith('**image suggeree')) {
+        continue;
+      }
+
+      // Strip standalone Description / Utilité lines
+      if (RegExp(r'^Description\s*:\s*', caseSensitive: false).hasMatch(line) ||
+          RegExp(r'^Utilit[ée]\s*:\s*', caseSensitive: false).hasMatch(line)) {
+        continue;
+      }
+
+      // Paragraph spacing for readability
+      const spacingXml = '<a:spcBef><a:spcPts val="120"/></a:spcBef>';
+
       if (line.startsWith('- ') || line.startsWith('* ')) {
         final text = _xmlEscape(line.substring(2).trim());
         paragraphs.add(
-          '<a:p><a:pPr><a:buChar char="•"/></a:pPr>'
+          '<a:p><a:pPr><a:buChar char="•"/>$spacingXml</a:pPr>'
           '<a:r><a:rPr lang="fr-FR" sz="1400"/><a:t>$text</a:t></a:r></a:p>',
         );
       } else if (line.startsWith('### ')) {
         final text = _xmlEscape(_stripMarkdownMarkers(line));
         paragraphs.add(
-          '<a:p><a:pPr><a:buChar char="▸"/></a:pPr>'
+          '<a:p><a:pPr><a:buChar char="▸"/>$spacingXml</a:pPr>'
           '<a:r><a:rPr lang="fr-FR" sz="1600" b="1">'
           '<a:solidFill><a:srgbClr val="6C63FF"/></a:solidFill>'
           '</a:rPr><a:t>$text</a:t></a:r></a:p>',
         );
       } else {
         final richText = _pptxRichTextRuns(line);
-        paragraphs.add('<a:p>$richText</a:p>');
+        paragraphs.add('<a:p><a:pPr>$spacingXml</a:pPr>$richText</a:p>');
       }
     }
 
@@ -1340,7 +1845,8 @@ class DocumentGenerationService {
       fontSize: 12,
     );
 
-    final sections = _splitSections(body);
+    final cleanBody = _cleanBodyForDocgen(_stripLeadingTitle(body, title));
+    final sections = _splitSections(cleanBody);
     var row = 3;
     for (final entry in sections.entries) {
       final cellA = sheet.cell(CellIndex.indexByString('A$row'));
@@ -1361,7 +1867,9 @@ class DocumentGenerationService {
     final sourceText = sources.isEmpty
         ? 'Aucune source web explicite.'
         : sources.map((s) {
-            final decoded = _decodeRedirectUrl(s);
+            final emDashIdx = s.indexOf(' — ');
+            final urlPart = emDashIdx != -1 ? s.substring(emDashIdx + 3).trim() : s;
+            final decoded = _decodeRedirectUrl(urlPart);
             final domain = _extractDomain(decoded);
             return '$domain: $decoded';
           }).join('\n');
@@ -1479,6 +1987,18 @@ class DocumentGenerationService {
       final heading = lines.first.trim();
       final content = lines.skip(1).join('\n').trim();
       if (heading.isEmpty) continue;
+
+      final lower = heading.toLowerCase();
+      if (lower == 'titre' || lower.startsWith('titre :') || lower.startsWith('titre:')) {
+        continue; // Skip LLM-generated duplicate title section
+      }
+      if (lower.contains('source') ||
+          lower.contains('référence') ||
+          lower.contains('reference') ||
+          lower.contains('bibliographie')) {
+        continue; // Skip LLM-generated sources section — handled separately
+      }
+
       result[heading] = content;
     }
     if (preamble.isNotEmpty) {

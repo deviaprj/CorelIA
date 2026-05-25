@@ -4,6 +4,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'app/router.dart';
 import 'app/theme.dart';
 import 'core/platform/platform_service.dart';
@@ -136,7 +137,15 @@ Future<void> main() async {
 
   // Retention : streak check + daily notification init
   try {
-    await StreakService().checkAndUpdateStreak();
+    final shouldGrantBonus = await StreakService().checkAndUpdateStreak();
+    if (shouldGrantBonus) {
+      // Appliquer le bonus de +2 messages directement (evite import circulaire QuotaService)
+      const bonusKey = 'quota_bonus_messages';
+      final prefs = await SharedPreferences.getInstance();
+      final current = prefs.getInt(bonusKey) ?? 0;
+      await prefs.setInt(bonusKey, current + 2);
+      debugPrint('[Retention] Bonus streak +2 messages accorde (total bonus: ${current + 2})');
+    }
     final dailyService = DailyQuestionService();
     await dailyService.init();
     final enabled = await dailyService.isEnabled();
@@ -144,7 +153,7 @@ Future<void> main() async {
       await dailyService.scheduleDailyNotification();
     }
   } catch (e) {
-    debugPrint('[Retention] Initialisation échouée : $e');
+    debugPrint('[Retention] Initialisation echouee : $e');
   }
 
   // Zone protégée pour capturer les erreurs asynchrones sans crasher l'app

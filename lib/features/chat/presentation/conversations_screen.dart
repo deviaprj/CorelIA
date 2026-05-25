@@ -8,6 +8,7 @@ import 'chat_notifier.dart';
 import '../data/firestore_chat_repository.dart';
 import '../../../core/providers/firebase_providers.dart';
 import '../../../shared/widgets/loading_widget.dart';
+import '../../retention/data/retention_providers.dart';
 
 class ConversationsScreen extends ConsumerStatefulWidget {
   const ConversationsScreen({super.key});
@@ -81,6 +82,7 @@ class _ConversationsScreenState extends ConsumerState<ConversationsScreen> {
   ) async {
     final repo = ref.read(chatRepositoryProvider);
     final conv = await repo.createConversation(userId: userId);
+    ref.read(usageStatsServiceProvider).recordConversationStarted();
     if (context.mounted) {
       context.push('/chat/${conv.id}');
     }

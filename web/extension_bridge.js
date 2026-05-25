@@ -128,8 +128,17 @@
   window.addEventListener('corely_request_page_content', () => {
     // Envoyer un message au content script pour extraire le contenu de la page
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-      if (tabs && tabs[0] && tabs[0].id) {
-        chrome.tabs.sendMessage(tabs[0].id, { type: 'GET_PAGE_CONTENT' }, (response) => {
+      const realTab = (tabs || []).find(t => t.id && t.url && !t.url.startsWith('chrome-extension://'));
+      const targetTab = realTab || (tabs && tabs[0]);
+      if (targetTab && targetTab.id) {
+        chrome.tabs.sendMessage(targetTab.id, { type: 'GET_PAGE_CONTENT' }, (response) => {
+          if (chrome.runtime.lastError) {
+            console.warn('[ExtensionBridge] GET_PAGE_CONTENT error:', chrome.runtime.lastError.message);
+            window.dispatchEvent(new CustomEvent('corely_page_content', {
+              detail: { title: '', url: '', content: '', error: chrome.runtime.lastError.message },
+            }));
+            return;
+          }
           if (response) {
             window.dispatchEvent(new CustomEvent('corely_page_content', {
               detail: {
@@ -140,6 +149,10 @@
             }));
           }
         });
+      } else {
+        window.dispatchEvent(new CustomEvent('corely_page_content', {
+          detail: { title: '', url: '', content: '', error: 'No active page tab found' },
+        }));
       }
     });
   });

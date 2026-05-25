@@ -233,7 +233,7 @@ async function handleBrowserAction(message, _sender, sendResponse) {
         break;
       }
 
-      // ── Content actions (forwarded to content script) ─────────────────────
+      // ── Content actions (extracted directly via scripting API) ────────────
       case 'GET_PAGE_CONTENT':
       case 'SUMMARIZE_PAGE': {
         var contentTabId = tabId || await getActiveTabId();
@@ -241,19 +241,48 @@ async function handleBrowserAction(message, _sender, sendResponse) {
           sendResponse({ success: false, error: 'No active tab' });
           break;
         }
-        var contentResults = await new Promise(function (resolve) {
-          chrome.tabs.sendMessage(contentTabId, {
-            type: action,
-            params: params,
-          }, function (response) {
-            if (chrome.runtime.lastError) {
-              resolve({ success: false, error: chrome.runtime.lastError.message });
-            } else {
-              resolve(response || { success: false, error: 'No response from content script' });
-            }
-          });
-        });
-        sendResponse(contentResults);
+        try {
+          var injectionResults = await Promise.race([
+            chrome.scripting.executeScript({
+              target: { tabId: contentTabId },
+              func: function () {
+                // Extract readable page content
+                var selectors = [
+                  'article', 'main', '[role="main"]',
+                  '.post-content', '.article-body', '.entry-content',
+                  '#content', '#main-content'
+                ];
+                for (var i = 0; i < selectors.length; i++) {
+                  var el = document.querySelector(selectors[i]);
+                  if (el && el.textContent.trim().length > 100) {
+                    return {
+                      title: document.title,
+                      url: window.location.href,
+                      content: el.textContent.replace(/\s+/g, ' ').trim().substring(0, 15000),
+                      success: true
+                    };
+                  }
+                }
+                return {
+                  title: document.title,
+                  url: window.location.href,
+                  content: (document.body ? document.body.textContent : '').replace(/\s+/g, ' ').trim().substring(0, 15000),
+                  success: true
+                };
+              }
+            }),
+            new Promise(function (_, rej) {
+              setTimeout(function () { rej(new Error('Content extraction timed out (8s)')); }, 8000);
+            })
+          ]);
+          if (injectionResults && injectionResults[0] && injectionResults[0].result) {
+            sendResponse({ success: true, data: injectionResults[0].result });
+          } else {
+            sendResponse({ success: false, error: 'No content extracted' });
+          }
+        } catch (injectErr) {
+          sendResponse({ success: false, error: injectErr.message || String(injectErr) });
+        }
         break;
       }
 
@@ -345,5 +374,12 @@ async function handleBrowserAction(message, _sender, sendResponse) {
 
 async function getActiveTabId() {
   var tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-  return (tabs && tabs[0] && tabs[0].id) ? tabs[0].id : null;
+  if (!tabs || tabs.length === 0) return null;
+  // Exclude chrome-extension:// tabs (side panel itself) to get the real active page
+  var realTab = tabs.find(function(t) {
+    return t.id && t.url && !t.url.startsWith('chrome-extension://');
+  });
+  if (realTab && realTab.id) return realTab.id;
+  // Fallback: return first tab if no real tab found (shouldn't happen in normal use)
+  return (tabs[0] && tabs[0].id) ? tabs[0].id : null;
 }
