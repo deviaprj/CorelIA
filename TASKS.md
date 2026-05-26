@@ -1,6 +1,57 @@
 # TASKS.md — Suivi Corely
 
-Dernière mise à jour : 2026-05-23 — Session V16 : Tests verts + fixes interpolation
+Dernière mise à jour : 2026-05-26 — Session V18 : Fix vocal + slash commands universels
+
+## Terminé — Session 2026-05-26 — Fix Vocal V16 + Slash Commands Universels + Mobile Restriction ✅
+
+### Problèmes résolus
+1. **Mode vocal bloqué après 1-2 tours** : `_conversationMode` reset à `false` dans `stopListening()` → au redémarrage du micro, `pauseFor` passait de `30min` à `5s`. Après 5s de silence le STT mourait silencieusement.
+   - Fix : `stopListening()` ne touche plus à `_conversationMode` (c'est un arrêt temporaire, pas une sortie du mode conversation).
+   - Fix : délai anti-écho augmenté de 400ms à 800ms (`_speakFullResponse()`).
+2. **Slash commands mobile** : seule `/docgen` reste autorisée. Toutes les autres commandes sont bloquées avec message explicite invitant à installer l'extension Chrome.
+3. **Extension slash commands universels** : `/links video` et `/links image` appellent désormais le backend universellement (pas seulement sur YouTube/Vimeo/TikTok). Le backend `download_service.py` combine yt-dlp (1000+ sites) + BeautifulSoup (tout le reste).
+4. **Manifest V3 permissions** : `<all_urls>` ajouté à `host_permissions` pour que `chrome.scripting.executeScript` fonctionne sur tous les sites. `dom_actions.js` déclaré dans `content_scripts` pour éviter l'injection dynamique qui échoue.
+
+### Fichiers modifiés
+- `lib/features/chat/presentation/voice_service.dart` — `stopListening()` ne reset plus `_conversationMode`
+- `lib/features/chat/presentation/voice_conversation_service.dart` — délai anti-écho 400ms → 800ms
+- `lib/features/chat/presentation/chat_notifier.dart` — mobile guard (seule `/docgen`), `_handleSlashLinks` universel (backend-first pour video/image), `_handleSlashDownload` avec `isDirectMediaUrl`
+- `lib/features/chat/presentation/slash_commands.dart` — `mobileVisibleCommandNames = {'docgen'}`
+- `lib/features/chat/presentation/chat_screen.dart` — `SlashCommandPalette(isMobile: PlatformService.isMobile)`
+- `web/manifest.json` — `<all_urls>` host_permissions + `dom_actions.js` dans content_scripts
+- `backend/agents/download_service.py` — playlist handling + `page_media` scraper universel
+- `backend/schemas/chat.py` — playlist schema type
+
+### Résultat
+- APK 75.1 MB installé sur Xiaomi 12
+- Extension Chrome buildée (`build/extension/` + `corely-extension.zip`)
+- 614 tests passés, 3 échecs pré-existants (phonetic_liaison)
+
+## TODO next-session (2026-05-27) — Priorité CRITIQUE
+
+### 1. Qualité TTS — Voix saccadée/robotique
+- [ ] **Problème** : La voix TTS est trop saccadée, fait très robotique, pas assez naturelle
+- [ ] **Piste 1** : Augmenter la taille des chunks flutter_tts (actuellement 120 chars) → essayer 200-300 chars
+- [ ] **Piste 2** : Réduire le speed flutter_tts (actuellement 0.44) → essayer 0.35-0.40
+- [ ] **Piste 3** : Activer les hésitations naturelles (`VocalHesitationInjector`) qui était désactivé en V16
+- [ ] **Piste 4** : Tester OpenRouter TTS (`gpt-4o-mini-tts`) comme moteur primaire si clé disponible
+- [ ] **Piste 5** : Vérifier que le nettoyage markdown ne supprime pas les ponctuations qui créent des pauses naturelles
+
+### 2. Tester mode vocal V16 fixé sur Xiaomi 12
+- [ ] 5 tours complets : aucun blocage, micro redémarre à chaque fois
+- [ ] TTS naturel : pas de sources, asterisques, tirets, tableaux lus à voix haute
+- [ ] Barge-in : parler pendant que Corely parle (> 3 mots) → TTS s'arrête, Corely répond au nouveau message
+- [ ] Pas de monologue : Corely ne doit pas répondre à sa propre voix
+
+### 3. Tester slash commands extension
+- [ ] `/links video` sur YouTube → backend extrait les vidéos, pas juste les liens de page
+- [ ] `/links image` sur n'importe quel site → backend scraper universel
+- [ ] `/download` sans argument après `/links` → télécharge la liste
+- [ ] `/download <url>` sur une vidéo YouTube directe
+
+### 4. Déployer le backend cloud
+- [ ] `bash scripts/deploy_backend.sh` sur machine avec internet
+- [ ] Vérifier `api.aironbot.app` répond sur `/health`, `/download_media`, `/crawl`
 
 ## Terminé — Session 2026-05-23 — Tests Non-Régression ✅
 

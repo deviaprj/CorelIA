@@ -256,6 +256,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
               if (_slashFilter != null)
                 SlashCommandPalette(
                   filter: _slashFilter!,
+                  isMobile: PlatformService.isMobile,
                   onSelected: (cmd) {
                     final inputBar = _inputBarKey.currentState;
                     if (inputBar != null) {

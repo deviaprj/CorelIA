@@ -82,7 +82,7 @@ class DownloadMediaResponse(BaseModel):
     """Response from the media download endpoint."""
 
     success: bool
-    type: str = Field(default="", description="video | page_media")
+    type: str = Field(default="", description="video | page_media | playlist")
     title: str | None = None
     thumbnail: str | None = None
     duration: int | None = None
@@ -92,6 +92,7 @@ class DownloadMediaResponse(BaseModel):
     formats: list[dict[str, Any]] | None = None
     videos: list[dict[str, Any]] | None = None
     images: list[dict[str, Any]] | None = None
+    entries: list[dict[str, Any]] | None = None
     error: str | None = None
 
 

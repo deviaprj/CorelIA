@@ -63,6 +63,12 @@ class DownloadService:
         re.IGNORECASE,
     )
 
+    # YouTube channel / playlist / user URLs that should use flat extraction
+    _YOUTUBE_CHANNEL_PATTERNS = re.compile(
+        r"youtube\.com/(@|channel/|c/|user/|playlist\?)",
+        re.IGNORECASE,
+    )
+
     def __init__(self) -> None:
         self._ydl_opts: dict[str, Any] = {
             "quiet": True,
@@ -88,9 +94,43 @@ class DownloadService:
     def _is_ytdlp_site(self, url: str) -> bool:
         return bool(self._YTDLP_HOSTS.search(url))
 
+    def _is_youtube_channel_or_playlist(self, url: str) -> bool:
+        return bool(self._YOUTUBE_CHANNEL_PATTERNS.search(url))
+
     def _extract_via_ytdlp(self, url: str) -> dict[str, Any]:
         if not _YTDLP_AVAILABLE or yt_dlp is None:
             raise RuntimeError("yt-dlp not installed")
+
+        # YouTube channels/playlists: use flat extraction to avoid timeout
+        if self._is_youtube_channel_or_playlist(url):
+            flat_opts = {
+                **self._ydl_opts,
+                "extract_flat": True,
+                "playlistend": 50,
+            }
+            with yt_dlp.YoutubeDL(flat_opts) as ydl:
+                info = ydl.extract_info(url, download=False)
+
+            entries: list[dict[str, Any]] = []
+            for e in (info.get("entries") or []):
+                if not e:
+                    continue
+                entry_url = e.get("webpage_url") or e.get("url") or ""
+                if not entry_url and e.get("id"):
+                    entry_url = f"https://www.youtube.com/watch?v={e['id']}"
+                entries.append({
+                    "title": e.get("title", ""),
+                    "url": entry_url,
+                    "duration": e.get("duration"),
+                })
+
+            return {
+                "type": "playlist",
+                "title": info.get("title", ""),
+                "uploader": info.get("uploader", ""),
+                "webpage_url": info.get("webpage_url", url),
+                "entries": entries,
+            }
 
         with yt_dlp.YoutubeDL(self._ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)

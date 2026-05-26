@@ -236,8 +236,11 @@ class VoiceConversationNotifier
     }
 
     // Apres le TTS, rouvrir le micro pour le prochain tour.
+    // Delai augmente a 800ms : le STT Android (SpeechRecognizer) a besoin
+    // d'un temps de repos entre stop() et listen() pour eviter les etats
+    // corrompus qui bloquent la detection au tour suivant.
     if (_isActive) {
-      await Future<void>.delayed(const Duration(milliseconds: 400));
+      await Future<void>.delayed(const Duration(milliseconds: 800));
       if (_isActive) {
         state = state.copyWith(state: VoiceConversationState.listening, transcript: '');
         _voice.clearTranscript();

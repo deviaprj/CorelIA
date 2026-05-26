@@ -663,6 +663,36 @@ Les utilisateurs demandent fréquemment de télécharger des vidéos depuis YouT
 - ⚠️ Dépendance au backend cloud pour les commandes universelles
 - ⚠️ Pas de téléchargement binaire — seulement les URLs et metadata sont retournées (le client télécharge séparément)
 
+## ADR-022 : Vocal V16 — Fix Cycle Tour-par-Tour + Slash Commands Mobile/Extension
+
+**Date** : 2026-05-26
+**Statut** : Accepté
+
+### Contexte
+Le mode vocal V16 (half-duplex tour-par-tour) avait une régression bloquante : après 1-2 échanges, le micro semblait écouter mais ne détectait plus rien. Par ailleurs, les commandes slash étaient disponibles sur mobile mais la plupart ne fonctionnaient pas (besoin du backend ou de l'extension Chrome).
+
+### Décisions
+
+**1. Fix vocal : `_conversationMode` ne doit pas être reset dans `stopListening()`**
+- `VoiceServiceNotifier.stopListening()` mettait `_conversationMode = false`. Au redémarrage du micro après le TTS, `startListening()` utilisait alors `pauseFor: 5s` au lieu de `30min`. Après 5s de silence, le STT s'arrêtait et ne redémarrait pas.
+- Fix : `stopListening()` ne touche plus à `_conversationMode`. La remise à zéro complète reste dans `setConversationMode(false)` appelé par `VoiceConversationNotifier.stop()`.
+- Délai anti-écho augmenté de 400ms à 800ms : le STT Android (`SpeechRecognizer`) a besoin d'un temps de repos entre `stop()` et `listen()` pour éviter les états corrompus.
+
+**2. Slash commands mobile : seule `/docgen` autorisée**
+- La garde `!isExtension && parsed.command.name != 'docgen'` bloque toutes les autres commandes avec message explicite.
+- `SlashCommands.mobileVisibleCommandNames = {'docgen'}` — la palette n'affiche que `/docgen` sur mobile.
+
+**3. Extension slash commands : backend universel pour video/image**
+- Suppression du regex `isVideoSite` (YouTube, Vimeo, TikTok, etc.) au profit d'une condition universelle : `filter == 'video' || filter == 'image'` → appel backend `downloadMedia` sur TOUS les sites.
+- Le backend `download_service.py` est déjà universel : yt-dlp pour 1000+ sites + BeautifulSoup scraper pour tout le reste (`<video>`, `<iframe>`, `og:video`, JSON-LD, `<img>`, CSS backgrounds).
+- `manifest.json` : ajout de `<all_urls>` dans `host_permissions` (nécessaire pour `chrome.scripting.executeScript`) + `dom_actions.js` dans `content_scripts` (évite l'injection dynamique qui échoue).
+
+### Conséquences
+- ✅ Mode vocal fiable à N tours sans blocage
+- ✅ Mobile propre : seule `/docgen` visible et fonctionnelle
+- ✅ Extension robuste : permissions correctes, scraper universel
+- ⚠️ Dépendance au backend pour `/links video` et `/links image` (mais fallback DOM si backend down)
+
 ---
 
-*Dernière mise à jour : 2026-05-24*
+*Dernière mise à jour : 2026-05-26*

@@ -216,7 +216,9 @@ class VoiceServiceNotifier extends Notifier<VoiceState> {
   }
 
   Future<void> stopListening() async {
-    _conversationMode = false;
+    // NE PAS toucher a _conversationMode ici — c'est un arret temporaire du
+    // micro (ex: pendant le TTS en mode conversation), pas une sortie du mode.
+    // _conversationMode est gere par setConversationMode() / forceReset().
     if (kIsWeb && _webBridge != null) {
       await _webBridge!.stopListening();
       await _cancelWebSubscriptions();

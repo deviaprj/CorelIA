@@ -223,16 +223,21 @@ class SlashCommands {
   ];
 
   /// Recherche les commandes correspondant à un préfixe.
-  static List<SlashCommand> search(String prefix) {
+  /// Sur mobile, seules les commandes dans [mobileVisibleCommandNames]
+  /// sont retournées.
+  static List<SlashCommand> search(String prefix, {bool isMobile = false}) {
+    final source = isMobile
+        ? all.where((c) => mobileVisibleCommandNames.contains(c.name)).toList()
+        : List<SlashCommand>.from(all);
+
     if (prefix.isEmpty) {
-      final sorted = List<SlashCommand>.from(all)
-        ..sort((a, b) => a.name.compareTo(b.name));
+      final sorted = source..sort((a, b) => a.name.compareTo(b.name));
       return sorted;
     }
     final lower = prefix.toLowerCase().trim();
     final commandToken = lower.split(RegExp(r'\s+')).first;
 
-    final matches = all
+    final matches = source
         .where((cmd) =>
             cmd.name.toLowerCase().startsWith(commandToken) ||
             cmd.description.toLowerCase().contains(lower))
@@ -248,8 +253,36 @@ class SlashCommands {
     return matches;
   }
 
+  /// Commandes visibles sur mobile (seulement celles qui fonctionnent sans
+  /// l'extension Chrome). Sur mobile l'APK, seulement `/docgen` est exposée.
+  static const Set<String> mobileVisibleCommandNames = {'docgen'};
+
+  /// Commandes qui fonctionnent sur mobile SI une URL est fournie.
+  /// Sans URL, elles nécessitent l'extension (accès au DOM de la page courante).
+  /// Note: `/download` n'est PAS inclus car le téléchargement final utilise
+  /// l'extension Chrome (`BrowserActionType.download`).
+  static const Set<String> mobileRunnableWithUrl = {
+    'scrape',
+    'crawl',
+    'summarize',
+    'extract',
+    'links',
+    'metadata',
+    'export',
+  };
+
   /// Commandes universelles (fonctionnent sur toutes les plateformes).
-  static const Set<String> universalCommandNames = {'docgen', 'scrape', 'summarize', 'extract', 'links', 'metadata', 'export', 'crawl'};
+  /// @deprecated Utilisez `mobileVisibleCommandNames` et `mobileRunnableWithUrl`.
+  static const Set<String> universalCommandNames = {
+    'docgen',
+    'scrape',
+    'summarize',
+    'extract',
+    'links',
+    'metadata',
+    'export',
+    'crawl',
+  };
 
   /// Parse une commande slash depuis le texte de l'utilisateur.
   /// Retourne null si ce n'est pas une commande slash valide.
@@ -308,16 +341,18 @@ class ParsedSlashCommand {
 class SlashCommandPalette extends StatelessWidget {
   final String filter;
   final void Function(SlashCommand) onSelected;
+  final bool isMobile;
 
   const SlashCommandPalette({
     super.key,
     required this.filter,
     required this.onSelected,
+    this.isMobile = false,
   });
 
   @override
   Widget build(BuildContext context) {
-    final commands = SlashCommands.search(filter);
+    final commands = SlashCommands.search(filter, isMobile: isMobile);
     if (commands.isEmpty) {
       return const SizedBox.shrink();
     }

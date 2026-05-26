@@ -214,13 +214,13 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
     final bridge = ref.read(extensionBridgeProvider);
     final isExtension = bridge.isExtension;
 
-    // Commands that work on ALL platforms (not just extension)
-    if (!isExtension && !SlashCommands.universalCommandNames.contains(parsed.command.name)) {
-      // Extension-only commands require the extension bridge.
+    // Mobile APK : seule /docgen est autorisée — toutes les autres commandes
+    // slash sont bloquées car elles nécessitent l'accès DOM ou le backend cloud.
+    if (!isExtension && parsed.command.name != 'docgen') {
       await _persistAssistantMessage(
-        '❌ Commande non disponible\n\n'
-        'La commande `/${parsed.command.name}` fonctionne uniquement dans l\'extension Chrome.\n\n'
-        '💡 Installez l\'extension Corely sur Chrome pour utiliser cette commande.',
+        '❌ Commande non disponible sur mobile\n\n'
+        'La commande `/${parsed.command.name}` n\'est pas disponible dans l\'application mobile.\n\n'
+        '💡 Installez l\'extension Chrome Corely pour utiliser les commandes slash (/links, /download, /screenshot, etc.).',
       );
       state = state.copyWith(isStreaming: false);
       return true;
@@ -357,9 +357,14 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
     final isVideoSite = videoHosts.hasMatch(targetUrl);
     final hasFileExt = RegExp(r'\.(mp4|webm|mkv|avi|mov|mp3|wav|ogg|pdf|zip|rar|jpg|jpeg|png|webp|gif)$', caseSensitive: false)
         .hasMatch(Uri.parse(targetUrl).path);
+    // URLs déjà directes (ex: googlevideo.com/videoplayback) — pas besoin de backend
+    final isDirectMediaUrl = RegExp(
+      r'(googlevideo\.com/videoplayback|\.m3u8|itag=\d+|mime=video|mime=audio)',
+      caseSensitive: false,
+    ).hasMatch(targetUrl);
 
     // Try backend media extraction for video sites and pages without direct file extensions
-    if (isVideoSite || !hasFileExt) {
+    if (!isDirectMediaUrl && (isVideoSite || !hasFileExt)) {
       final backendUrl = AppConstants.backendBaseUrl;
       if (backendUrl.isNotEmpty && !backendUrl.contains('localhost')) {
         try {
@@ -411,6 +416,41 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
               }
             }
 
+            if (mediaType == 'playlist') {
+              // YouTube channel/playlist — show list of videos, store for bulk download
+              final title = mediaResult['title'] as String? ?? 'Playlist';
+              final uploader = mediaResult['uploader'] as String? ?? '';
+              final entries = (mediaResult['entries'] as List<dynamic>? ?? []).cast<Map<String, dynamic>>();
+
+              if (entries.isNotEmpty) {
+                final msg = StringBuffer()
+                  ..writeln('📋 **$title** ${uploader.isNotEmpty ? 'par $uploader' : ''}')
+                  ..writeln()
+                  ..writeln('**${entries.length} vidéos trouvées** :');
+                for (var i = 0; i < entries.length && i < 15; i++) {
+                  final e = entries[i];
+                  final eTitle = e['title'] as String? ?? 'Vidéo';
+                  final eUrl = e['url'] as String? ?? '';
+                  final eDuration = e['duration'] as int?;
+                  final durStr = eDuration != null ? ' (${eDuration ~/ 60}m${eDuration % 60}s)' : '';
+                  msg.writeln('${i + 1}. [$eTitle]($eUrl)$durStr');
+                }
+                if (entries.length > 15) {
+                  msg.writeln('... et ${entries.length - 15} autres');
+                }
+                msg.writeln('\n💡 Lancez `/download <url>` sur une vidéo spécifique.');
+                await _persistAssistantMessage(msg.toString());
+                _lastLinksForDownload = entries
+                    .map((e) => e['url'] as String?)
+                    .whereType<String>()
+                    .where((u) => u.isNotEmpty)
+                    .toList(growable: false);
+                _lastLinksFilter = 'video';
+                state = state.copyWith(error: null, isStreaming: false);
+                return true;
+              }
+            }
+
             if (mediaType == 'page_media') {
               // Generic page — show images and videos found
               final title = mediaResult['title'] as String? ?? 'Page';
@@ -456,47 +496,57 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
           }
         } catch (e) {
           debugPrint('[Download] Backend extraction failed: $e');
-          final errStr = e.toString();
-          final isTimeout = errStr.contains('timeout') || errStr.contains('Timed out');
-          final is404 = errStr.contains('404') || errStr.contains('Not Found');
-          final isConn = errStr.contains('Connection') || errStr.contains('SocketException') || errStr.contains('refused');
-
-          String detail;
-          if (is404) {
-            detail = 'Le endpoint `/download_media` n\'est pas disponible sur le backend. '
-                'Vérifiez que le backend a été redémarré après `pip install -r requirements.txt`.';
-          } else if (isTimeout) {
-            detail = 'Le backend a mis trop de temps à répondre. '
-                'yt-dlp peut être lent sur les chaînes YouTube avec beaucoup de vidéos. '
-                'Essayez avec une URL de vidéo directe (pas une chaîne).';
-          } else if (isConn) {
-            detail = 'Impossible de joindre le backend à `$backendUrl`. '
-                'Vérifiez que le serveur est démarré et accessible.';
+          // En mode combo (urls stockées par /links), on tente le téléchargement
+          // direct même si le backend échoue — mieux vaut un fichier HTML que rien.
+          if (cmd.args.isEmpty) {
+            // Fall through to direct download below
           } else {
-            detail = 'Erreur backend : $errStr';
-          }
+            final errStr = e.toString();
+            final isTimeout = errStr.contains('timeout') || errStr.contains('Timed out');
+            final is404 = errStr.contains('404') || errStr.contains('Not Found');
+            final isConn = errStr.contains('Connection') || errStr.contains('SocketException') || errStr.contains('refused');
 
+            String detail;
+            if (is404) {
+              detail = 'Le endpoint `/download_media` n\'est pas disponible sur le backend. '
+                  'Vérifiez que le backend a été redémarré après `pip install -r requirements.txt`.';
+            } else if (isTimeout) {
+              detail = 'Le backend a mis trop de temps à répondre. '
+                  'yt-dlp peut être lent sur les chaînes YouTube avec beaucoup de vidéos. '
+                  'Essayez avec une URL de vidéo directe (pas une chaîne).';
+            } else if (isConn) {
+              detail = 'Impossible de joindre le backend à `$backendUrl`. '
+                  'Vérifiez que le serveur est démarré et accessible.';
+            } else {
+              detail = 'Erreur backend : $errStr';
+            }
+
+            await _persistAssistantMessage(
+              '❌ Échec extraction vidéo\n\n'
+              '$detail\n\n'
+              '💡 **Solutions** :\n'
+              '- Redémarrez le backend : `cd backend && uvicorn backend.main:app --reload`\n'
+              '- Vérifiez que yt-dlp est installé : `pip show yt-dlp`\n'
+              '- Pour les fichiers directs (MP4, WebM, etc.), utilisez `/download <url_directe>`\n'
+              '- Sur desktop, utilisez une extension comme "Video DownloadHelper"',
+            );
+            state = state.copyWith(isStreaming: false);
+            return true;
+          }
+        }
+      } else if (isVideoSite) {
+        // Backend URL vide ou localhost
+        if (cmd.args.isEmpty) {
+          // Mode combo : tenter le téléchargement direct même sans backend
+        } else {
           await _persistAssistantMessage(
-            '❌ Échec extraction vidéo\n\n'
-            '$detail\n\n'
-            '💡 **Solutions** :\n'
-            '- Redémarrez le backend : `cd backend && uvicorn backend.main:app --reload`\n'
-            '- Vérifiez que yt-dlp est installé : `pip show yt-dlp`\n'
-            '- Pour les fichiers directs (MP4, WebM, etc.), utilisez `/download <url_directe>`\n'
-            '- Sur desktop, utilisez une extension comme "Video DownloadHelper"',
+            '❌ Backend non configuré\n\n'
+            'BACKEND_URL est vide ou contient localhost. '
+            'Ajoutez `BACKEND_URL=https://api.aironbot.app` dans `.env` et recompilez.',
           );
           state = state.copyWith(isStreaming: false);
           return true;
         }
-      } else if (isVideoSite) {
-        // Backend URL vide ou localhost
-        await _persistAssistantMessage(
-          '❌ Backend non configuré\n\n'
-          'BACKEND_URL est vide ou contient localhost. '
-          'Ajoutez `BACKEND_URL=https://api.aironbot.app` dans `.env` et recompilez.',
-        );
-        state = state.copyWith(isStreaming: false);
-        return true;
       }
     }
 
@@ -658,33 +708,82 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
 
     if (url != null) {
       final globalService = ref.read(searchServiceGlobalProvider);
-      try {
-        // 1. Try scrape for anchor links
-        final data = await globalService.scrape(url);
-        final allLinks = (data['data'] as List? ?? [])
-            .where((d) => d['field'] == 'links')
-            .expand((d) => (d['values'] as List? ?? []).cast<Map>());
-        final filtered = allLinks.where((m) {
-          final href = (m['url'] ?? '').toString();
-          switch (rawFilter.toLowerCase()) {
-            case 'video':
-              return href.contains('video') || href.endsWith('.mp4') || href.endsWith('.webm');
-            case 'image':
-              return href.contains('image') || href.endsWith('.jpg') || href.endsWith('.jpeg') || href.endsWith('.png') || href.endsWith('.gif') || href.endsWith('.webp');
-            case 'audio':
-              return href.contains('audio') || href.endsWith('.mp3') || href.endsWith('.wav');
-            case 'document':
-              return href.endsWith('.pdf') || href.endsWith('.doc') || href.endsWith('.docx') || href.endsWith('.xls') || href.endsWith('.xlsx');
-            default:
-              return true;
-          }
-        });
-        final links = filtered.map((m) => '- [${m['text'] ?? 'Lien'}](${m['url']})').join('\n');
 
-        // 2. Fallback: for video filter, also extract embedded media via downloadMedia
-        if (links.isEmpty && rawFilter.toLowerCase() == 'video') {
-          final media = await globalService.downloadMedia(url, mediaType: 'video');
-          if (media['success'] == true) {
+      // YouTube is a SPA — BeautifulSoup cannot extract video links from rendered HTML.
+      // Skip scrape and go directly to backend media extraction.
+      final isYouTube = url.contains('youtube.com') || url.contains('youtu.be');
+
+      if (!isYouTube) {
+        try {
+          final data = await globalService.scrape(url);
+          final allLinks = (data['data'] as List? ?? [])
+              .where((d) => d['field'] == 'links')
+              .expand((d) => (d['values'] as List? ?? []).cast<Map>());
+          final filtered = allLinks.where((m) {
+            final href = (m['url'] ?? '').toString();
+            switch (rawFilter.toLowerCase()) {
+              case 'video':
+                return href.contains('video') || href.endsWith('.mp4') || href.endsWith('.webm');
+              case 'image':
+                return href.contains('image') || href.endsWith('.jpg') || href.endsWith('.jpeg') || href.endsWith('.png') || href.endsWith('.gif') || href.endsWith('.webp');
+              case 'audio':
+                return href.contains('audio') || href.endsWith('.mp3') || href.endsWith('.wav');
+              case 'document':
+                return href.endsWith('.pdf') || href.endsWith('.doc') || href.endsWith('.docx') || href.endsWith('.xls') || href.endsWith('.xlsx');
+              default:
+                return true;
+            }
+          });
+          final links = filtered.map((m) => '- [${m['text'] ?? 'Lien'}](${m['url']})').join('\n');
+
+          if (links.isNotEmpty) {
+            await _persistAssistantMessage('Liens extraits de $url (filtre: $rawFilter):\n\n$links');
+            return true;
+          }
+        } catch (e) {
+          debugPrint('[Links] Scrape failed for $url: $e');
+        }
+      }
+
+      // Fallback / primary path for YouTube and empty scrape results
+      try {
+        final media = await globalService.downloadMedia(url, mediaType: 'video');
+        if (media['success'] == true) {
+          final mediaType = media['type'] as String? ?? '';
+
+          if (mediaType == 'playlist') {
+            final entries = (media['entries'] as List<dynamic>? ?? []).cast<Map<String, dynamic>>();
+            final title = media['title'] as String? ?? 'Playlist';
+            final uploader = media['uploader'] as String? ?? '';
+            if (entries.isNotEmpty) {
+              final buf = StringBuffer()
+                ..writeln('📋 **$title** ${uploader.isNotEmpty ? 'par $uploader' : ''}')
+                ..writeln()
+                ..writeln('Vidéos trouvées (${entries.length}) :');
+              for (var i = 0; i < entries.length && i < 15; i++) {
+                final e = entries[i];
+                final eTitle = e['title'] as String? ?? 'Vidéo';
+                final eUrl = e['url'] as String? ?? '';
+                final eDuration = e['duration'] as int?;
+                final durStr = eDuration != null ? ' (${eDuration ~/ 60}m${eDuration % 60}s)' : '';
+                buf.writeln('${i + 1}. [$eTitle]($eUrl)$durStr');
+              }
+              if (entries.length > 15) {
+                buf.writeln('... et ${entries.length - 15} autres');
+              }
+              buf.writeln('\n💡 Lancez `/download <url>` sur un lien pour le télécharger.');
+              await _persistAssistantMessage(buf.toString());
+              _lastLinksForDownload = entries
+                  .map((e) => e['url'] as String?)
+                  .whereType<String>()
+                  .where((u) => u.isNotEmpty)
+                  .toList(growable: false);
+              _lastLinksFilter = 'video';
+              return true;
+            }
+          }
+
+          if (mediaType == 'video' || mediaType == 'page_media') {
             final videos = (media['videos'] as List<dynamic>? ?? []).cast<Map<String, dynamic>>();
             final title = media['title'] as String? ?? 'Page';
             if (videos.isNotEmpty) {
@@ -701,7 +800,6 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
               }
               buf.writeln('\n💡 Lancez `/download <url>` sur un lien pour le télécharger.');
               await _persistAssistantMessage(buf.toString());
-              // Store links for bulk download
               _lastLinksForDownload = videos
                   .map((v) => v['url'] as String?)
                   .whereType<String>()
@@ -712,22 +810,12 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
             }
           }
         }
-
-        if (links.isEmpty) {
-          await _persistAssistantMessage('Aucun lien trouvé sur $url (filtre: $rawFilter).');
-          return true;
-        }
-        await _persistAssistantMessage('Liens extraits de $url (filtre: $rawFilter):\n\n$links');
-        return true;
       } catch (e) {
-        await _persistAssistantMessage(
-          '❌ Échec extraction liens\n\n'
-          'Erreur backend : $e\n\n'
-          '💡 Vérifiez que l\'URL est accessible ou utilisez l\'extension Chrome.',
-        );
-        state = state.copyWith(isStreaming: false);
-        return true;
+        debugPrint('[Links] downloadMedia failed for $url: $e');
       }
+
+      await _persistAssistantMessage('Aucun lien trouvé sur $url (filtre: $rawFilter).');
+      return true;
     }
 
     if (!bridge.isExtension) {
@@ -749,6 +837,153 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
       'audios': 'audio',
     };
     final filter = aliases[rawFilter.toLowerCase()] ?? rawFilter.toLowerCase();
+
+    // ── Extension universelle : pour video/image, utiliser le backend
+    // Le backend combine yt-dlp (1000+ sites) + BeautifulSoup (tout le reste).
+    // Le DOM statique ne trouve que les liens de page, pas les URLs directes.
+    final metaAction = BrowserAction(
+      action: BrowserActionType.pageMetadata,
+      params: {},
+    );
+    final metaResult = await bridge.executeAction(metaAction);
+    final currentUrl = metaResult.success ? (metaResult.data?['url'] as String? ?? '') : '';
+    final currentTitle = metaResult.success ? (metaResult.data?['title'] as String? ?? '') : '';
+
+    final shouldUseBackend = filter == 'video' || filter == 'image';
+
+    if (shouldUseBackend) {
+      final backendUrl = AppConstants.backendBaseUrl;
+      if (backendUrl.isNotEmpty && !backendUrl.contains('localhost')) {
+        try {
+          final globalService = ref.read(searchServiceGlobalProvider);
+          // mediaType: 'auto' → le backend détecte automatiquement (yt-dlp ou scraper)
+          final media = await globalService.downloadMedia(currentUrl, mediaType: 'auto');
+          if (media['success'] == true) {
+            final mediaType = media['type'] as String? ?? '';
+
+            // ── Playlist / chaîne (yt-dlp) ──
+            if (mediaType == 'playlist' && filter == 'video') {
+              final entries = (media['entries'] as List<dynamic>? ?? []).cast<Map<String, dynamic>>();
+              final title = media['title'] as String? ?? 'Playlist';
+              final uploader = media['uploader'] as String? ?? '';
+              if (entries.isNotEmpty) {
+                final buf = StringBuffer()
+                  ..writeln('📋 **$title** ${uploader.isNotEmpty ? 'par $uploader' : ''}')
+                  ..writeln()
+                  ..writeln('Vidéos trouvées (${entries.length}) :');
+                for (var i = 0; i < entries.length && i < 15; i++) {
+                  final e = entries[i];
+                  final eTitle = e['title'] as String? ?? 'Vidéo';
+                  final eUrl = e['url'] as String? ?? '';
+                  final eDuration = e['duration'] as int?;
+                  final durStr = eDuration != null ? ' (${eDuration ~/ 60}m${eDuration % 60}s)' : '';
+                  buf.writeln('${i + 1}. [$eTitle]($eUrl)$durStr');
+                }
+                if (entries.length > 15) {
+                  buf.writeln('... et ${entries.length - 15} autres');
+                }
+                buf.writeln('\n💡 Lancez `/download <url>` sur une vidéo spécifique.');
+                await _persistAssistantMessage(buf.toString());
+                // Ne pas stocker de playlist pour /download bulk — chaque URL
+                // nécessite une résolution backend individuelle.
+                _lastLinksForDownload = [];
+                _lastLinksFilter = 'video';
+                return true;
+              }
+            }
+
+            // ── Vidéo directe (yt-dlp a extrait une URL de streaming) ──
+            if (mediaType == 'video' && filter == 'video') {
+              final title = media['title'] as String? ?? 'Vidéo';
+              final directUrl = media['direct_url'] as String? ?? '';
+              final duration = media['duration'] as int?;
+              final formats = (media['formats'] as List<dynamic>? ?? []).cast<Map<String, dynamic>>();
+              final durStr = duration != null ? ' (${duration ~/ 60}m${duration % 60}s)' : '';
+
+              final buf = StringBuffer()
+                ..writeln('📹 **$title**$durStr')
+                ..writeln()
+                ..writeln('URL directe extraite : ${directUrl.isNotEmpty ? "Oui" : "Non"}.')
+                ..writeln()
+                ..writeln('💡 Lancez `/download` sans paramètre pour télécharger cette vidéo.');
+              if (formats.isNotEmpty) {
+                buf.writeln('\n| Qualité | Format | Audio+Vidéo |');
+                buf.writeln('|--------|--------|-------------|');
+                for (final f in formats.take(8)) {
+                  final q = f['quality'] ?? f['format_id'] ?? '?';
+                  final ext = f['ext'] ?? '?';
+                  final av = (f['has_audio'] == true && f['has_video'] == true) ? '✅' : '⚠️';
+                  buf.writeln('| $q | $ext | $av |');
+                }
+              }
+              await _persistAssistantMessage(buf.toString());
+              _lastLinksForDownload = directUrl.isNotEmpty ? [directUrl] : [];
+              _lastLinksFilter = 'video';
+              return true;
+            }
+
+            // ── Médias de page (scraper universel — tout site) ──
+            if (mediaType == 'page_media') {
+              final videos = (media['videos'] as List<dynamic>? ?? []).cast<Map<String, dynamic>>();
+              final images = (media['images'] as List<dynamic>? ?? []).cast<Map<String, dynamic>>();
+              final title = media['title'] as String? ?? 'Page';
+
+              if (filter == 'video' && videos.isNotEmpty) {
+                final buf = StringBuffer()
+                  ..writeln('🎬 **$title**')
+                  ..writeln()
+                  ..writeln('Vidéos trouvées (${videos.length}) :');
+                for (var i = 0; i < videos.length && i < 15; i++) {
+                  final v = videos[i];
+                  buf.writeln('${i + 1}. [${v['tag'] ?? 'vidéo'}](${v['url']})');
+                }
+                if (videos.length > 15) {
+                  buf.writeln('... et ${videos.length - 15} autres');
+                }
+                buf.writeln('\n💡 Lancez `/download` sans paramètre pour télécharger toute cette liste.');
+                await _persistAssistantMessage(buf.toString());
+                _lastLinksForDownload = videos
+                    .map((v) => v['url'] as String?)
+                    .whereType<String>()
+                    .where((u) => u.isNotEmpty)
+                    .toList(growable: false);
+                _lastLinksFilter = 'video';
+                return true;
+              }
+
+              if (filter == 'image' && images.isNotEmpty) {
+                final buf = StringBuffer()
+                  ..writeln('🖼️ **$title**')
+                  ..writeln()
+                  ..writeln('Images trouvées (${images.length}) :');
+                for (var i = 0; i < images.length && i < 15; i++) {
+                  final img = images[i];
+                  final alt = (img['alt'] as String? ?? '').isNotEmpty ? ' — ${img['alt']}' : '';
+                  buf.writeln('${i + 1}. [Image ${i + 1}$alt](${img['url']})');
+                }
+                if (images.length > 15) {
+                  buf.writeln('... et ${images.length - 15} autres');
+                }
+                buf.writeln('\n💡 Lancez `/download` sans paramètre pour télécharger toute cette liste.');
+                await _persistAssistantMessage(buf.toString());
+                _lastLinksForDownload = images
+                    .map((img) => img['url'] as String?)
+                    .whereType<String>()
+                    .where((u) => u.isNotEmpty)
+                    .toList(growable: false);
+                _lastLinksFilter = 'image';
+                return true;
+              }
+            }
+          }
+        } catch (e) {
+          debugPrint('[Links] Backend extraction failed for $currentUrl: $e');
+          // Fall through to DOM extraction
+        }
+      }
+    }
+
+    // ── Fallback DOM extraction (non-video sites ou échec backend)
     final action = BrowserAction(
       action: BrowserActionType.extractLinks,
       params: {'filter': filter},
@@ -758,11 +993,6 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
       final links = result.data!['links'] as List? ?? [];
       final count = result.data!['count'] as int? ?? links.length;
       final appliedFilter = result.data!['filter'] as String? ?? 'all';
-      final totalMatched = result.data!['totalMatched'] as int? ?? count;
-      final pageUrl = result.data!['pageUrl'] as String? ?? '';
-      final pageTitle = result.data!['pageTitle'] as String? ?? '';
-      final rawAnchorCount = result.data!['rawAnchorCount'] as int? ?? 0;
-      final mediaSourceCount = result.data!['mediaSourceCount'] as int? ?? 0;
       _lastLinksFilter = appliedFilter;
       _lastLinksForDownload = links
           .whereType<Map>()
@@ -775,11 +1005,11 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
         return '- [${m['text'] ?? 'Lien'}](${m['href']})';
       }).join('\n');
       final more = count > 20 ? '\n... et ${count - 20} autres' : '';
-      final diagnostics = 'Diagnostic: page="${pageTitle.isNotEmpty ? pageTitle : 'N/A'}" '
-          'URL=$pageUrl | ancres_brutes=$rawAnchorCount | media_sources=$mediaSourceCount '
-          '| matches_total=$totalMatched | retournes=$count';
-      await _persistAssistantMessage('Liens trouvés ($appliedFilter, $count au total) :\n$linksText$more\n\n'
-          '$diagnostics\n\n💡 Lancez `/download` sans paramètre pour télécharger toute cette liste.');
+      await _persistAssistantMessage(
+        'Liens trouvés sur "$currentTitle" ($appliedFilter, $count au total) :\n'
+        '$linksText$more\n\n'
+        '💡 Lancez `/download` sans paramètre pour télécharger toute cette liste.',
+      );
     } else {
       await _persistAssistantMessage(
         '❌ Échec extraction liens\n\n'
@@ -3481,7 +3711,7 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
 
   static Map<String, String>? _tryParseFlightParams(String message) {
     const cityName = r'[A-ZÀ-Ÿ][a-zà-ÿ]+(?:\s[A-ZÀ-Ÿ][a-zà-ÿ]+)?';
-    const numericDate = r'\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4}';
+    const numericDate = r'\d{1,2}[/.-]\d{1,2}(?:[/.-]\d{2,4})?';
     const months =
         r'[Jj]anvier|[Ff]évrier|[Ff]evrier|[Mm]ars|[Aa]vril|[Mm]ai|'
         r'[Jj]uillet|[Jj]uin|[Aa]oût|[Aa]out|[Ss]eptembre|[Oo]ctobre|'
@@ -3573,20 +3803,20 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
       };
     }
 
-    // Pattern D: "City1 City2 numericDate" — compact with numeric date
-    final compact = RegExp(
+    // Pattern D: "City1-City2 date" or "City1 City2 date" — compact, no du/le required
+    final compactNumDates = RegExp(
       '(?:de\\s+)?($cityName)\\s+'
       r'(?:à|vers|pour|-)?\s*'
-      '($cityName)',
+      '($cityName)\\b'
+      r'.{0,20}?'
+      '(?:d[ue]|le)?\\s*(' + numericDate + r')',
     );
-    final matchD = compact.firstMatch(message);
-    final dateFinder = RegExp('($numericDate)');
-    final dateMatch = dateFinder.firstMatch(message);
-    if (matchD != null && dateMatch != null) {
+    final matchD = compactNumDates.firstMatch(message);
+    if (matchD != null) {
       return {
         'from': matchD.group(1)!.trim(),
         'to': matchD.group(2)!.trim(),
-        'departDate': normalizeDate(dateMatch.group(1)!),
+        'departDate': normalizeDate(matchD.group(3)!),
       };
     }
 
@@ -3634,14 +3864,17 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
   }
 
   static String normalizeDate(String raw) {
-    // Accept dd/mm/yyyy, dd-mm-yyyy, dd.mm.yyyy → yyyy-mm-dd
+    // Accept dd/mm[/yyyy], dd-mm[-yyyy], dd.mm[.yyyy] → yyyy-mm-dd
     final parts = raw.trim().split(RegExp(r'[/.-]'));
-    if (parts.length == 3) {
+    if (parts.length >= 2) {
       try {
         final d = int.parse(parts[0]);
         final m = int.parse(parts[1]);
-        var y = int.parse(parts[2]);
-        if (y < 100) y += 2000;
+        var y = DateTime.now().year;
+        if (parts.length >= 3) {
+          y = int.parse(parts[2]);
+          if (y < 100) y += 2000;
+        }
         return '$y-${m.toString().padLeft(2, '0')}-${d.toString().padLeft(2, '0')}';
       } catch (_) {
         return raw;

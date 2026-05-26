@@ -745,7 +745,7 @@ class SearchIntentExtractor {
 
   static Map<String, String>? _tryParseFlightParamsGeneric(String message, AppLanguage lang) {
     const cityName = r'[A-ZÀ-Ÿ][a-zà-ÿ]+(?:\s[A-ZÀ-Ÿ][a-zà-ÿ]+)?';
-    const numericDate = r'\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4}';
+    const numericDate = r'\d{1,2}[/.-]\d{1,2}(?:[/.-]\d{2,4})?';
     const months =
         r'[Jj]anvier|[Ff]évrier|[Ff]evrier|[Mm]ars|[Aa]vril|[Mm]ai|'
         r'[Jj]uillet|[Jj]uin|[Aa]oût|[Aa]out|[Ss]eptembre|[Oo]ctobre|'
@@ -824,6 +824,23 @@ class SearchIntentExtractor {
         returnDate = '$y-${m2.toString().padLeft(2, '0')}-${d2.toString().padLeft(2, '0')}';
       }
       return {'from': matchC.group(1)!.trim(), 'to': matchC.group(2)!.trim(), 'departDate': departDate, if (returnDate != null) 'returnDate': returnDate};
+    }
+
+    // Pattern D: "City1-City2 date" or "City1 City2 date" — compact, no du/le required
+    final compactNumDates = RegExp(
+      '(?:de\\s+)?($cityName)\\s+'
+      r'(?:à|vers|pour|-)?\s*'
+      '($cityName)\\b'
+      r'.{0,20}?'
+      '(?:d[ue]|le)?\\s*(' + numericDate + r')',
+    );
+    final matchD = compactNumDates.firstMatch(message);
+    if (matchD != null) {
+      return {
+        'from': matchD.group(1)!.trim(),
+        'to': matchD.group(2)!.trim(),
+        'departDate': _normalizeDate(matchD.group(3)!),
+      };
     }
 
     return null;
