@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_tts/flutter_tts.dart';
@@ -35,12 +34,12 @@ class TtsNaturalService {
   final TtsCacheService _cache = TtsCacheService();
 
   // ── Etat commun ─────────────────────────────────────────────────────────
-  static const double _openRouterTtsSpeed = 1.0;
+  static const double _openRouterTtsSpeed = 0.95;  // légèrement plus lent = plus naturel
   bool _isSpeaking = false;
   TtsEngine _activeEngine = TtsEngine.flutterTts;
   TtsEmotion _currentEmotion = TtsEmotion.neutral;
-  double _speechRate = 0.45;
-  double _pitch = 1.15;
+  double _speechRate = 0.42;
+  double _pitch = 1.10;
   String _language = 'fr-FR';
 
   bool get isSpeaking => _isSpeaking;
@@ -267,9 +266,9 @@ class TtsNaturalService {
         if (!_isSpeaking) break;
         final chunk = chunks[i];
 
-        // Paragraph break: longer pause instead of speaking
+        // Paragraph break: natural breath pause
         if (chunk.isEmpty) {
-          await Future<void>.delayed(const Duration(milliseconds: 500));
+          await Future<void>.delayed(const Duration(milliseconds: 350));
           continue;
         }
 
@@ -288,8 +287,8 @@ class TtsNaturalService {
         );
 
         if (i < chunks.length - 1) {
-          // Longer pause between sentences for natural prosody
-          await Future<void>.delayed(const Duration(milliseconds: 250));
+          // Short pause — TTS engine handles sentence-level prosody itself
+          await Future<void>.delayed(const Duration(milliseconds: 60));
         }
       }
     } catch (e) {
@@ -454,6 +453,12 @@ class TtsNaturalService {
       RegExp(r'^\s*[-*_#>|~`]+\s*', multiLine: true),
       (_) => '',
     );
+    // Remove standalone bracket tags [word] (emotion/state tags missed by EmotionParser,
+    // e.g. unknown English tags).  Must run BEFORE replacing brackets individually.
+    working = working.replaceAll(
+      RegExp(r'\[[A-Za-z\u00C0-\u024F][A-Za-z\u00C0-\u024F0-9_\-]{0,30}\]'),
+      '',
+    );
     // Remove stray brackets that weren't links (but keep link text handled above)
     working = working.replaceAll(RegExp(r'(?<!\w)\[(\d+)\](?!\w)'), ' '); // citations missed earlier
     working = working.replaceAll(RegExp(r'\[|\]'), ' ');
@@ -536,61 +541,110 @@ class TtsNaturalService {
     return result;
   }
 
+  /// Splits [text] into TTS-ready chunks, respecting sentence and word
+  /// boundaries. Rules (by priority):
+  ///   1. Split at paragraph breaks (\n\n) — insert an empty marker for pause.
+  ///   2. Accumulate whole sentences until chunk exceeds [_maxTtsChunk] chars.
+  ///   3. If a single sentence exceeds [_maxTtsChunk], split at clause
+  ///      boundaries (comma/semicolon) then at word boundaries — never mid-word.
+  static const int _maxTtsChunk = 300; // 2.5× previous: keeps most sentences intact
+
   List<String> _splitForNaturalSpeech(String text) {
-    // Preserve paragraph breaks (\n\n) for natural pauses between sections
     final cleaned = text
         .replaceAll(RegExp(r'[ \t]+'), ' ')
         .replaceAll(RegExp(r'\n{3,}'), '\n\n')
         .trim();
     if (cleaned.isEmpty) return const [];
 
-    const maxChunkLength = 120;
     final chunks = <String>[];
-    final current = StringBuffer();
-
-    void flush() {
-      if (current.isNotEmpty) {
-        chunks.add(current.toString().trim());
-        current.clear();
-      }
-    }
 
     final paragraphs = cleaned.split('\n\n');
     for (var pIdx = 0; pIdx < paragraphs.length; pIdx++) {
       final para = paragraphs[pIdx].trim();
       if (para.isEmpty) continue;
 
-      final sentenceChunks = para.split(RegExp(r'(?<=[\.!?;:])\s+'));
-      for (final sentence in sentenceChunks) {
+      // Split on sentence-ending punctuation followed by whitespace
+      final sentences = para.split(RegExp(r'(?<=[.!?])\s+'));
+      final current = StringBuffer();
+
+      for (final sentence in sentences) {
         final trimmed = sentence.trim();
         if (trimmed.isEmpty) continue;
 
-        if (trimmed.length > maxChunkLength) {
-          flush();
-          for (var i = 0; i < trimmed.length; i += maxChunkLength) {
-            final end = math.min(i + maxChunkLength, trimmed.length);
-            chunks.add(trimmed.substring(i, end).trim());
+        if (trimmed.length > _maxTtsChunk) {
+          // Flush accumulated content first
+          if (current.isNotEmpty) {
+            chunks.add(current.toString().trim());
+            current.clear();
           }
+          // Long sentence: split at clause boundaries, never mid-word
+          _splitLongSentence(trimmed, chunks);
           continue;
         }
 
-        final nextLength = current.length + (current.isNotEmpty ? 1 : 0) + trimmed.length;
-        if (nextLength > maxChunkLength) {
-          flush();
+        final wouldExceed =
+            current.length + (current.isNotEmpty ? 1 : 0) + trimmed.length > _maxTtsChunk;
+        if (wouldExceed && current.isNotEmpty) {
+          chunks.add(current.toString().trim());
+          current.clear();
         }
         if (current.isNotEmpty) current.write(' ');
         current.write(trimmed);
       }
 
-      flush();
-      // Insert a paragraph-break marker (empty chunk) between paragraphs
-      // so that _speakWithFlutterTts can insert a longer pause.
+      if (current.isNotEmpty) {
+        chunks.add(current.toString().trim());
+      }
+
+      // Empty marker = paragraph break (longer pause in _speakWithFlutterTts)
       if (pIdx < paragraphs.length - 1) {
         chunks.add('');
       }
     }
 
     return chunks.where((c) => c.isNotEmpty || c == '').toList(growable: false);
+  }
+
+  /// Splits a long sentence at clause boundaries (comma, semicolon) then at
+  /// word boundaries. Never splits mid-word.
+  void _splitLongSentence(String sentence, List<String> chunks) {
+    // Try comma/semicolon splits first
+    final parts = sentence.split(RegExp(r'(?<=[,;])\s+'));
+    final buffer = StringBuffer();
+
+    for (final part in parts) {
+      final adding = part.trim();
+      if (adding.isEmpty) continue;
+      final wouldExceed =
+          buffer.length + (buffer.isNotEmpty ? 2 : 0) + adding.length > _maxTtsChunk;
+      if (wouldExceed && buffer.isNotEmpty) {
+        chunks.add(buffer.toString().trim());
+        buffer.clear();
+      }
+      if (buffer.isNotEmpty) buffer.write(' ');
+      buffer.write(adding);
+    }
+
+    if (buffer.isEmpty) return;
+    final remaining = buffer.toString().trim();
+
+    if (remaining.length <= _maxTtsChunk) {
+      chunks.add(remaining);
+      return;
+    }
+
+    // Last resort: word-boundary split (NEVER mid-word)
+    final words = remaining.split(' ');
+    final wordBuf = StringBuffer();
+    for (final word in words) {
+      if (wordBuf.isNotEmpty && wordBuf.length + 1 + word.length > _maxTtsChunk) {
+        chunks.add(wordBuf.toString());
+        wordBuf.clear();
+      }
+      if (wordBuf.isNotEmpty) wordBuf.write(' ');
+      wordBuf.write(word);
+    }
+    if (wordBuf.isNotEmpty) chunks.add(wordBuf.toString());
   }
 
   Future<void> stop() async {

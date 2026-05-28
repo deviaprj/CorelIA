@@ -95,6 +95,7 @@ class OpenRouterTtsService {
   }) {
     // Limiter la longueur du texte (les API TTS ont des limites)
     final truncated = text.length > 4096 ? text.substring(0, 4096) : text;
+
     return '{"model":"$model","input":${_escapeJson(truncated)},'
         '"voice":"${voice.name}","speed":$speed,"response_format":"mp3"}';
   }

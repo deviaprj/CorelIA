@@ -248,7 +248,7 @@ class InputBarState extends ConsumerState<InputBar> {
                               hintText: attachments.isNotEmpty ? 'Ajoutez votre question...' : 'Posez une question...',
                               border: InputBorder.none,
                               isDense: true,
-                              contentPadding: const EdgeInsets.symmetric(vertical: 12),
+                              contentPadding: const EdgeInsets.fromLTRB(4, 12, 0, 12),
                             ),
                             onSubmitted: (_) => _send(),
                             textInputAction: TextInputAction.send,

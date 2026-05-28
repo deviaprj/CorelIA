@@ -1905,8 +1905,10 @@ class DocumentGenerationService {
   Future<Uint8List> _toImage(String prompt, {required String format}) async {
     final encodedPrompt = Uri.encodeComponent(prompt);
     final seed = DateTime.now().millisecondsSinceEpoch % 10000;
+    // Pollinations supports ?format=jpeg|png — use to get the correct container
+    final imgFormat = (format == 'png') ? 'png' : 'jpeg';
     final url = 'https://image.pollinations.ai/prompt/$encodedPrompt'
-        '?width=1024&height=1024&nologo=true&seed=$seed';
+        '?width=1024&height=1024&nologo=true&seed=$seed&format=$imgFormat';
 
     try {
       final response = await http.get(Uri.parse(url)).timeout(

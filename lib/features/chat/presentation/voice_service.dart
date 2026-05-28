@@ -164,6 +164,18 @@ class VoiceServiceNotifier extends Notifier<VoiceState> {
       return;
     }
 
+    // En mode conversation, utiliser cancel() pour réinitialiser proprement
+    // l'état interne du SpeechRecognizer Android sans recréer l'instance.
+    // cancel() (contrairement à stop()) libère le résultat partiel en cours
+    // et remet le recognizer en état IDLE — ce qui permet un nouveau listen()
+    // sans risquer de "already listening" ou d'état corrompu après 2+ tours.
+    if (_conversationMode && _stt != null && _sttInitialized) {
+      try {
+        await _stt!.cancel();
+      } catch (_) {}
+      await Future<void>.delayed(const Duration(milliseconds: 250));
+    }
+
     await _initSttOnce();
     if (_stt == null || !_sttInitialized) {
       state = state.copyWith(isListening: false);

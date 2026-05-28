@@ -1,7 +1,9 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import '../../../app/cofely_theme.dart';
 import 'chat_notifier.dart';
 import 'chat_bubble.dart';
 import 'input_bar.dart';
@@ -161,27 +163,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
 
     final isVoiceActive = voiceConv.state != VoiceConversationState.idle;
 
-    return Scaffold(
-      appBar: AppBar(
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new),
-          onPressed: () => context.canPop()
-              ? context.pop()
-              : context.go('/chats'),
-        ),
-        title: const Text('Chat', style: TextStyle(fontSize: 18)),
-        actions: [
-          if (state.remainingRequests != null && !state.isStreaming)
-            Padding(
-              padding: const EdgeInsets.only(right: 12),
-              child: Chip(
-                label: Text('${state.remainingRequests} restants'),
-                visualDensity: VisualDensity.compact,
-              ),
-            ),
-        ],
-      ),
-      body: Stack(
+    // Responsive : plein écran mobile, maxWidth 400 px desktop/web
+    Widget chatBody = Stack(
         children: [
           Column(
             children: [
@@ -325,7 +308,139 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
               ),
             ),
         ],
+      );
+
+    // Responsive desktop/web : centrer + limiter à 400 px
+    if (kIsWeb) {
+      chatBody = Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: CofelyTokens.maxChatWidth),
+          child: chatBody,
+        ),
+      );
+    }
+
+    return Scaffold(
+      // Header Cofely : barre fixe, logo "C" dégradé, titre + point "En ligne"
+      appBar: PreferredSize(
+        preferredSize: const Size.fromHeight(kToolbarHeight),
+        child: Container(
+          decoration: const BoxDecoration(
+            color: CofelyTokens.botBubble,
+            boxShadow: CofelyTokens.headerShadow,
+          ),
+          child: SafeArea(
+            bottom: false,
+            child: Row(
+              children: [
+                // Bouton retour
+                Semantics(
+                  label: 'Retour',
+                  child: IconButton(
+                    icon: const Icon(Icons.arrow_back_ios_new,
+                        size: 20, color: CofelyTokens.primary),
+                    onPressed: () => context.canPop()
+                        ? context.pop()
+                        : context.go('/chats'),
+                    tooltip: 'Retour',
+                  ),
+                ),
+                // Logo "C" dégradé Cofely
+                Container(
+                  width: 28,
+                  height: 28,
+                  decoration: const BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: CofelyTokens.avatarGradient,
+                  ),
+                  child: const Center(
+                    child: Text(
+                      'C',
+                      style: TextStyle(
+                        color: CofelyTokens.onPrimary,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 13,
+                        fontFamily: 'Inter',
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                // Titre + indicateur "En ligne"
+                Expanded(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Assistant Cofely',
+                        style: TextStyle(
+                          fontFamily: 'Inter',
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                          color: CofelyTokens.primary,
+                        ),
+                      ),
+                      Row(
+                        children: [
+                          Container(
+                            width: 7,
+                            height: 7,
+                            margin: const EdgeInsets.only(right: 5),
+                            decoration: const BoxDecoration(
+                              color: CofelyTokens.onlineGreen,
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                          const Text(
+                            'En ligne',
+                            style: TextStyle(
+                              fontFamily: 'Inter',
+                              fontSize: 11,
+                              color: CofelyTokens.onlineGreen,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                // Badge requêtes restantes
+                if (state.remainingRequests != null && !state.isStreaming)
+                  Padding(
+                    padding: const EdgeInsets.only(right: 4),
+                    child: Chip(
+                      label: Text(
+                        '${state.remainingRequests}',
+                        style: const TextStyle(
+                          fontSize: 11,
+                          color: CofelyTokens.primary,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      backgroundColor: const Color(0xFFCCE8F4),
+                      side: const BorderSide(color: CofelyTokens.accent),
+                      visualDensity: VisualDensity.compact,
+                      padding: EdgeInsets.zero,
+                    ),
+                  ),
+                // Bouton paramètres
+                Semantics(
+                  label: 'Paramètres',
+                  child: IconButton(
+                    icon: const Icon(Icons.tune_rounded,
+                        size: 22, color: CofelyTokens.primary),
+                    onPressed: () => context.push('/settings'),
+                    tooltip: 'Paramètres',
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
+      body: chatBody,
     );
   }
 
@@ -491,50 +606,69 @@ class _ChatToolbar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-
     return Container(
+      // Fond transparent, pas de décoration — les chips portent le style
       padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
       child: Row(
         children: [
-          // Piece jointe
-          ActionChip(
-            avatar: Icon(
-              Icons.attach_file_outlined,
-              size: 18,
-              color: colorScheme.outline,
+          // Chip pièce jointe
+          Semantics(
+            label: 'Ajouter un fichier',
+            child: ActionChip(
+              avatar: const Icon(
+                Icons.attach_file_outlined,
+                size: 18,
+                color: Color(0xFF4A6375),
+              ),
+              label: const Text(
+                'Fichier',
+                style: TextStyle(fontSize: 12, color: Color(0xFF4A6375)),
+              ),
+              backgroundColor: const Color(0xFFE8EEF4),
+              side: const BorderSide(color: Color(0xFFCDD8E0)),
+              visualDensity: VisualDensity.compact,
+              onPressed: onAttachment,
+              tooltip: 'Joindre un fichier',
             ),
-            label: Text(
-              'Fichier',
-              style: TextStyle(fontSize: 12, color: colorScheme.outline),
-            ),
-            backgroundColor: colorScheme.surfaceContainerHighest,
-            side: BorderSide(color: colorScheme.outlineVariant),
-            visualDensity: VisualDensity.compact,
-            onPressed: onAttachment,
           ),
           const SizedBox(width: 8),
-          // Conversation vocale
-          ActionChip(
-            avatar: Icon(
-              isVoiceActive ? Icons.mic : Icons.mic_none_outlined,
-              size: 18,
-              color: isVoiceActive ? colorScheme.onErrorContainer : colorScheme.outline,
-            ),
-            label: Text(
-              isVoiceActive ? 'Vocal ON' : 'Vocal OFF',
-              style: TextStyle(
-                fontSize: 12,
-                color: isVoiceActive ? colorScheme.onErrorContainer : colorScheme.outline,
+          // Chip conversation vocale
+          // Actif  : fond #CCE8F4, bord #003F5C, icone bleu Cofely
+          // Inactif : fond #E8EEF4, bord #CDD8E0, icone gris
+          Semantics(
+            label: isVoiceActive ? 'Désactiver le mode vocal' : 'Activer le mode vocal',
+            child: ActionChip(
+              avatar: Icon(
+                isVoiceActive ? Icons.mic : Icons.mic_none_outlined,
+                size: 18,
+                color: isVoiceActive
+                    ? CofelyTokens.primary
+                    : const Color(0xFF4A6375),
               ),
+              label: Text(
+                isVoiceActive ? 'Vocal ON' : 'Vocal OFF',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: isVoiceActive
+                      ? CofelyTokens.primary
+                      : const Color(0xFF4A6375),
+                  fontWeight: isVoiceActive ? FontWeight.w600 : FontWeight.normal,
+                ),
+              ),
+              backgroundColor: isVoiceActive
+                  ? const Color(0xFFCCE8F4)
+                  : const Color(0xFFE8EEF4),
+              side: BorderSide(
+                color: isVoiceActive
+                    ? CofelyTokens.primary
+                    : const Color(0xFFCDD8E0),
+              ),
+              visualDensity: VisualDensity.compact,
+              onPressed: onToggleVoiceConv,
+              tooltip: isVoiceActive
+                  ? 'Arrêter le mode vocal'
+                  : 'Démarrer la conversation vocale',
             ),
-            backgroundColor:
-                isVoiceActive ? colorScheme.errorContainer : colorScheme.surfaceContainerHighest,
-            side: BorderSide(
-              color: isVoiceActive ? colorScheme.error : colorScheme.outlineVariant,
-            ),
-            visualDensity: VisualDensity.compact,
-            onPressed: onToggleVoiceConv,
           ),
           const Spacer(),
         ],
@@ -684,25 +818,54 @@ class _WelcomeHint extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(Icons.auto_awesome,
-              size: 56,
-              color: Theme.of(context).colorScheme.secondary),
-          const SizedBox(height: 16),
-          Text(
-            'Posez votre première question',
-            style: Theme.of(context).textTheme.titleMedium,
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Posez-moi n\'importe quoi',
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: Theme.of(context).colorScheme.outline,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 32),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            // Avatar "C" dégradé Cofely (56 px)
+            Container(
+              width: 56,
+              height: 56,
+              decoration: const BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: CofelyTokens.avatarGradient,
+                boxShadow: CofelyTokens.bubbleShadow,
+              ),
+              child: const Center(
+                child: Text(
+                  'C',
+                  style: TextStyle(
+                    color: CofelyTokens.onPrimary,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 24,
+                    fontFamily: 'Inter',
+                  ),
                 ),
-          ),
-        ],
+              ),
+            ),
+            const SizedBox(height: 20),
+            const Text(
+              'Assistant Cofely',
+              style: TextStyle(
+                fontFamily: 'Inter',
+                fontSize: 18,
+                fontWeight: FontWeight.w700,
+                color: CofelyTokens.primary,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Posez votre première question',
+              style: TextStyle(
+                fontFamily: 'Inter',
+                fontSize: 14,
+                color: CofelyTokens.primary.withAlpha(160),
+              ),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
       ),
     );
   }

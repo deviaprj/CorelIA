@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../../../app/cofely_theme.dart';
 import '../../../core/providers/app_providers.dart';
 import '../../../core/providers/firebase_providers.dart';
 
@@ -19,12 +20,12 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
 
   static const _pages = [
     _OnboardingPage(
-      icon: Icons.auto_awesome,
+      icon: Icons.chat_bubble_outline_rounded,
       title: 'IA à portée de main',
       description:
           'Votre assistant personnel ultra-performant '
           '— gratuitement, sans limite de tokens.',
-      gradient: [Color(0xFF6C63FF), Color(0xFF9C55FF)],
+      gradient: [Color(0xFF001218), CofelyTokens.primary],
     ),
     _OnboardingPage(
       icon: Icons.sync_rounded,
@@ -32,7 +33,7 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
       description:
           'Vos conversations sont synchronisées en temps réel '
           'entre votre téléphone et votre extension Chrome.',
-      gradient: [Color(0xFF00BCD4), Color(0xFF006064)],
+      gradient: [CofelyTokens.primary, Color(0xFF0078A8)],
     ),
     _OnboardingPage(
       icon: Icons.mic_rounded,
@@ -40,7 +41,7 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
       description:
           'Dictez vos questions avec la reconnaissance vocale et '
           'laissez l\'IA vous répondre à voix haute.',
-      gradient: [Color(0xFF4CAF50), Color(0xFF1B5E20)],
+      gradient: [Color(0xFF00263A), CofelyTokens.accent],
     ),
   ];
 
@@ -180,11 +181,46 @@ class _PageContent extends StatelessWidget {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(page.icon, size: 80, color: Colors.white),
+            // Page 1 : logo Cofely "C", les autres : icône
+            if (page.icon == Icons.chat_bubble_outline_rounded)
+              Container(
+                width: 96,
+                height: 96,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: Colors.white.withOpacity(0.15),
+                  border: Border.all(
+                    color: Colors.white.withOpacity(0.35),
+                    width: 2,
+                  ),
+                ),
+                alignment: Alignment.center,
+                child: const Text(
+                  'C',
+                  style: TextStyle(
+                    fontFamily: 'Inter',
+                    fontSize: 52,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                  ),
+                ),
+              )
+            else
+              Container(
+                width: 96,
+                height: 96,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: Colors.white.withOpacity(0.15),
+                ),
+                alignment: Alignment.center,
+                child: Icon(page.icon, size: 52, color: Colors.white),
+              ),
             const SizedBox(height: 40),
             Text(
               page.title,
               style: const TextStyle(
+                fontFamily: 'Inter',
                 fontSize: 28,
                 fontWeight: FontWeight.bold,
                 color: Colors.white,
@@ -195,6 +231,7 @@ class _PageContent extends StatelessWidget {
             Text(
               page.description,
               style: const TextStyle(
+                fontFamily: 'Inter',
                 fontSize: 16,
                 color: Colors.white70,
                 height: 1.5,

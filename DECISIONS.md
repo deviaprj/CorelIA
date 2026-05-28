@@ -695,4 +695,46 @@ Le mode vocal V16 (half-duplex tour-par-tour) avait une régression bloquante : 
 
 ---
 
-*Dernière mise à jour : 2026-05-26*
+## ADR-019 : Design System Cofely — Source de Vérité Unique
+
+**Date** : 2026-05-28
+**Statut** : Accepté
+
+### Contexte
+Le projet avait deux identités visuelles en coexistence : l'ancien thème AironBot (`#6C63FF` violet, `Icons.auto_awesome`) visible sur le login screen et l'onboarding, et le nouveau thème Cofely (`#003F5C` bleu foncé, logo "C") visible sur les écrans principaux (chat, settings). Les icônes Android et web étaient encore les icônes Flutter génériques.
+
+### Décision
+**Centralisation complète du design system dans `lib/app/cofely_theme.dart`** :
+- `CofelyTokens` class avec constantes statiques : `primary`, `accent`, `onAccent`, `avatarGradient`, `userBubble`, `botBubble`
+- `lightTheme` et `darkTheme` via `ThemeData` Material 3
+- Zéro hardcoded `#6C63FF` dans le codebase
+
+**Refonte login screen** : dégradé en-tête sombre + carte formulaire blanche arrondie — pattern "hero header + card" plus moderne que le formulaire centré à plat.
+
+**Refonte onboarding** : gradients bleus Cofely (3 palettes : sombre/medium/accent). Page 1 avec logo "C" textuel dans cercle semi-transparent au lieu d'une icône Material générique.
+
+**Génération icônes via Python PIL** :
+- Script reproductible dans l'historique : `make_gradient_bg()` → `draw_c_on()` → masque rounded_rectangle ou ellipse
+- Icônes maskable avec padding 10% safe zone (compatible Android adaptive icons)
+- Les nouvelles icônes coexistent avec `mipmap-anydpi-v26/` (adaptive icon XML) — ne pas supprimer les XML adaptatifs si présents
+
+### Règles de cohérence à respecter
+- Toujours utiliser `CofelyTokens.primary` / `CofelyTokens.accent` — jamais de valeur hexadécimale hardcodée dans les widgets
+- `DialogTheme` (PAS `DialogThemeData`) pour Material 3
+- `Chip` n'a pas de paramètre `tooltip` en Flutter 3.x
+- Import chemin relatif : `'../../../app/cofely_theme.dart'` (ajuster selon profondeur)
+
+### Alternatives Considérées
+- `ThemeExtension` Flutter (plus flexible mais complexité accrue)
+- Constantes inline dans chaque widget (anti-pattern, maintenance impossible)
+- Package de design system externe (sur-ingénierie pour ce projet)
+
+### Conséquences
+- ✅ Cohérence visuelle totale sur tous les écrans (login, onboarding, chat, settings, vocal)
+- ✅ Icônes launcher Android et favicon web en cohérence avec l'identité Cofely
+- ✅ Un seul endroit pour modifier les couleurs brand
+- ⚠️ Script Python de génération d'icônes non versionné (à extraire dans `scripts/`)
+
+---
+
+*Dernière mise à jour : 2026-05-28*

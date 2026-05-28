@@ -7,8 +7,9 @@ import 'tts_emotion.dart';
 /// Exemple d'entrée : "[joyeux] Salut ! Comment ça va aujourd'hui ?"
 /// Sortie : EmotionParseResult(emotion: TtsEmotion.joyful, cleanText: "Salut ! Comment ça va aujourd'hui ?")
 class EmotionParser {
-  /// Mapping balise → émotion.
+  /// Mapping balise → émotion (français ET anglais).
   static const _tagToEmotion = {
+    // ── Français ──────────────────────────────────────────────────────────
     '[joyeux]': TtsEmotion.joyful,
     '[heureux]': TtsEmotion.joyful,
     '[content]': TtsEmotion.joyful,
@@ -27,6 +28,24 @@ class EmotionParser {
     '[calme]': TtsEmotion.neutral,
     '[amical]': TtsEmotion.friendly,
     '[chaleureux]': TtsEmotion.friendly,
+    // ── Anglais (généré par certains LLM) ────────────────────────────────
+    '[excited]': TtsEmotion.excited,
+    '[enthusiastic]': TtsEmotion.excited,
+    '[joyful]': TtsEmotion.joyful,
+    '[happy]': TtsEmotion.joyful,
+    '[cheerful]': TtsEmotion.joyful,
+    '[amused]': TtsEmotion.joyful,
+    '[sad]': TtsEmotion.sad,
+    '[melancholic]': TtsEmotion.sad,
+    '[serious]': TtsEmotion.serious,
+    '[neutral]': TtsEmotion.neutral,
+    '[calm]': TtsEmotion.neutral,
+    '[friendly]': TtsEmotion.friendly,
+    '[warm]': TtsEmotion.friendly,
+    '[angry]': TtsEmotion.serious,
+    '[confused]': TtsEmotion.neutral,
+    '[laughing]': TtsEmotion.joyful,
+    '[thinking]': TtsEmotion.serious,
   };
 
   /// Pattern regex pour capturer toutes les balises entre crochets.
@@ -123,6 +142,24 @@ class EmotionParser {
     '[calme]': '😌',
     '[amical]': '🤗',
     '[chaleureux]': '🔥',
+    // Anglais
+    '[excited]': '🤩',
+    '[enthusiastic]': '🎉',
+    '[joyful]': '😊',
+    '[happy]': '😊',
+    '[cheerful]': '😄',
+    '[amused]': '😄',
+    '[sad]': '😢',
+    '[melancholic]': '😔',
+    '[serious]': '😐',
+    '[neutral]': '',
+    '[calm]': '😌',
+    '[friendly]': '🤗',
+    '[warm]': '🤗',
+    '[angry]': '😠',
+    '[confused]': '🤔',
+    '[laughing]': '😂',
+    '[thinking]': '🤔',
   };
 
   /// Remplace les balises émotionnelles par des emojis pour l'affichage UI.

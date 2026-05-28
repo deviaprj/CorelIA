@@ -22,18 +22,18 @@ class EmotionTtsConfig {
 }
 
 /// Mapping émotion → config TTS.
-/// Valeurs calibrees pour Google Speech Services (flutter_tts).
-/// 0.5 = lent, 0.6 = agreable, 0.7 = rapide, 1.0 = vitesse normale.
-/// Configs calibrees pour Google Speech Services (flutter_tts).
-/// 0.5 = lent, 0.6 = agreable, 0.7 = rapide, 1.0 = vitesse normale.
+/// Valeurs calibrées pour Google Speech Services (flutter_tts).
+/// Base : 0.42 (speechRate init). Emotion rates relatifs :
+///   neutral=0.52, friendly=0.54, joyful=0.58, excited=0.64.
+/// Avec chunks de 300 chars, le moteur TTS gère mieux la prosodie interne.
 const emotionTtsConfigs = <TtsEmotion, EmotionTtsConfig>{
-  TtsEmotion.neutral: EmotionTtsConfig(rate: 0.58, pitch: 1.00),
-  TtsEmotion.joyful: EmotionTtsConfig(rate: 0.64, pitch: 1.08),
-  TtsEmotion.sad: EmotionTtsConfig(rate: 0.52, pitch: 0.92),
-  TtsEmotion.serious: EmotionTtsConfig(rate: 0.55, pitch: 0.96),
-  TtsEmotion.excited: EmotionTtsConfig(rate: 0.70, pitch: 1.12),
-  TtsEmotion.cheerful: EmotionTtsConfig(rate: 0.62, pitch: 1.06),
-  TtsEmotion.friendly: EmotionTtsConfig(rate: 0.60, pitch: 1.04),
+  TtsEmotion.neutral:  EmotionTtsConfig(rate: 0.52, pitch: 1.00),
+  TtsEmotion.joyful:   EmotionTtsConfig(rate: 0.58, pitch: 1.06),
+  TtsEmotion.sad:      EmotionTtsConfig(rate: 0.46, pitch: 0.92),
+  TtsEmotion.serious:  EmotionTtsConfig(rate: 0.49, pitch: 0.96),
+  TtsEmotion.excited:  EmotionTtsConfig(rate: 0.64, pitch: 1.10),
+  TtsEmotion.cheerful: EmotionTtsConfig(rate: 0.56, pitch: 1.04),
+  TtsEmotion.friendly: EmotionTtsConfig(rate: 0.54, pitch: 1.02),
 };
 
 /// Configs calibrees pour Microsoft Edge TTS.

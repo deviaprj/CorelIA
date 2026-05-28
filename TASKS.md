@@ -1,6 +1,102 @@
 # TASKS.md — Suivi Corely
 
-Dernière mise à jour : 2026-05-26 — Session V18 : Fix vocal + slash commands universels
+Dernière mise à jour : 2026-05-28 — Session V20 : Thème Cofely unifié + nouvelles icônes
+
+## Terminé — Session 2026-05-28 — Thème Cofely Unifié + Icônes + Login/Onboarding ✅
+
+### Problèmes résolus
+
+1. **Login screen — ancien thème violet #6C63FF**
+   - Refonte complète du `build()` : dégradé sombre `#001218 → #003F5C` en en-tête, logo cercle gradient "C" 72px, titre "Corely" Inter bold
+   - Carte blanche arrondie (`BorderRadius vertical top 28px`) avec le formulaire
+   - `FilledButton` `CofelyTokens.primary`, badge info `CofelyTokens.accent`, toggle `CofelyTokens.primary`
+   - Plus aucun `Color(0xFF6C63FF)` dans le fichier
+
+2. **Onboarding screen — gradients violets/cyan/vert**
+   - Page 1 : `[#001218, #003F5C]` + logo "C" dans cercle semi-transparent au lieu de `Icons.auto_awesome`
+   - Page 2 : `[#003F5C, #0078A8]`
+   - Page 3 : `[#00263A, #58B4D1]` (accent Cofely)
+   - Icônes placées dans des cercles `white.withOpacity(0.15)`, police `Inter`
+
+3. **Icônes Android — ancien logo générique**
+   - 10 fichiers PNG générés via Python PIL (mdpi/hdpi/xhdpi/xxhdpi/xxxhdpi × square+round)
+   - Design : fond dégradé diagonal `#00121E → #003F5C`, arc "C" blanc épais centré + halo accent
+
+4. **Icônes Web/Extension — ancien favicon générique**
+   - 9 icônes web PWA + 5 icônes extension Chrome
+   - Même design Cofely que les icônes Android
+
+### Fichiers modifiés / créés
+- `lib/app/cofely_theme.dart` ← nouveau fichier (design system complet)
+- `lib/features/auth/presentation/login_screen.dart` — build() réécrit entièrement
+- `lib/features/onboarding/presentation/onboarding_screen.dart` — `_pages` + `_PageContent` refaits
+- `android/app/src/main/res/mipmap-*/` — 10 fichiers PNG icônes Android
+- `web/favicon.png`, `web/icons/*` — 14 fichiers icônes web/extension
+
+---
+
+## TODO next-session (2026-05-29) — Priorité CRITIQUE
+
+### 1. Tester le nouveau thème sur Xiaomi 12
+- [ ] Login screen s'affiche en thème Cofely (bleu sombre, pas violet)
+- [ ] Onboarding en thème Cofely (3 pages avec dégradés bleus)
+- [ ] Icônes launcher Android affichent le "C" Cofely (peut nécessiter désinstall/réinstall)
+- [ ] Icônes rondes sur lanceurs Android modernes
+
+### 2. Tester le mode vocal (5 tours complets)
+- [ ] STT redémarre après chaque réponse sans blocage
+- [ ] TTS fluide : pas de sources/asterisques/tirets lus
+- [ ] Barge-in > 3 mots → TTS s'arrête, Corely répond
+
+### 3. Déployer le backend cloud (action utilisateur requise)
+- [ ] `bash scripts/deploy_backend.sh` sur machine avec internet
+- [ ] Vérifier `api.aironbot.app` répond sur `/health`
+
+---
+
+## Terminé — Session 2026-05-27 — TTS Anti-Saccade + DocGen PNG ✅
+
+### Problèmes résolus
+
+1. **TTS voix saccadée/robotique — cause racine identifiée et corrigée**
+   - **Cause 1 (critique)** : `maxChunkLength = 120` découpait presque toutes les phrases françaises (avg 140-200 chars) via `trimmed.substring(i, end)` **au milieu d'un mot**.
+   - **Cause 2** : Pause artificielle de 250ms **entre chaque chunk** créait un rythme clairement robotique.
+   - **Fix** : Réécriture complète de `_splitForNaturalSpeech()` — chunks max 300 chars, découpe sur limites de phrases (`.!?`) en priorité, puis clauses (`,;`), puis mots. **Jamais au milieu d'un mot.**
+   - **Nouveaux paramètres** : `_speechRate` 0.45 → 0.42, `_pitch` 1.15 → 1.10, pause inter-phrase 250ms → 60ms, pause paragraphe 500ms → 350ms.
+   - **emotionTtsConfigs** : toutes les rates réduites ~10% pour correspondre au nouveau rate de base 0.42.
+
+2. **DocGen PNG format** : `_toImage()` fetchait toujours du JPEG depuis Pollinations, ignorant le paramètre `format`. Fix : `&format=jpeg|png` ajouté à l'URL Pollinations.
+
+### Fichiers modifiés
+- `lib/features/chat/presentation/tts_natural_service.dart` — Réécriture `_splitForNaturalSpeech` + nouvelle méthode `_splitLongSentence`, paramètres TTS, suppression `import 'dart:math'`
+- `lib/features/chat/presentation/tts_emotion.dart` — Réduction ~10% des rates dans `emotionTtsConfigs`
+- `lib/features/chat/data/document_generation_service.dart` — Fix `_toImage()` format Pollinations
+
+### Résultat tests
+- **18/18 tests TTS** (`tts_natural_service_test.dart`) passés ✅
+- **508/511 tests chat** passés (+3 échecs pré-existants `phonetic_liaison`) ✅
+
+---
+
+## TODO next-session (2026-05-28) — Priorité CRITIQUE
+
+### 1. Tester mode vocal V16 fixé sur Xiaomi 12 (device requis)
+- [ ] 5 tours complets : aucun blocage, micro redémarre à chaque fois
+- [ ] TTS naturel : voix fluide sans saccades, pas de sources/asterisques/tirets lus à voix haute
+- [ ] Barge-in : parler pendant que Corely parle (> 3 mots) → TTS s'arrête, Corely répond
+- [ ] Pas de monologue : Corely ne doit pas répondre à sa propre voix
+
+### 2. Tester slash commands extension
+- [ ] `/links video` sur YouTube → backend extrait les vidéos
+- [ ] `/links image` sur n'importe quel site → scraper universel
+- [ ] `/download` sans argument après `/links` → télécharge la liste
+- [ ] `/download <url>` sur une vidéo YouTube directe
+
+### 3. Déployer le backend cloud (action utilisateur requise)
+- [ ] `bash scripts/deploy_backend.sh` sur machine avec internet
+- [ ] Vérifier `api.aironbot.app` répond sur `/health`, `/download_media`, `/crawl`
+
+---
 
 ## Terminé — Session 2026-05-26 — Fix Vocal V16 + Slash Commands Universels + Mobile Restriction ✅
 

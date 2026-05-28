@@ -136,6 +136,49 @@ firebase functions:secrets:set STRIPE_WEBHOOK_SECRET
 
 ## Sessions Récentes
 
+### Session 2026-05-28 — Thème Cofely Unifié + Icônes V20
+
+#### Refonte thème : login_screen + onboarding
+**Problème** : Login screen et onboarding screen utilisaient encore `#6C63FF` (violet AironBot), pas le thème Cofely.
+**Fix login** : `build()` entièrement réécrit — en-tête dégradé `#001218→#003F5C`, logo "C" cercle gradient 72px, carte blanche arrondie, `FilledButton` en `CofelyTokens.primary`.
+**Fix onboarding** : `_pages` avec nouveaux gradients bleus Cofely, `_PageContent` : logo "C" pour page 1, icônes dans cercles semi-transparents pour pages 2-3.
+
+#### Génération icônes Python PIL
+**Design** : fond dégradé diagonal `#00121E → #003F5C`, arc "C" blanc épais centré, halo accent `#58B4D1`.
+**Script** : `make_gradient_bg()` pixel-par-pixel, `draw_c_on()` avec superposition d'arcs, `make_icon()` avec masque rounded_rectangle ou ellipse.
+**Produit** : 10 fichiers Android (mipmap-*) + 9 icônes web PWA + 5 extension Chrome.
+**Règle** : toujours vérifier `img.getpixel()` centre + zone "C" après génération pour s'assurer que le design est correct.
+
+#### CofelyTokens — design system source de vérité
+- `primary = #003F5C`, `accent = #58B4D1`, `avatarGradient` LinearGradient const
+- Toujours importer `'../../../app/cofely_theme.dart'` (chemin relatif selon profondeur)
+- `DialogTheme` (PAS `DialogThemeData`), `Chip` sans `tooltip`
+
+### Session 2026-05-27 — TTS Anti-Saccade + DocGen PNG
+
+#### Bug Critique : Voix TTS saccadée/robotique
+**Cause racine 1** : `_splitForNaturalSpeech()` découpait les phrases à 120 chars via `substring(i, end)` — coupe **au milieu d'un mot** sur presque toutes les phrases françaises (avg 140-200 chars).
+**Cause racine 2** : Pause de 250ms entre **chaque chunk** → rythme robotique mécanique.
+**Solution** : Réécriture complète de `_splitForNaturalSpeech()` + nouvelle méthode `_splitLongSentence()` :
+- Chunks max 300 chars (`_maxTtsChunk = 300`)
+- Priorité : limites de phrases (`.!?`) → clauses (`,;`) → mots (jamais mid-word)
+- Pause inter-phrase : 250ms → **60ms**, paragraphe : 500ms → **350ms**
+- `_speechRate` : 0.45 → **0.42**, `_pitch` : 1.15 → **1.10**
+- `emotionTtsConfigs` : toutes les rates réduites ~10%
+**Fichiers** : `tts_natural_service.dart`, `tts_emotion.dart`
+**Règle** : si un bug TTS est patché 2+ fois sans résultat → réécriture complète de la méthode de découpage
+
+#### Bug DocGen : PNG toujours en JPEG
+**Cause** : `_toImage()` ignorait le paramètre `format`, fetchait toujours JPEG de Pollinations.
+**Fix** : Ajout `&format=jpeg|png` dans l'URL Pollinations.
+**Fichier** : `document_generation_service.dart`
+
+#### État tests
+- 18/18 tests TTS passés ✅
+- 508/511 tests chat passés (+3 pré-existants phonetic_liaison) ✅
+
+---
+
 ### Session 2026-05-04
 
 #### Bug Critique: Mode Vocal Se Coupe Instantanément

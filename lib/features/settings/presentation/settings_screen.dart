@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../../../app/cofely_theme.dart';
 import '../../../core/language/language_service.dart';
 import '../../../core/providers/app_providers.dart';
 import '../../../core/providers/firebase_providers.dart';
@@ -84,7 +85,30 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final isPro = ref.watch(isProProvider).valueOrNull ?? false;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Paramètres')),
+      // AppBar Cofely : logo « C » dégradé en leading, couleurs du thème
+      appBar: AppBar(
+        title: const Text('Paramètres'),
+        leading: Padding(
+          padding: const EdgeInsets.all(10),
+          child: Container(
+            decoration: const BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: CofelyTokens.avatarGradient,
+            ),
+            child: const Center(
+              child: Text(
+                'C',
+                style: TextStyle(
+                  color: CofelyTokens.onPrimary,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 13,
+                  fontFamily: 'Inter',
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
       body: ListView(
         children: [
           // ── Compte ──────────────────────────────────────────────────────

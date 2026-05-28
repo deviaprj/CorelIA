@@ -7,6 +7,7 @@ import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../domain/message.dart';
 import '../../../core/constants.dart';
+import '../../../app/cofely_theme.dart';
 import 'voice_service.dart';
 import 'emotion_parser.dart';
 
@@ -37,11 +38,28 @@ class ChatBubble extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           if (!isUser) ...[
-            CircleAvatar(
-              radius: 16,
-              backgroundColor: colorScheme.secondaryContainer,
-              child: Icon(Icons.auto_awesome,
-                  size: 16, color: colorScheme.secondary),
+            // Avatar bot : cercle 36 px, dégradé Cofely, lettre « C »
+            Semantics(
+              label: 'Assistant Cofely',
+              child: Container(
+                width: CofelyTokens.avatarSize,
+                height: CofelyTokens.avatarSize,
+                decoration: const BoxDecoration(
+                  shape: BoxShape.circle,
+                  gradient: CofelyTokens.avatarGradient,
+                ),
+                child: const Center(
+                  child: Text(
+                    'C',
+                    style: TextStyle(
+                      color: CofelyTokens.onPrimary,
+                      fontWeight: FontWeight.bold,
+                      fontSize: CofelyTokens.avatarFontSz,
+                      fontFamily: 'Inter',
+                    ),
+                  ),
+                ),
+              ),
             ),
             const SizedBox(width: 8),
           ],
@@ -57,15 +75,20 @@ class ChatBubble extends StatelessWidget {
                         MediaQuery.of(context).size.width * 0.78,
                   ),
                   decoration: BoxDecoration(
+                    // Bulles user : fond bleu accent / Bot : fond blanc
                     color: isUser
-                        ? colorScheme.primary
-                        : colorScheme.surfaceContainerHighest,
+                        ? CofelyTokens.userBubble
+                        : CofelyTokens.botBubble,
                     borderRadius: BorderRadius.only(
-                      topLeft: const Radius.circular(16),
-                      topRight: const Radius.circular(16),
-                      bottomLeft: Radius.circular(isUser ? 16 : 4),
-                      bottomRight: Radius.circular(isUser ? 4 : 16),
+                      topLeft: const Radius.circular(CofelyTokens.bubbleRadius),
+                      topRight: const Radius.circular(CofelyTokens.bubbleRadius),
+                      bottomLeft: Radius.circular(
+                          isUser ? CofelyTokens.bubbleRadius : CofelyTokens.tailRadius),
+                      bottomRight: Radius.circular(
+                          isUser ? CofelyTokens.tailRadius : CofelyTokens.bubbleRadius),
                     ),
+                    // Ombre légère : 0 2px 8px rgba(0,0,0,0.10)
+                    boxShadow: CofelyTokens.bubbleShadow,
                   ),
                   child: message.isStreaming && message.content.isEmpty
                       ? const Padding(
@@ -116,8 +139,9 @@ class ChatBubble extends StatelessWidget {
                                   if (message.content.isNotEmpty)
                                     Text(
                                       EmotionParser.toUiText(message.content),
-                                      style: TextStyle(
-                                        color: colorScheme.onPrimary,
+                                      style: const TextStyle(
+                                        // Texte user : #003F5C sur #58B4D1 → contrast ~4.4:1 (WCAG AA)
+                                        color: CofelyTokens.onAccent,
                                       ),
                                     ),
                                 ],
@@ -138,13 +162,24 @@ class ChatBubble extends StatelessWidget {
                                   }
                                 },
                                 styleSheet: MarkdownStyleSheet(
+                                  // Texte bot sur blanc → contrast 14.7:1 (WCAG AAA)
+                                  p: const TextStyle(
+                                    color: CofelyTokens.onSurface,
+                                    fontSize: 15,
+                                    height: 1.5,
+                                  ),
+                                  a: const TextStyle(
+                                    color: CofelyTokens.primary,
+                                    decoration: TextDecoration.underline,
+                                  ),
                                   codeblockDecoration: BoxDecoration(
-                                    color: colorScheme.surface,
+                                    color: CofelyTokens.chatBg,
                                     borderRadius: BorderRadius.circular(8),
                                   ),
                                   code: const TextStyle(
                                     fontFamily: 'monospace',
                                     fontSize: 13,
+                                    color: CofelyTokens.primary,
                                   ),
                                 ),
                               ),
@@ -395,13 +430,11 @@ class _TypingIndicatorState extends State<_TypingIndicator>
             child: Transform.translate(
               offset: Offset(0, -_anims[i].value),
               child: Container(
-                width: 6,
-                height: 6,
-                decoration: BoxDecoration(
-                  color: Theme.of(context)
-                      .colorScheme
-                      .onSurfaceVariant
-                      .withOpacity(0.6),
+                width: 7,
+                height: 7,
+                decoration: const BoxDecoration(
+                  // Points rebondissants couleur accent Cofely
+                  color: CofelyTokens.accent,
                   shape: BoxShape.circle,
                 ),
               ),
