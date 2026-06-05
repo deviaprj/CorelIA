@@ -1,0 +1,17 @@
+
+ ⛅️ wrangler 4.98.0
+───────────────────
+Total Upload: 112.73 KiB / gzip: 27.36 KiB
+Worker Startup Time: 17 ms
+Your Worker has access to the following bindings:
+Binding                                                                 Resource                  
+env.AI                                                                  AI                        
+env.ENVIRONMENT ("production")                                          Environment Variable      
+env.CORS_ORIGINS ("chrome-extension://*,https://corelia...")           Environment Variable      
+env.DEFAULT_LLM_MODEL ("@cf/meta/llama-3-8b-instruct")                  Environment Variable      
+env.DEEPSEEK_API_URL ("https://api.deepseek.com/v1/chat/comp...")       Environment Variable      
+
+Uploaded corelia-api (9.93 sec)
+Deployed corelia-api triggers (5.44 sec)
+  https://corelia-api.cloudflare-paramedic156.workers.dev
+Current Version ID: 001827d4-ba66-4cad-8262-050828ad9b1b

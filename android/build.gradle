@@ -1,0 +1,29 @@
+// Expose flutter SDK versions globally pour les plugins tiers
+// qui utilisent flutter.compileSdkVersion dans leur build.gradle
+ext {
+    flutter = [
+        compileSdkVersion: 35,
+        targetSdkVersion : 35,
+        minSdkVersion    : 26,
+        ndkVersion       : '27.0.12077973',
+    ]
+}
+
+allprojects {
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+rootProject.buildDir = '../build'
+subprojects {
+    project.buildDir = "${rootProject.buildDir}/${project.name}"
+}
+subprojects {
+    project.evaluationDependsOn(':app')
+}
+
+tasks.register("clean", Delete) {
+    delete rootProject.buildDir
+}

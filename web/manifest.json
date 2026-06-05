@@ -1,0 +1,69 @@
+{
+  "manifest_version": 3,
+  "name": "Corely",
+  "short_name": "Corely",
+  "version": "1.0.0",
+  "description": "Assistant IA Corely — chat, voix, projets.",
+  "icons": {
+    "16":  "icons/icon-16.png",
+    "48":  "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+
+  "action": {
+    "default_icon": "icons/icon-48.png",
+    "default_popup": "index.html",
+    "default_title": "Corely"
+  },
+
+  "side_panel": {
+    "default_path": "index.html"
+  },
+
+  "background": {
+    "service_worker": "background.js"
+  },
+
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content_script.js", "dom_actions.js"],
+      "run_at": "document_idle"
+    }
+  ],
+
+  "permissions": [
+    "storage",
+    "sidePanel",
+    "contextMenus",
+    "scripting",
+    "activeTab",
+    "tabs",
+    "downloads",
+    "offscreen"
+  ],
+
+  "host_permissions": [
+    "<all_urls>",
+    "https://api.deepseek.com/*",
+    "https://openrouter.ai/*",
+    "https://*.firebaseio.com/*",
+    "https://*.googleapis.com/*",
+    "https://serpapi.com/*",
+    "https://api.openweathermap.org/*",
+    "https://lite.duckduckgo.com/*",
+    "https://html.duckduckgo.com/*",
+    "https://api.duckduckgo.com/*"
+  ],
+
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'; img-src 'self' data: https:;"
+  },
+
+  "web_accessible_resources": [
+    {
+      "resources": ["*.js", "*.dart.js", "*.wasm", "assets/**", "canvaskit/**", "dom_actions.js", "offscreen.html", "offscreen.js"],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}

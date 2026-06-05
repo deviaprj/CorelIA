@@ -1,0 +1,60 @@
+include: package:very_good_analysis/analysis_options.yaml
+
+analyzer:
+  exclude:
+    - "**/*.g.dart"
+    - "**/*.freezed.dart"
+    - "lib/firebase_options.dart"
+  errors:
+    missing_required_param: error
+    missing_return: error
+    todo: ignore
+
+linter:
+  rules:
+    - always_declare_return_types
+    - always_put_required_named_parameters_first
+    - annotate_overrides
+    - avoid_empty_else
+    - avoid_print: false
+    - avoid_relative_lib_imports
+    - avoid_returning_null_for_future
+    - avoid_types_as_parameter_names
+    - await_only_futures
+    - camel_case_types
+    - cancel_subscriptions
+    - close_sinks
+    - comment_references
+    - constant_identifier_names
+    - curly_braces_in_flow_control_structures
+    - directives_ordering
+    - empty_catches
+    - empty_constructor_bodies
+    - empty_statements
+    - file_names
+    - hash_and_equals
+    - library_names
+    - library_prefixes
+    - no_duplicate_case_values
+    - non_constant_identifier_names
+    - omit_local_variable_types
+    - prefer_const_constructors
+    - prefer_const_declarations
+    - prefer_final_fields
+    - prefer_final_locals
+    - prefer_is_empty
+    - prefer_is_not_empty
+    - prefer_single_quotes
+    - prefer_typing_uninitialized_variables
+    - sort_constructors_first
+    - sort_unnamed_constructors_first
+    - test_types_in_equals
+    - throw_in_finally
+    - type_init_formals
+    - unnecessary_brace_in_string_interps
+    - unnecessary_const
+    - unnecessary_new
+    - unnecessary_null_in_if_null_operators
+    - unnecessary_this
+    - unrelated_type_equality_checks
+    - valid_regexps

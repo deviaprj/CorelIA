@@ -1,0 +1,39 @@
+{
+  "$schema": "https://raw.githubusercontent.com/cloudflare/workers-sdk/main/packages/wrangler/config-schema.json",
+  "name": "aironbot-api",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-06-01",
+  "compatibility_flags": ["nodejs_compat"],
+
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 0.1
+  },
+
+  "ai": {
+    "binding": "AI"
+  },
+
+  // Routes — décommentez après avoir configuré le DNS api.aironbot.app
+  // "routes": [
+  //   {
+  //     "pattern": "api.aironbot.app/*",
+  //     "zone_id": "${CF_ZONE_ID}"
+  //   }
+  // ],
+
+  // Rate limiting via Cloudflare WAF (dashboard.cloudflare.com → Security → WAF → Rate limiting rules)
+  // Le code in-code (rate_limit.ts) fournit un fallback par Worker.
+
+  "vars": {
+    "ENVIRONMENT": "production",
+    "CORS_ORIGINS": "chrome-extension://*,https://aironbot.app,http://localhost:*",
+    "DEFAULT_LLM_MODEL": "@cf/meta/llama-3.2-11b-vision-instruct",
+    "DEEPSEEK_API_URL": "https://api.deepseek.com/v1/chat/completions"
+  }
+
+  // Secrets à définir via `npx wrangler secret put <NAME>` :
+  //   DEEPSEEK_API_KEY   — DeepSeek API key
+  //   OPENROUTER_API_KEY — OpenRouter API key
+  //   API_SECRET_KEY     — Shared secret for Flutter client auth
+}

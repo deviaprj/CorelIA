@@ -1,0 +1,28 @@
+{
+  "name": "corelia-worker",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "dev:staging": "wrangler dev --env staging",
+    "deploy": "wrangler deploy",
+    "deploy:staging": "wrangler deploy --env staging",
+    "lint": "eslint src/",
+    "typecheck": "tsc --noEmit",
+    "secret:put": "wrangler secret put",
+    "tail": "wrangler tail"
+  },
+  "dependencies": {
+    "hono": "^4.4.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250501.0",
+    "@types/node": "^20.14.0",
+    "typescript": "^5.5.0",
+    "wrangler": "^4.3.0",
+    "eslint": "^9.5.0",
+    "@typescript-eslint/eslint-plugin": "^7.13.0",
+    "@typescript-eslint/parser": "^7.13.0"
+  }
+}

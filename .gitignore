@@ -1,0 +1,82 @@
+# Flutter / Dart
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+build/
+*.g.dart
+*.freezed.dart
+
+# Environment & Secrets
+.env
+.env.local
+.env.staging
+.env.production
+google-services.json
+GoogleService-Info.plist
+lib/core/firebase_options.dart
+lib/firebase_options.dart
+
+# IDE
+.idea/
+.vscode/
+*.iml
+*.ipr
+*.iws
+.DS_Store
+Thumbs.db
+
+# Android
+android/.gradle/
+android/captures/
+android/key.properties
+*.keystore
+*.jks
+
+# iOS
+ios/Pods/
+ios/.symlinks/
+ios/Flutter/flutter_export_environment.sh
+
+# Coverage
+coverage/
+lcov.info
+
+# Logs
+*.log
+
+# Build artifacts
+*.apk
+*.aab
+*.ipa
+*.zip
+corel_ia_extension_*.zip
+
+# Node (functions)
+functions/node_modules/
+functions/lib/
+
+# Python (backend)
+backend/.env
+backend/venv/
+backend/.venv/
+backend/__pycache__/
+backend/**/__pycache__/
+backend/*.pyc
+
+# macOS
+.DS_Store
+
+# Playwright MCP
+.playwright-mcp/
+
+# Cloudflare Worker
+cloudflare-worker/node_modules/
+cloudflare-worker/dist/
+cloudflare-worker/.wrangler/
+cloudflare-worker/worker-configuration.d.ts
+.env
+.env
+cloudflare-worker/.dev.vars
+android/app/google-services.json
+ios/Runner/GoogleService-Info.plist

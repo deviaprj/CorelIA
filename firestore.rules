@@ -1,0 +1,53 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── Utilisateurs ──────────────────────────────────────────────────────────
+    // Un utilisateur ne peut lire/écrire que SON propre document
+    match /users/{userId} {
+      allow read: if isSignedIn() && request.auth.uid == userId;
+      allow write: if isSignedIn() && request.auth.uid == userId;
+
+      // ── Préférences synchronisées ──────────────────────────────────────────
+      match /preferences/sync {
+        allow read: if isSignedIn() && request.auth.uid == userId;
+        allow write: if isSignedIn() && request.auth.uid == userId;
+      }
+    }
+
+    // ── Conversations ─────────────────────────────────────────────────────────
+    // Un utilisateur ne peut accéder qu'à SES conversations
+    match /conversations/{convId} {
+      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow update: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+
+      // ── Messages dans la conversation ─────────────────────────────────────
+      match /messages/{msgId} {
+        allow read: if isSignedIn() &&
+          get(/databases/$(database)/documents/conversations/$(convId)).data.userId == request.auth.uid;
+        allow create: if isSignedIn() &&
+          request.resource.data.conversationId == convId &&
+          get(/databases/$(database)/documents/conversations/$(convId)).data.userId == request.auth.uid;
+        allow update: if isSignedIn() &&
+          get(/databases/$(database)/documents/conversations/$(convId)).data.userId == request.auth.uid;
+        allow delete: if isSignedIn() &&
+          get(/databases/$(database)/documents/conversations/$(convId)).data.userId == request.auth.uid;
+      }
+    }
+
+    // ── Projets (Pro) ────────────────────────────────────────────────────────
+    match /projects/{projectId} {
+      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow update: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+    }
+
+    // ── Helper ────────────────────────────────────────────────────────────────
+    function isSignedIn() {
+      return request.auth != null;
+    }
+  }
+}
