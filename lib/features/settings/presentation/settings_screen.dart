@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../../app/cofely_theme.dart';
@@ -88,26 +89,34 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       // AppBar Cofely : logo « C » dégradé en leading, couleurs du thème
       appBar: AppBar(
         title: const Text('Paramètres'),
-        leading: Padding(
-          padding: const EdgeInsets.all(10),
-          child: Container(
-            decoration: const BoxDecoration(
-              shape: BoxShape.circle,
-              gradient: CofelyTokens.avatarGradient,
-            ),
-            child: const Center(
-              child: Text(
-                'C',
-                style: TextStyle(
-                  color: CofelyTokens.onPrimary,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 13,
-                  fontFamily: 'Inter',
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () => Navigator.of(context).pop(),
+        ),
+        actions: [
+          Padding(
+            padding: const EdgeInsets.only(right: 12),
+            child: Container(
+              width: 32,
+              height: 32,
+              decoration: const BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: CofelyTokens.avatarGradient,
+              ),
+              child: const Center(
+                child: Text(
+                  'C',
+                  style: TextStyle(
+                    color: CofelyTokens.onPrimary,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 13,
+                    fontFamily: 'Inter',
+                  ),
                 ),
               ),
             ),
           ),
-        ),
+        ],
       ),
       body: ListView(
         children: [
@@ -281,19 +290,62 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   }
 
   Future<void> _loadSystemPromptFromFile() async {
-    // Utiliser le package file_picker ou un InputElement web
-    // Pour l'instant, on utilise Clipboard comme fallback
-    final data = await Clipboard.getData(Clipboard.kTextPlain);
-    final text = data?.text;
-    if (text != null && text.isNotEmpty) {
-      _systemPromptController.text = text;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Collé depuis le presse-papier')),
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['txt', 'md', 'json', 'yaml', 'yml'],
+        withData: true,
+        withReadStream: false,
       );
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Presse-papier vide. Copiez le contenu d\'un fichier .txt ou .md puis appuyez sur Fichier.')),
-      );
+
+      if (result != null && result.files.isNotEmpty) {
+        final file = result.files.first;
+        if (file.bytes != null) {
+          final text = String.fromCharCodes(file.bytes!);
+          _systemPromptController.text = text;
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Chargé : ${file.name} (${text.length} caractères)')),
+            );
+          }
+        } else {
+          // Fallback : clipboard pour les plateformes sans accès direct
+          final data = await Clipboard.getData(Clipboard.kTextPlain);
+          final text = data?.text;
+          if (text != null && text.isNotEmpty) {
+            _systemPromptController.text = text;
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Collé depuis le presse-papier')),
+              );
+            }
+          }
+        }
+      }
+    } catch (e) {
+      // Fallback clipboard si file_picker échoue (ex: plateforme non supportée)
+      try {
+        final data = await Clipboard.getData(Clipboard.kTextPlain);
+        final text = data?.text;
+        if (text != null && text.isNotEmpty) {
+          _systemPromptController.text = text;
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Collé depuis le presse-papier')),
+            );
+          }
+        } else if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Aucun fichier sélectionné et presse-papier vide.')),
+          );
+        }
+      } catch (_) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Impossible de charger le fichier.')),
+          );
+        }
+      }
     }
   }
 

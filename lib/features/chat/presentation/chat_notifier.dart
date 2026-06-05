@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:share_plus/share_plus.dart';
 import '../data/ai_client.dart';
 import '../data/chat_api_service.dart';
+import '../data/worker_chat_client.dart';
 import '../data/model_router.dart';
 import '../data/firestore_chat_repository.dart';
 import '../data/mock_chat_repository.dart';
@@ -214,16 +215,41 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
     final bridge = ref.read(extensionBridgeProvider);
     final isExtension = bridge.isExtension;
 
-    // Mobile APK : seule /docgen est autorisée — toutes les autres commandes
-    // slash sont bloquées car elles nécessitent l'accès DOM ou le backend cloud.
-    if (!isExtension && parsed.command.name != 'docgen') {
+    // Commandes réservées à l'extension Chrome (DOM uniquement)
+    const extensionOnlyCommands = {
+      'scroll', 'open', 'click', 'fill', 'screenshot', 'back', 'forward',
+      'forms', 'tables', 'media', 'autofill', 'inspect', 'highlight',
+      'waitfor', 'monitor', 'translate', 'searchpage',
+    };
+    // Commandes universelles (mobile + extension, backend requis pour certaines)
+    const universalCommands = {
+      'download', 'links', 'pdf', 'summarize', 'extract', 'metadata',
+      'export', 'docgen', 'scrape', 'crawl',
+    };
+
+    if (!isExtension && extensionOnlyCommands.contains(parsed.command.name)) {
       await _persistAssistantMessage(
         '❌ Commande non disponible sur mobile\n\n'
-        'La commande `/${parsed.command.name}` n\'est pas disponible dans l\'application mobile.\n\n'
-        '💡 Installez l\'extension Chrome Corely pour utiliser les commandes slash (/links, /download, /screenshot, etc.).',
+        'La commande `/${parsed.command.name}` nécessite l\'extension Chrome.\n\n'
+        '💡 Installez l\'extension Chrome Corely pour utiliser les commandes '
+        'de navigation DOM (/scroll, /open, /click, /screenshot, etc.).',
       );
       state = state.copyWith(isStreaming: false);
       return true;
+    }
+
+    // Sur mobile, les commandes universelles nécessitent le backend
+    if (!isExtension && universalCommands.contains(parsed.command.name)) {
+      if (!AppConstants.isWorkerConfigured) {
+        await _persistAssistantMessage(
+          '❌ Backend non configuré\n\n'
+          'La commande `/${parsed.command.name}` nécessite le backend Cloudflare Worker.\n\n'
+          '💡 Configurez `BACKEND_URL` et `API_SECRET_KEY` dans `.env` puis redéployez.\n'
+          'Ou utilisez `/docgen` qui fonctionne sans backend.',
+        );
+        state = state.copyWith(isStreaming: false);
+        return true;
+      }
     }
 
     // Add natural language user message to conversation
@@ -734,10 +760,21 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
                 return true;
             }
           });
-          final links = filtered.map((m) => '- [${m['text'] ?? 'Lien'}](${m['url']})').join('\n');
+          final linksDisplay = filtered.toList();
+          final linksText = linksDisplay.map((m) => '- [${m['text'] ?? 'Lien'}](${m['url']})').join('\n');
 
-          if (links.isNotEmpty) {
-            await _persistAssistantMessage('Liens extraits de $url (filtre: $rawFilter):\n\n$links');
+          if (linksDisplay.isNotEmpty) {
+            // Sauvegarder les liens pour /download ultérieur
+            _lastLinksForDownload = linksDisplay
+                .map((m) => (m['url'] ?? '').toString())
+                .where((u) => u.isNotEmpty)
+                .toList(growable: false);
+            _lastLinksFilter = rawFilter.toLowerCase();
+            await _persistAssistantMessage(
+              'Liens extraits de $url (filtre: $rawFilter, ${linksDisplay.length} lien(s)) :\n\n'
+              '$linksText\n\n'
+              '💡 Lancez `/download` sans paramètre pour télécharger toute cette liste.',
+            );
             return true;
           }
         } catch (e) {
@@ -814,7 +851,12 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
         debugPrint('[Links] downloadMedia failed for $url: $e');
       }
 
-      await _persistAssistantMessage('Aucun lien trouvé sur $url (filtre: $rawFilter).');
+      await _persistAssistantMessage(
+        'Aucun lien trouvé sur $url (filtre: $rawFilter).\n\n'
+        '💡 **Note** : les pages de chaînes YouTube ne peuvent pas être extraites '
+        'par le Worker Cloudflare. Utilisez `/links` sur une page de vidéo '
+        'individuelle (ex: `/links https://www.youtube.com/watch?v=...`).',
+      );
       return true;
     }
 
@@ -1011,11 +1053,26 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
         '💡 Lancez `/download` sans paramètre pour télécharger toute cette liste.',
       );
     } else {
-      await _persistAssistantMessage(
-        '❌ Échec extraction liens\n\n'
-        'Erreur : ${result.error}\n\n'
-        '💡 Vérifiez que la page est chargée dans l\'extension.',
-      );
+      final errorMsg = result.error ?? 'Erreur inconnue';
+      if (errorMsg.contains('timed out') || errorMsg.contains('Timeout')) {
+        await _persistAssistantMessage(
+          '❌ Échec extraction liens\n\n'
+          'Erreur : Action timed out\n\n'
+          '💡 **Causes possibles :**\n'
+          '1. Aucune page web n\'est ouverte dans un onglet Chrome\n'
+          '2. La page n\'est pas encore chargée (attendez la fin du chargement)\n'
+          '3. L\'extension n\'est pas rechargée après le build\n\n'
+          '🔄 **Solution :** rechargez l\'extension dans chrome://extensions, '
+          'ouvrez une page web, patientez 2 secondes, puis réessayez.\n\n'
+          '💡 **Alternative :** `/links <url>` fonctionne sans DOM via le backend.',
+        );
+      } else {
+        await _persistAssistantMessage(
+          '❌ Échec extraction liens\n\n'
+          'Erreur : $errorMsg\n\n'
+          '💡 Vérifiez que la page est chargée dans l\'extension.',
+        );
+      }
       state = state.copyWith(isStreaming: false);
     }
     return true;
@@ -3175,7 +3232,28 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
       return _getVisionStream(history);
     }
 
-    // 2. Classifer la tâche et résoudre le modèle via ModelRouter
+    // 2. Cloudflare Worker — chemin primaire sécurisé (pas de clés API dans l'APK)
+    if (AppConstants.isWorkerConfigured) {
+      // Classifier la tâche pour choisir le meilleur modèle
+      final lastUserContent = history.lastWhere(
+        (m) => m['role'] == 'user',
+        orElse: () => {'content': ''},
+      )['content'];
+      final userText = (lastUserContent is String) ? lastUserContent : '';
+      final taskType = ModelRouter.classifyTaskEnhanced(
+        userText,
+        attachmentTypes: attachmentTypes,
+      );
+      final effectiveModel = modelOverride ?? state.selectedModel;
+      final entry = ModelRouter.resolveModel(taskType, userOverride: effectiveModel);
+      return _getWorkerStream(
+        history,
+        model: entry?.modelId,
+        isVoiceConversation: isVoiceConversation,
+      );
+    }
+
+    // 3. Fallback : appel direct aux API (développement local sans Worker)
     final lastUserContent = history.lastWhere(
       (m) => m['role'] == 'user',
       orElse: () => {'content': ''},
@@ -3202,6 +3280,64 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
       taskType: taskType,
       params: params,
     );
+  }
+
+  /// Stream via le Worker Cloudflare (chemin principal sécurisé).
+  /// Le Worker gère le routing LLM, le rate limiting et la sanitization.
+  Stream<String> _getWorkerStream(
+    List<Map<String, dynamic>> history, {
+    String? model,
+    bool isVoiceConversation = false,
+  }) async* {
+    debugPrint('[ChatNotifier] Routing via Cloudflare Worker (model: ${model ?? 'auto'})');
+    _lastUsedModelId = model ?? 'worker:auto';
+
+    final buffer = StringBuffer();
+    bool workerProducedContent = false;
+
+    try {
+      final workerClient = WorkerChatClient();
+      final stream = workerClient.streamChat(
+        messages: history,
+        model: model,
+        temperature: isVoiceConversation ? 0.95 : 0.7,
+        maxTokens: isVoiceConversation ? 2048 : 4096,
+      );
+
+      await for (final chunk in stream) {
+        buffer.write(chunk);
+        workerProducedContent = true;
+        yield chunk;
+      }
+      
+      // Si le Worker n'a produit aucun contenu, fallback direct
+      if (!workerProducedContent) {
+        debugPrint('[ChatNotifier] Worker returned empty content — falling back to direct API');
+        yield* _fallbackToDirectApiStream(history, isVoiceConversation: isVoiceConversation);
+      }
+    } on AiException catch (e) {
+      debugPrint('[ChatNotifier] Worker failed: $e — falling back to direct API');
+      yield* _fallbackToDirectApiStream(history, isVoiceConversation: isVoiceConversation);
+    }
+  }
+
+  /// Fallback : appel direct aux API DeepSeek/OpenRouter.
+  Stream<String> _fallbackToDirectApiStream(
+    List<Map<String, dynamic>> history, {
+    bool isVoiceConversation = false,
+  }) async* {
+    final taskType = TaskType.general;
+    final entry = ModelRouter.resolveModel(taskType);
+    if (entry != null) {
+      _lastUsedModelId = entry.modelId;
+      yield* _buildStreamForModel(
+        entry,
+        history,
+        isVoiceConversation: isVoiceConversation,
+        taskType: taskType,
+        params: ModelRouter.resolveParams(taskType),
+      );
+    }
   }
 
   /// Construit le stream pour un modèle donné selon son provider.

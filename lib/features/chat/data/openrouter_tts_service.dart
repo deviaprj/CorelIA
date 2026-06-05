@@ -23,7 +23,7 @@ class OpenRouterTtsService {
   static final _httpClient = http.Client();
 
   /// Synthétise du texte en audio via OpenRouter TTS.
-  /// Fallback : gpt-4o-mini-tts → kokoro-82m → null.
+  /// Chaîne : gpt-4o-mini-tts ($0.60/M) → Orpheus 3B ($7/M) → kokoro-82m ($0.62/M).
   static Future<Uint8List?> synthesize(
     String text, {
     TtsVoice voice = TtsVoice.nova,
@@ -32,7 +32,7 @@ class OpenRouterTtsService {
     final apiKey = AppConstants.openRouterApiKey;
     if (apiKey.isEmpty) return null;
 
-    // Essayer le modèle principal
+    // 1. gpt-4o-mini-tts — cheap, decent quality
     final result = await _callTtsApi(
       model: AppConstants.ttsModel,
       text: text,
@@ -42,8 +42,19 @@ class OpenRouterTtsService {
     );
     if (result != null) return result;
 
-    // Fallback kokoro-82m
-    debugPrint('[OpenRouterTTS] gpt-4o-mini-tts échoué, fallback kokoro-82m');
+    // 2. Orpheus 3B — natural, expressive voice
+    debugPrint('[OpenRouterTTS] gpt-4o-mini échoué, essai Orpheus 3B');
+    final premium = await _callTtsApi(
+      model: AppConstants.ttsModelPremium,
+      text: text,
+      voice: voice,
+      speed: speed,
+      apiKey: apiKey,
+    );
+    if (premium != null) return premium;
+
+    // 3. kokoro-82m — free output, basic
+    debugPrint('[OpenRouterTTS] Orpheus 3B échoué, fallback kokoro-82m');
     return _callTtsApi(
       model: AppConstants.ttsModelFallback,
       text: text,

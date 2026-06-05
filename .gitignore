@@ -69,3 +69,9 @@ backend/*.pyc
 
 # Playwright MCP
 .playwright-mcp/
+
+# Cloudflare Worker
+cloudflare-worker/node_modules/
+cloudflare-worker/dist/
+cloudflare-worker/.wrangler/
+cloudflare-worker/worker-configuration.d.ts

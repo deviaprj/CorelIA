@@ -31,6 +31,7 @@ String? _dartDefineValue(String key) => switch (key) {
   'STRIPE_PUBLIC_KEY' => const String.fromEnvironment('STRIPE_PUBLIC_KEY', defaultValue: ''),
   'SERPAPI_API_KEY' => const String.fromEnvironment('SERPAPI_API_KEY', defaultValue: ''),
   'OPENWEATHERMAP_API_KEY' => const String.fromEnvironment('OPENWEATHERMAP_API_KEY', defaultValue: ''),
+  'API_SECRET_KEY' => const String.fromEnvironment('API_SECRET_KEY', defaultValue: ''),
   _ => null,
 };
 
@@ -41,7 +42,7 @@ abstract class AppConstants {
   // ── IA ──────────────────────────────────────────────────────────────────────
   static String get deepSeekApiKey => _env('DEEPSEEK_API_KEY') ?? '';
   static String get openRouterApiKey => _env('OPENROUTER_API_KEY') ?? '';
-  static const deepSeekBaseUrl = 'https://api.deepseek.com/chat/completions';
+  static const deepSeekBaseUrl = 'https://api.deepseek.com/v1/chat/completions';
   static const openRouterBaseUrl = 'https://openrouter.ai/api/v1/chat/completions';
 
   // DeepSeek direct API models
@@ -60,9 +61,10 @@ abstract class AppConstants {
   static const arceeTrinityFree = 'arcee/trinity';
   static const ringFastFree = 'neversleep/ring-2.6-1t';
 
-  // OpenRouter TTS models
-  static const ttsModel = 'openai/gpt-4o-mini-tts';
-  static const ttsModelFallback = 'sillytavern/kokoro-82m';
+  // OpenRouter TTS models — chaîne: gpt-4o-mini → Orpheus 3B → kokoro
+  static const ttsModel = 'openai/gpt-4o-mini-tts';        // $0.60/M — cheap, good
+  static const ttsModelPremium = 'canopylabs/orpheus-3b';   // $7/M — natural, expressive
+  static const ttsModelFallback = 'sillytavern/kokoro-82m'; // $0.62/M — free output, basic
   static const openRouterTtsUrl = 'https://openrouter.ai/api/v1/audio/speech';
 
   // OpenRouter fallback chat model
@@ -142,9 +144,21 @@ abstract class AppConstants {
   static const appWebUrl = 'https://aironbot.app';
   static const shareTagline = '— Genere par Corely\nhttps://aironbot.app';
 
-  // ── Backend ─────────────────────────────────────────────────────────────────
-  // Backend cloud optionnel — si BACKEND_URL n'est pas configure, on ne tente pas l'appel
+  // ── Backend Cloudflare Worker ────────────────────────────────────────────────
+  // URL de base du Worker Cloudflare (ex: https://api.aironbot.app)
   static String get backendBaseUrl => _env('BACKEND_URL') ?? '';
+
+  // URL complète du endpoint /chat du Worker (SSE streaming)
+  static String get workerChatUrl => backendBaseUrl.isNotEmpty
+      ? '$backendBaseUrl/chat'
+      : '';
+
+  // Clé secrète partagée pour authentifier le client Flutter auprès du Worker
+  static String get apiSecretKey => _env('API_SECRET_KEY') ?? '';
+
+  // Vérifie si le Worker Cloudflare est configuré et accessible
+  static bool get isWorkerConfigured =>
+      backendBaseUrl.isNotEmpty && !backendBaseUrl.contains('localhost');
 
   // ── Firestore collections ───────────────────────────────────────────────────
   static const colUsers = 'users';

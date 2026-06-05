@@ -122,6 +122,23 @@ class VoiceConversationNotifier
 
     state = state.copyWith(state: VoiceConversationState.listening);
     await _voice.startListening();
+
+    // Vérifier que le micro a bien démarré après un court délai
+    await Future<void>.delayed(const Duration(milliseconds: 500));
+    if (_isActive && !_voice.state.isListening && !_voice.state.isAvailable) {
+      state = state.copyWith(
+        state: VoiceConversationState.error,
+        error: 'Microphone non disponible. Vérifiez la permission dans '
+            'Paramètres → Applications → Corely → Autorisations → Microphone.',
+      );
+      await stop();
+    } else if (_isActive && !_voice.state.isListening) {
+      state = state.copyWith(
+        state: VoiceConversationState.error,
+        error: 'Le micro n\'a pas pu démarrer. Réessayez.',
+      );
+      await stop();
+    }
   }
 
   void _onSpeechFinal(String transcript) {

@@ -81,9 +81,33 @@
 
     // Récupérer le tabId actif pour les actions qui en ont besoin
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-      // Exclude chrome-extension:// tabs (side panel itself) to get the real active page
-      const realTab = (tabs || []).find(t => t.id && !(t.url || '').startsWith('chrome-extension://'));
-      const tabId = realTab ? realTab.id : (tabs && tabs[0] && tabs[0].id ? tabs[0].id : null);
+      // Exclude restricted URL tabs — Chrome blocks content script access on:
+      //   - chrome:// pages (settings, extensions, etc.)
+      //   - chrome-extension:// pages (the extension side panel itself)
+      //   - about: pages
+      const isValidTab = (t) => {
+        const url = (t.url || '').toLowerCase();
+        return !url.startsWith('chrome://') &&
+               !url.startsWith('chrome-extension://') &&
+               !url.startsWith('about:') &&
+               !url.startsWith('devtools://');
+      };
+      const realTab = (tabs || []).find(t => t.id && isValidTab(t));
+      const tabId = realTab ? realTab.id : null;
+
+      if (!tabId) {
+        console.warn('[ExtensionBridge] Aucun onglet valide trouvé. Ouvrez une page web normale.');
+        window.dispatchEvent(new CustomEvent('corely_browser_action_result', {
+          detail: {
+            actionId: detail.actionId,
+            action: detail.action,
+            success: false,
+            data: null,
+            error: 'Aucune page web active. Ouvrez un site web (pas chrome:// ni about:) dans un onglet, puis réessayez.',
+          },
+        }));
+        return;
+      }
 
       const message = {
         type: 'BROWSER_ACTION',

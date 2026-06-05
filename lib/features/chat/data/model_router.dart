@@ -239,8 +239,8 @@ class ModelRouter {
       return entry;
     }
 
-    // Dernier recours : deepseek-v4-flash
-    return _registry['deepseek-v4-flash'];
+    // Dernier recours : deepseek-v4-pro
+    return _registry['deepseek-v4-pro'];
   }
 
   /// Marque un modèle comme rate-limited après un 429.
