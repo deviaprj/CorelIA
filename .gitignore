@@ -76,3 +76,11 @@ cloudflare-worker/dist/
 cloudflare-worker/.wrangler/
 cloudflare-worker/worker-configuration.d.ts
 .env
+.env
+.dev.vars
+**/.env
+**/.dev.vars
+backend/.env
+cloudflare-worker/.dev.vars
+*.apk
+*.zip
