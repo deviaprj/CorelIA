@@ -74,8 +74,8 @@ async def _stream_openrouter(
     headers = {
         "Content-Type": "application/json",
         "Authorization": f"Bearer {settings.openrouter_api_key}",
-        "HTTP-Referer": "https://aironbot.app",
-        "X-Title": "AironBot",
+        "HTTP-Referer": "https://corelia.app",
+        "X-Title": "CorelIA",
     }
 
     async with httpx.AsyncClient(timeout=120.0) as client:

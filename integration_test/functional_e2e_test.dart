@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
-import 'package:airon_bot/main.dart' as app;
+import 'package:corel_ia/main.dart' as app;
 
 /// Tests fonctionnels E2E — Sprint 2
 /// Scénarios : chat streaming, recherche web, conversation vocale
@@ -50,7 +50,7 @@ void main() {
       }
 
       // Si on est déjà sur Conversations ou Login, rien à faire
-      if (find.text('AironBot').evaluate().isNotEmpty ||
+      if (find.text('CorelIA').evaluate().isNotEmpty ||
           find.text('Bon retour').evaluate().isNotEmpty) {
         return;
       }

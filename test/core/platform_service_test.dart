@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:airon_bot/core/platform/platform_service.dart';
+import 'package:corel_ia/core/platform/platform_service.dart';
 
 void main() {
   group('PlatformService', () {

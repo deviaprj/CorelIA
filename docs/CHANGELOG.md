@@ -1,4 +1,4 @@
-# Changelog — AironBot Transformation
+# Changelog — CorelIA Transformation
 
 ## [1.1.0] - 2026-04-24 — Phase 3 : Exécution autonome
 

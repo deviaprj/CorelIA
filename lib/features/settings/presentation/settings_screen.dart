@@ -448,7 +448,7 @@ class _ReferralSectionState extends ConsumerState<_ReferralSection> {
   void _shareCode(String code) {
     final text = 'Rejoins Corely avec mon code parrain : $code\n'
         'On gagne chacun +5 requêtes IA gratuites !\n'
-        'https://aironbot.app';
+        'https://corelia.app';
     Share.share(text);
   }
 

@@ -1,4 +1,4 @@
-# README Développeur — AironBot
+# README Développeur — CorelIA
 
 > Guide de setup, d'architecture et de contribution pour l'équipe technique.
 
@@ -189,7 +189,7 @@ Recommandé : **Google Cloud Run** ou **Railway**.
 
 ```bash
 # Build Docker
-docker build -t aironbot-backend .
+docker build -t corelia-backend .
 
 # Push & deploy
 # (voir documentation Cloud Run ou Railway)
@@ -199,10 +199,10 @@ docker build -t aironbot-backend .
 ```env
 DEEPSEEK_API_KEY=sk-xxx
 OPENROUTER_API_KEY=sk-or-xxx
-OLLAMA_CLOUD_URL=https://ollama.aironbot.app
+OLLAMA_CLOUD_URL=https://ollama.corelia.app
 OLLAMA_CLOUD_API_KEY=xxx
 SERPAPI_KEY=xxx
-FIREBASE_PROJECT_ID=aironbot-prod
+FIREBASE_PROJECT_ID=corelia-prod
 REDIS_URL=redis://... # Upstash ou Redis Cloud
 APP_ENV=production
 ```

@@ -1,7 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:airon_bot/features/monetization/subscription/subscription_service.dart';
-import 'package:airon_bot/core/constants.dart';
-import 'package:airon_bot/core/platform/platform_service.dart';
+import 'package:corel_ia/features/monetization/subscription/subscription_service.dart';
+import 'package:corel_ia/core/constants.dart';
+import 'package:corel_ia/core/platform/platform_service.dart';
 
 void main() {
   group('SubscriptionService', () {
@@ -106,7 +106,7 @@ void main() {
     test('should have Stripe checkout base URL', () {
       expect(
         AppConstants.stripeCheckoutBaseUrl,
-        equals('https://aironbot.app/checkout'),
+        equals('https://corelia.app/checkout'),
       );
     });
   });

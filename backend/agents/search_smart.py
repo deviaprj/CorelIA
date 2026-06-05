@@ -158,8 +158,8 @@ async def _classify_intent(query: str) -> dict[str, Any]:
                 "Authorization": f"Bearer {key}",
             }
             if provider == "openrouter":
-                headers["HTTP-Referer"] = "https://aironbot.app"
-                headers["X-Title"] = "AironBot"
+                headers["HTTP-Referer"] = "https://corelia.app"
+                headers["X-Title"] = "CorelIA"
 
             payload = {
                 "model": "deepseek-chat" if provider == "deepseek" else "mistralai/mistral-7b-instruct",

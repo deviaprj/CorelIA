@@ -1,6 +1,6 @@
 # Rapport de Session — 2026-05-01
 
-**Branche** : `br-AironBot-V2` | **Commit initial** : `d9e74e77`
+**Branche** : `br-CorelIA-V2` | **Commit initial** : `d9e74e77`
 
 ## Changements effectués
 

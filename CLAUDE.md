@@ -7,12 +7,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Corely is a cross-platform AI chat application (Flutter/Dart) targeting 1M+ users. It includes:
 - **Mobile app**: Android/iOS with Firebase Auth, chat, voice input
 - **Chrome Extension**: Same codebase, built with Flutter Web + Manifest V3
-- **Backend** (optional cloud): Python FastAPI at `api.aironbot.app` with Redis rate limiting
+- **Backend** (optional cloud): Python FastAPI at `api.corelia.app` with Redis rate limiting
 - **Monetization**: AdMob ads (free tier), RevenueCat subscriptions (Pro tier)
 - **AI**: DeepSeek-V4-Flash (free text), DeepSeek-Chat (vision fallback), OpenRouter (Pro: Mistral-Large, GPT-4o-mini)
 
 ### Contrainte d'autonomie (règle d'or)
-L'APK Android et l'extension Chrome doivent être 100% autonomes. Aucun backend local requis. Toutes les fonctionnalités doivent fonctionner via services natifs, appels API directs, ou packages Dart/Flutter embarqués. Le backend cloud (`api.aironbot.app`) est un bonus, pas une dépendance.
+L'APK Android et l'extension Chrome doivent être 100% autonomes. Aucun backend local requis. Toutes les fonctionnalités doivent fonctionner via services natifs, appels API directs, ou packages Dart/Flutter embarqués. Le backend cloud (`api.corelia.app`) est un bonus, pas une dépendance.
 
 ## Architecture
 
@@ -542,7 +542,7 @@ flutter build web --dart-define=DEEPSEEK_API_KEY=sk-xxx --dart-define=OPENROUTER
 
 ### 🔴 À faire — Priorité CRITIQUE (prochaine session)
 - [ ] **Tester mode vocal V16 sur Xiaomi 12** : 5 tours complets, pas de monologue, barge-in >3 mots, TTS fluide sans sources/asterisques, quota retry auto après vidéo
-- [ ] **Déployer le backend** : `bash scripts/deploy_backend.sh` depuis la machine utilisateur (Docker nécessite internet). Cible `api.aironbot.app`.
+- [ ] **Déployer le backend** : `bash scripts/deploy_backend.sh` depuis la machine utilisateur (Docker nécessite internet). Cible `api.corelia.app`.
 - [ ] **Tester parsing vols réel** : "trouve un billet paris-londre direct du 29/05", requêtes lowercase + mots parasites
 - [ ] **Tester slash commands mobile** : `/scrape https://example.com`, `/summarize <url>`, `/links <url>` avec backend local `192.168.1.38:8000`
 - [ ] **TTS qualité** : évaluer si le nettoyage markdown suffit ou si des artefacts persistent (tableaux complexes, emojis non standards)

@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:airon_bot/features/monetization/credits/credit_service.dart';
+import 'package:corel_ia/features/monetization/credits/credit_service.dart';
 
 void main() {
   group('CreditService', () {

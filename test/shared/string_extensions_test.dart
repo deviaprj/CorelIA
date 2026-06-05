@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:airon_bot/shared/extensions/string_extensions.dart';
+import 'package:corel_ia/shared/extensions/string_extensions.dart';
 
 void main() {
   group('StringExt', () {

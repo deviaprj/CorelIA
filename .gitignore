@@ -50,7 +50,7 @@ lcov.info
 *.aab
 *.ipa
 *.zip
-airon_bot_extension_*.zip
+corel_ia_extension_*.zip
 
 # Node (functions)
 functions/node_modules/
@@ -75,3 +75,4 @@ cloudflare-worker/node_modules/
 cloudflare-worker/dist/
 cloudflare-worker/.wrangler/
 cloudflare-worker/worker-configuration.d.ts
+.env

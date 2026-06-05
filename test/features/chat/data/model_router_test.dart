@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:airon_bot/features/chat/data/model_router.dart';
+import 'package:corel_ia/features/chat/data/model_router.dart';
 
 void main() {
   group('ModelRouter', () {

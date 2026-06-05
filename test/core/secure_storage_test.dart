@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:airon_bot/core/secure_storage.dart';
+import 'package:corel_ia/core/secure_storage.dart';
 
 // Fake implementation for testing
 class FakeSecureStorage implements SecureStorageService {

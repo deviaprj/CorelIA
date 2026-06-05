@@ -1,7 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:airon_bot/features/chat/data/mock_chat_repository.dart';
-import 'package:airon_bot/features/chat/domain/conversation.dart';
-import 'package:airon_bot/features/chat/domain/message.dart';
+import 'package:corel_ia/features/chat/data/mock_chat_repository.dart';
+import 'package:corel_ia/features/chat/domain/conversation.dart';
+import 'package:corel_ia/features/chat/domain/message.dart';
 import 'dart:async';
 
 void main() {

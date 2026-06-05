@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:airon_bot/features/chat/presentation/input_bar.dart';
+import 'package:corel_ia/features/chat/presentation/input_bar.dart';
 
 void main() {
   group('InputBar Widget Tests', () {

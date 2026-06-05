@@ -1,9 +1,9 @@
 # Rapport de Session — Sprint 2 Finalisation
 
 > **Date** : 2026-04-24  
-> **Branche** : `br-AironBot-V2`  
+> **Branche** : `br-CorelIA-V2`  
 > **Device de test** : Xiaomi 12 (`6db039ac`)  
-> **Objectif** : Transformer AironBot en assistant IA autonome avec DeepSeek, recherche web, voix, sans backend PC.
+> **Objectif** : Transformer CorelIA en assistant IA autonome avec DeepSeek, recherche web, voix, sans backend PC.
 
 ---
 
@@ -272,7 +272,7 @@ bool isDemoMode = const bool.fromEnvironment('DEMO_MODE', defaultValue: false);
 ## 5. Architecture finale
 
 ```
-Mobile (AironBot APK)
+Mobile (CorelIA APK)
 ├── Auth Mock (anonyme, local)
 ├── Chat
 │   ├── DeepSeek API directe (HTTPS)
@@ -361,7 +361,7 @@ adb -s 6db039ac install -r build/app/outputs/flutter-apk/app-release.apk
 
 ### Lancer l'app
 ```bash
-adb -s 6db039ac shell am start -n com.aironbot.airon_bot/.MainActivity
+adb -s 6db039ac shell am start -n com.corelia.corel_ia/.MainActivity
 ```
 
 ### Capture d'écran
@@ -402,4 +402,4 @@ PYTHONPATH=$(pwd):$PYTHONPATH python3 -m uvicorn main:app --host 0.0.0.0 --port 
 ---
 
 *Session terminée le 24 avril 2026.*  
-*AironBot br-AironBot-V2 | Commit `a70e0636`*
+*CorelIA br-CorelIA-V2 | Commit `a70e0636`*

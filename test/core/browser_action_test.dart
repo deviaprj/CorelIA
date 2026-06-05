@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:airon_bot/core/platform/browser_action.dart';
-import 'package:airon_bot/core/platform/extension_bridge_io.dart' show ExtensionBridge;
+import 'package:corel_ia/core/platform/browser_action.dart';
+import 'package:corel_ia/core/platform/extension_bridge_io.dart' show ExtensionBridge;
 
 void main() {
   // ── BrowserActionType ───────────────────────────────────────────────────────

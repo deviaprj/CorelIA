@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:airon_bot/features/chat/domain/attachment.dart';
+import 'package:corel_ia/features/chat/domain/attachment.dart';
 
 void main() {
   group('Attachment', () {

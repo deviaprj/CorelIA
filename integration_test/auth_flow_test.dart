@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
-import 'package:airon_bot/main.dart' as app;
+import 'package:corel_ia/main.dart' as app;
 
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
@@ -36,7 +36,7 @@ void main() {
       // await tester.pumpAndSettle();
 
       // Vérifier la redirection
-      // expect(find.text('AironBot'), findsOneWidget);
+      // expect(find.text('CorelIA'), findsOneWidget);
     });
 
     testWidgets('login and logout flow', (WidgetTester tester) async {
@@ -73,7 +73,7 @@ void main() {
       // await tester.pumpAndSettle();
 
       // Vérifier redirection
-      // expect(find.text('AironBot'), findsOneWidget);
+      // expect(find.text('CorelIA'), findsOneWidget);
     });
   });
 }

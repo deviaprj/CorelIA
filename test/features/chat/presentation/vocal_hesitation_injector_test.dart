@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:airon_bot/features/chat/presentation/vocal_hesitation_injector.dart';
+import 'package:corel_ia/features/chat/presentation/vocal_hesitation_injector.dart';
 
 void main() {
   group('VocalHesitationInjector', () {

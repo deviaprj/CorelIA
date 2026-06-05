@@ -1,5 +1,5 @@
 /**
- * AironBot Cloudflare Worker — API REST pour le chatbot
+ * CorelIA Cloudflare Worker — API REST pour le chatbot
  * 
  * Endpoints:
  *   POST /chat             — Chat streaming (SSE) via Workers AI / DeepSeek / OpenRouter
@@ -14,7 +14,7 @@
  *   - CORS configuré pour l'extension Chrome et le Flutter app
  * 
  * Déploiement:
- *   npm run deploy          → production (api.aironbot.app)
+ *   npm run deploy          → production (api.corelia.app)
  *   npm run deploy:staging  → staging
  *   npm run dev             → local (wrangler dev)
  */
@@ -48,12 +48,12 @@ app.use('*', cors({
     // Allow Chrome extensions, localhost, and the main domain
     const allowed = [
       'chrome-extension://',
-      'https://aironbot.app',
+      'https://corelia.app',
       'http://localhost:',
     ];
     if (!origin) return '*';
     if (allowed.some(prefix => origin.startsWith(prefix))) return origin;
-    return 'https://aironbot.app';
+    return 'https://corelia.app';
   },
   allowMethods: ['GET', 'POST', 'OPTIONS'],
   allowHeaders: ['Content-Type', 'Authorization', 'X-Request-ID'],

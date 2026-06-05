@@ -6,7 +6,7 @@ set -e
 # Flutter path
 FLUTTER="/home/geekai/flutter/bin/flutter"
 
-echo "🧪 Lancement des tests AironBot"
+echo "🧪 Lancement des tests CorelIA"
 echo "================================"
 
 # Couleurs

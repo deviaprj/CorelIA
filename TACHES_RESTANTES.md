@@ -1,7 +1,7 @@
 # TACHES RESTANTES — Sprint 2 Finalisation
 
 > Date : 2026-04-24
-> Branche : `br-AironBot-V2`
+> Branche : `br-CorelIA-V2`
 
 ---
 

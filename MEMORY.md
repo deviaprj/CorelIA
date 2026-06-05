@@ -1,6 +1,6 @@
-# AironBot — Mémoire de Projet
+# CorelIA — Mémoire de Projet
 
-Ce fichier contient les connaissances clés et décisions importantes pour le développement continu d'AironBot.
+Ce fichier contient les connaissances clés et décisions importantes pour le développement continu d'CorelIA.
 
 ---
 
@@ -31,7 +31,7 @@ Chaque feature suit le pattern :
 - `presentation/` — Screens, widgets, notifiers
 
 ### Firebase
-- Project ID : `aironbot-1773058753`
+- Project ID : `corelia-1773058753`
 - Collections : `users`, `conversations`, `messages`, `projects`, `referrals`
 - Cloud Functions : `checkQuota`, `stripeWebhook`
 
@@ -139,7 +139,7 @@ firebase functions:secrets:set STRIPE_WEBHOOK_SECRET
 ### Session 2026-05-28 — Thème Cofely Unifié + Icônes V20
 
 #### Refonte thème : login_screen + onboarding
-**Problème** : Login screen et onboarding screen utilisaient encore `#6C63FF` (violet AironBot), pas le thème Cofely.
+**Problème** : Login screen et onboarding screen utilisaient encore `#6C63FF` (violet CorelIA), pas le thème Cofely.
 **Fix login** : `build()` entièrement réécrit — en-tête dégradé `#001218→#003F5C`, logo "C" cercle gradient 72px, carte blanche arrondie, `FilledButton` en `CofelyTokens.primary`.
 **Fix onboarding** : `_pages` avec nouveaux gradients bleus Cofely, `_PageContent` : logo "C" pour page 1, icônes dans cercles semi-transparents pour pages 2-3.
 
@@ -420,7 +420,7 @@ Rendre la recherche avancée réellement utile en scrapant les comparateurs pour
 #### Backend deployment
 - Dockerfile buildée localement mais `apt-get` échoue sans internet (DNS Docker local).
 - **Action requise** : exécuter `bash scripts/deploy_backend.sh` depuis la machine de l'utilisateur où Docker a internet.
-- Cible : `api.aironbot.app` (FastAPI + uvicorn 4 workers + Docker).
+- Cible : `api.corelia.app` (FastAPI + uvicorn 4 workers + Docker).
 
 #### Notes pour la prochaine session
 - **Vocal turn-taking** : priorité CRITIQUE. L'IA doit savoir exactement quand parler sans couper la parole. Cela passe par :

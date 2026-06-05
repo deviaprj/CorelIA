@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:airon_bot/features/chat/presentation/tts_natural_service.dart';
+import 'package:corel_ia/features/chat/presentation/tts_natural_service.dart';
 
 void main() {
   group('TtsNaturalService', () {

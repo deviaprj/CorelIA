@@ -1,4 +1,4 @@
-# Dockerfile for AironBot backend
+# Dockerfile for CorelIA backend
 FROM python:3.12-slim
 
 WORKDIR /app

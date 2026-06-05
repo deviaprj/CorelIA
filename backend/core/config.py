@@ -12,7 +12,7 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    app_name: str = "AironBot Backend"
+    app_name: str = "CorelIA Backend"
     app_env: str = "development"
     debug: bool = False
 

@@ -1,4 +1,4 @@
-# AUDIT TECHNIQUE — AironBot Transformation
+# AUDIT TECHNIQUE — CorelIA Transformation
 
 > Date : 2026-04-24
 > Branche : `br-openclaw`
@@ -153,9 +153,9 @@ lib/
 
 ---
 
-## 5. LACUNES vs OBJECTIFS AIRONBOT
+## 5. LACUNES vs OBJECTIFS CORELIA
 
-| Objectif AironBot | Lacune actuelle | Impact |
+| Objectif CorelIA | Lacune actuelle | Impact |
 |---|---|---|
 | **Conversations naturelles** | Contexte limité 20 messages, pas de mémoire long terme | 🔴 Élevé |
 | **Recherche web temps réel** | Aucun moteur de recherche intégré | 🔴 Élevé |

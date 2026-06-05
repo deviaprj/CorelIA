@@ -568,7 +568,7 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
           await _persistAssistantMessage(
             '❌ Backend non configuré\n\n'
             'BACKEND_URL est vide ou contient localhost. '
-            'Ajoutez `BACKEND_URL=https://api.aironbot.app` dans `.env` et recompilez.',
+            'Ajoutez `BACKEND_URL=https://api.corelia.app` dans `.env` et recompilez.',
           );
           state = state.copyWith(isStreaming: false);
           return true;

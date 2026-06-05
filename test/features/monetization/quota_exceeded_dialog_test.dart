@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:airon_bot/features/monetization/ads/quota_exceeded_dialog.dart';
+import 'package:corel_ia/features/monetization/ads/quota_exceeded_dialog.dart';
 
 void main() {
   group('QuotaType', () {

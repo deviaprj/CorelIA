@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:airon_bot/features/chat/presentation/slash_commands.dart';
+import 'package:corel_ia/features/chat/presentation/slash_commands.dart';
 
 void main() {
   // ── SlashCommand model ─────────────────────────────────────────────────────

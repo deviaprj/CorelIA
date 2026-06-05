@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:airon_bot/features/auth/domain/app_user.dart';
+import 'package:corel_ia/features/auth/domain/app_user.dart';
 
 // Fake implementations for testing
 class FakeUser {

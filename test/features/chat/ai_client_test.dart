@@ -1,8 +1,8 @@
 import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
-import 'package:airon_bot/features/chat/data/ai_client.dart';
-import 'package:airon_bot/core/constants.dart';
+import 'package:corel_ia/features/chat/data/ai_client.dart';
+import 'package:corel_ia/core/constants.dart';
 
 
 void main() {

@@ -50,7 +50,7 @@ Dernière mise à jour : 2026-05-28 — Session V20 : Thème Cofely unifié + no
 
 ### 3. Déployer le backend cloud (action utilisateur requise)
 - [ ] `bash scripts/deploy_backend.sh` sur machine avec internet
-- [ ] Vérifier `api.aironbot.app` répond sur `/health`
+- [ ] Vérifier `api.corelia.app` répond sur `/health`
 
 ---
 
@@ -94,7 +94,7 @@ Dernière mise à jour : 2026-05-28 — Session V20 : Thème Cofely unifié + no
 
 ### 3. Déployer le backend cloud (action utilisateur requise)
 - [ ] `bash scripts/deploy_backend.sh` sur machine avec internet
-- [ ] Vérifier `api.aironbot.app` répond sur `/health`, `/download_media`, `/crawl`
+- [ ] Vérifier `api.corelia.app` répond sur `/health`, `/download_media`, `/crawl`
 
 ---
 
@@ -147,7 +147,7 @@ Dernière mise à jour : 2026-05-28 — Session V20 : Thème Cofely unifié + no
 
 ### 4. Déployer le backend cloud
 - [ ] `bash scripts/deploy_backend.sh` sur machine avec internet
-- [ ] Vérifier `api.aironbot.app` répond sur `/health`, `/download_media`, `/crawl`
+- [ ] Vérifier `api.corelia.app` répond sur `/health`, `/download_media`, `/crawl`
 
 ## Terminé — Session 2026-05-23 — Tests Non-Régression ✅
 
@@ -255,8 +255,8 @@ LISTENING → THINKING → SPEAKING → LISTENING
 
 ### 2. Déployer le backend cloud
 - [ ] `bash scripts/deploy_backend.sh` sur machine avec internet (Docker pull + push)
-- [ ] Vérifier `api.aironbot.app` répond sur `/health`, `/search_smart`, `/download_media`, `/crawl`
-- [ ] Mettre à jour `.env` avec `BACKEND_URL=https://api.aironbot.app` et rebuild extension/APK
+- [ ] Vérifier `api.corelia.app` répond sur `/health`, `/search_smart`, `/download_media`, `/crawl`
+- [ ] Mettre à jour `.env` avec `BACKEND_URL=https://api.corelia.app` et rebuild extension/APK
 
 ### 3. Tester mode vocal V16 sur Xiaomi 12
 - [ ] 5 tours complets : aucun blocage, micro redémarre à chaque fois
@@ -351,7 +351,7 @@ Après les tests, décider :
 ### Fichiers créés
 - `backend/agents/search_smart.py` — orchestrateur LLM intent + parallel scraping + selectors learnés
 - `backend/Dockerfile` — image Python 3.12 slim avec BS4/lxml
-- `backend/scripts/deploy_backend.sh` — build + push Docker vers `api.aironbot.app`
+- `backend/scripts/deploy_backend.sh` — build + push Docker vers `api.corelia.app`
 - `lib/features/chat/data/search_service_global.dart` — client Dart unifié (`search()`, `scrape()`, `formatMarkdown()`)
 - `docs/API_CONFIGURATION.md` — référence clés API, endpoints, `.env`
 - `AGENTS.md` + `CODEX_AGENT.md` — stratégies agents Claude/Codex
@@ -585,7 +585,7 @@ Après les tests, décider :
 ### Résultat ✅
 - **463 tests passés, 0 échec**
 - APK installé sur Xiaomi 12, Extension rebuildée
-- Branches `br-AironBot-V2` et `main` synchronisées sur origin
+- Branches `br-CorelIA-V2` et `main` synchronisées sur origin
 
 ---
 
@@ -642,7 +642,7 @@ Le mode conversation vocal mains-libres est désormais fluide et humain. Latence
 ## À faire — Prochaine session
 
 ### Priorité HAUTE
-- [ ] **Déployer le backend** : `bash scripts/deploy_backend.sh` depuis la machine de l'utilisateur (Docker a besoin d'internet pour `apt-get`). Cible : `api.aironbot.app`.
+- [ ] **Déployer le backend** : `bash scripts/deploy_backend.sh` depuis la machine de l'utilisateur (Docker a besoin d'internet pour `apt-get`). Cible : `api.corelia.app`.
 - [ ] **Tester le parsing vols en conditions réelles** : "trouve un billet paris-londre direct du 29/05", "vol aller-retour nice-barcelone le 10 juin retour le 15", etc.
 - [x] **Fix `_performEnhancedSearch` hôtels** : checkIn/checkOut/guests sont bien passés à `searchHotels` — vérifié, le code est correct
 - [x] **Vérifier OPEN_URL timeout** : `background.js` a `Promise.race` avec 8s timeout + `normalizeExternalUrl` pour les URLs malformées

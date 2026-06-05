@@ -91,7 +91,7 @@ Future<void> main() async {
       // Compte de test automatique pour acces immediat au chat
       try {
         await mockAuthRepository.signInWithEmail(
-          'test@aironbot.app',
+          'test@corelia.app',
           'test1234',
         );
         debugPrint('[DEMO] Connexion compte de test reussie');
@@ -99,7 +99,7 @@ Future<void> main() async {
         // Le compte n'existe pas encore : le creer
         try {
           await mockAuthRepository.registerWithEmail(
-            'test@aironbot.app',
+            'test@corelia.app',
             'test1234',
             'Utilisateur Test',
           );

@@ -1,4 +1,4 @@
-# AironBot — Rapport Final de la Mission
+# CorelIA — Rapport Final de la Mission
 
 **Date** : 27 mars 2026
 **Branche** : `br-openclaw`
@@ -8,7 +8,7 @@
 
 ## 📋 Résumé Exécutif
 
-Cette mission avait pour objectif l'analyse complète, l'optimisation et l'évolution du projet AironBot vers un état "production-ready". Tous les objectifs ont été atteints :
+Cette mission avait pour objectif l'analyse complète, l'optimisation et l'évolution du projet CorelIA vers un état "production-ready". Tous les objectifs ont été atteints :
 
 - ✅ Code compilant et fonctionnel
 - ✅ **136 tests** unitaires et widget passing
@@ -352,7 +352,7 @@ Voir `DECISIONS.md` pour le détail des 10 ADR :
 
 ## 🎯 Conclusion
 
-Le projet AironBot est maintenant dans un état **stable et fonctionnel** :
+Le projet CorelIA est maintenant dans un état **stable et fonctionnel** :
 - ✅ Architecture propre et documentée
 - ✅ Tests robustes (136 tests passing)
 - ✅ Build Linux opérationnel

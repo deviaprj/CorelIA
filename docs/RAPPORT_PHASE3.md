@@ -1,8 +1,8 @@
-# RAPPORT FINAL — Transformation AironBot Phase 3
+# RAPPORT FINAL — Transformation CorelIA Phase 3
 
 ## Résumé exécutif
 
-La transformation d'AironBot vers une application de chatbot IA avancée est **partiellement complète**.
+La transformation d'CorelIA vers une application de chatbot IA avancée est **partiellement complète**.
 Les fondations sécurisées, le backend FastAPI, la couche réseau refactorée, la détection Ollama local, et la recherche web sont en place.
 
 ---
@@ -11,7 +11,7 @@ Les fondations sécurisées, le backend FastAPI, la couche réseau refactorée, 
 
 ### Documents produits
 1. **AUDIT_PROJET.md** — Audit technique complet de la codebase existante.
-2. **PLAN_ACTION_AIRONBOT.md** — Plan d'action détaillé avec choix technologiques, architecture cible, et décomposition en sprints.
+2. **PLAN_ACTION_CORELIA.md** — Plan d'action détaillé avec choix technologiques, architecture cible, et décomposition en sprints.
 3. **CHANGELOG.md** — Historique des modifications de la v1.0.0 à la v1.1.0.
 4. **README_DEVELOPER.md** — Guide complet pour les développeurs (setup, architecture, déploiement).
 

@@ -1,7 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:airon_bot/features/chat/data/ai_client.dart';
+import 'package:corel_ia/features/chat/data/ai_client.dart';
 
 /// Tests de charge pour les APIs
 void main() {

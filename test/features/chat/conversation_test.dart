@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:airon_bot/features/chat/domain/conversation.dart';
+import 'package:corel_ia/features/chat/domain/conversation.dart';
 
 void main() {
   group('Conversation Model', () {

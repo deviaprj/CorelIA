@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:airon_bot/features/projects/domain/project.dart';
+import 'package:corel_ia/features/projects/domain/project.dart';
 
 void main() {
   group('Project', () {

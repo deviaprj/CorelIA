@@ -1,6 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:airon_bot/core/constants.dart';
+import 'package:corel_ia/core/constants.dart';
 
 void main() {
   group('AppConstants', () {

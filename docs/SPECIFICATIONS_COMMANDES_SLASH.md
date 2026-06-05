@@ -46,7 +46,7 @@
 ### 1.2 Problèmes racines
 
 #### Problème #1 : Backend cloud non déployé
-`api.aironbot.app` n'est pas déployé. Or, **7 commandes** (`scrape`, `crawl`, `download`, `links`, `summarize`, `extract`, `metadata`, `export`) dépendent du backend pour leur fonctionnement avec URL. Le code Dart vérifie :
+`api.corelia.app` n'est pas déployé. Or, **7 commandes** (`scrape`, `crawl`, `download`, `links`, `summarize`, `extract`, `metadata`, `export`) dépendent du backend pour leur fonctionnement avec URL. Le code Dart vérifie :
 ```dart
 if (_backendUrl.isEmpty || _backendUrl.contains('localhost')) {
   throw Exception('Backend URL not configured');
@@ -76,7 +76,7 @@ Le routeur actuel (`ModelRouter`) privilégie `deepseek-v4-pro` (payant) pour le
 │                     CORE (Dart/Flutter)                         │
 │  ┌─────────────┐  ┌──────────────────┐  ┌────────────────────┐ │
 │  │ Extension   │  │ Backend Cloud    │  │ Scripts Locaux     │ │
-│  │ Bridge      │  │ api.aironbot.app │  │ (Python/Node.js)   │ │
+│  │ Bridge      │  │ api.corelia.app │  │ (Python/Node.js)   │ │
 │  │ (DOM/API)   │  │ (FastAPI)        │  │                    │ │
 │  └──────┬──────┘  └────────┬─────────┘  └─────────┬──────────┘ │
 │         │                  │                       │            │
@@ -96,7 +96,7 @@ Le routeur actuel (`ModelRouter`) privilégie `deepseek-v4-pro` (payant) pour le
 **Toute commande doit avoir 2 à 3 chemins de fallback**, ordonnés du plus fiable au plus créatif :
 
 1. **Chemin direct** : Script local ou DOM → résultat déterministe
-2. **Chemin cloud** : Backend `api.aironbot.app` → scraping/crawling
+2. **Chemin cloud** : Backend `api.corelia.app` → scraping/crawling
 3. **Chemin LLM** : Interprétation par IA (DeepSeek V4 Flash ou OpenRouter) → réponse générée
 
 ### 2.2 Scripts Python/Node.js locaux (nouveau)
@@ -392,7 +392,7 @@ Pour les pages SPA (YouTube, Twitter, etc.), les commandes DOM qui échouent doi
 
 ### 4.2 Commandes avec dépendance backend — 8 commandes
 
-**Problème** : `api.aironbot.app` non déployé.
+**Problème** : `api.corelia.app` non déployé.
 
 **Solution immédiate** : Scripts locaux Python/Node.js (cf. section 2.2).
 
@@ -408,7 +408,7 @@ C'est la seule commande qui fonctionne sur mobile sans URL. Elle utilise déjà 
 
 ## 5. Déploiement du Backend — Plan Prioritaire
 
-Le backend `api.aironbot.app` est le nœud critique. Sans lui, 8 commandes sur 26 (~31%) sont inopérantes en mode « URL distante ».
+Le backend `api.corelia.app` est le nœud critique. Sans lui, 8 commandes sur 26 (~31%) sont inopérantes en mode « URL distante ».
 
 ### 5.1 Script de déploiement existant
 
@@ -511,7 +511,7 @@ Avec cette modification, un `python backend/main.py` local devient utilisable po
 | # | Action | Impact |
 |---|--------|--------|
 | 5 | Déployer le backend sur Fly.io (gratuit) | Active toutes les commandes URL |
-| 6 | Configurer `BACKEND_URL=api.aironbot.app` dans les builds | Production ready |
+| 6 | Configurer `BACKEND_URL=api.corelia.app` dans les builds | Production ready |
 | 7 | Ajouter un healthcheck `/ping` et un fallback explicite | Détection panne backend |
 
 ### Phase 3 — Routage LLM optimisé (1 jour)
@@ -542,7 +542,7 @@ Avec cette modification, un `python backend/main.py` local devient utilisable po
    - **Robustes** : pas de dépendance à un backend distant
    - **Maintenables** : scripts isolés, testables unitairement
 
-2. **Backend cloud** (`api.aironbot.app`) comme second niveau, déployé sur Fly.io (gratuit) ou via le script Docker existant. Il offre :
+2. **Backend cloud** (`api.corelia.app`) comme second niveau, déployé sur Fly.io (gratuit) ou via le script Docker existant. Il offre :
    - **Disponibilité 24/7** : accessible depuis mobile et extension
    - **Cache** : les résultats de scrape peuvent être cachés (TTL 15 min)
    - **yt-dlp** : extraction vidéo complète (1000+ sites)

@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:airon_bot/features/settings/data/preferences_sync_service.dart';
+import 'package:corel_ia/features/settings/data/preferences_sync_service.dart';
 
 void main() {
   group('SyncedPreferences', () {

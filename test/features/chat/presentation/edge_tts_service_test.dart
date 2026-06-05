@@ -1,7 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:airon_bot/features/chat/presentation/edge_tts_service.dart';
-import 'package:airon_bot/features/chat/presentation/tts_emotion.dart';
-import 'package:airon_bot/features/chat/presentation/emotion_parser.dart';
+import 'package:corel_ia/features/chat/presentation/edge_tts_service.dart';
+import 'package:corel_ia/features/chat/presentation/tts_emotion.dart';
+import 'package:corel_ia/features/chat/presentation/emotion_parser.dart';
 
 void main() {
   group('EdgeTtsService', () {

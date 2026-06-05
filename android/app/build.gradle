@@ -20,7 +20,7 @@ def flutterVersionName = localProperties.getProperty('flutter.versionName')
 if (flutterVersionName == null) flutterVersionName = '1.0.0'
 
 android {
-    namespace 'com.aironbot.airon_bot'
+    namespace 'com.corelia.corel_ia'
     compileSdk 36
     ndkVersion '27.0.12077973'
 
@@ -35,7 +35,7 @@ android {
     }
 
     defaultConfig {
-        applicationId "com.aironbot.airon_bot"
+        applicationId "com.corelia.corel_ia"
         minSdk 26
         targetSdk 36
         versionCode flutterVersionCode.toInteger()

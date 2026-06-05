@@ -1,7 +1,7 @@
-# Rapport d'Audit — AironBot V2
+# Rapport d'Audit — CorelIA V2
 
 **Date** : 2026-05-01
-**Branche** : `br-AironBot-V2`
+**Branche** : `br-CorelIA-V2`
 **Auditeur** : Claude Code (Audit automatique)
 **Commit HEAD** : `d9e74e77`
 **Fichiers modifiés non commités** : 2 (`ai_client.dart`, `chat_notifier.dart`)
@@ -117,7 +117,7 @@
 ### 3.2 Extension Chrome — 30% complet
 **Ce qui existe** :
 - Manifest V3 avec side panel, popup, background service worker
-- Context menu "Demander à AironBot" sur sélection texte
+- Context menu "Demander à CorelIA" sur sélection texte
 - Content script capture sélection
 - Build script (`scripts/build_extension.sh`) opérationnel
 
@@ -300,7 +300,7 @@
 
 ## 8. Résumé Exécutif
 
-AironBot V2 est une application Flutter cross-platform (mobile + extension Chrome) avec une architecture solide (MVVM + Riverpod). **Le chat IA avec streaming, retry, et multi-provider est mature (90%).** L'authentification, la persistance Firestore, et la monetization de base fonctionnent.
+CorelIA V2 est une application Flutter cross-platform (mobile + extension Chrome) avec une architecture solide (MVVM + Riverpod). **Le chat IA avec streaming, retry, et multi-provider est mature (90%).** L'authentification, la persistance Firestore, et la monetization de base fonctionnent.
 
 **Progrès significatifs depuis le dernier audit** :
 - Le TTS est passé de "basique et robotique" à "naturel" avec `cleanMarkdown()` complet

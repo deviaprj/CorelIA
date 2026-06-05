@@ -30,7 +30,7 @@
 
 ### Installation manuelle (développeur)
 
-1. Téléchargez `corely-extension.zip` depuis [GitHub Releases](https://github.com/aironbot/corely/releases)
+1. Téléchargez `corely-extension.zip` depuis [GitHub Releases](https://github.com/corelia/corely/releases)
 2. Décompressez le ZIP
 3. Dans Chrome, allez à `chrome://extensions`
 4. Activez "Mode développeur" (coin supérieur droit)

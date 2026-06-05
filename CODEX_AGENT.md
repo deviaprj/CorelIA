@@ -2,8 +2,8 @@
 
 ## Meta
 
-- **Project**: Corely (ex-AironBot) — Flutter/Dart AI Chat + Chrome Extension
-- **Branch**: `br-AironBot-V2` (target: beta-ready)
+- **Project**: Corely (ex-CorelIA) — Flutter/Dart AI Chat + Chrome Extension
+- **Branch**: `br-CorelIA-V2` (target: beta-ready)
 - **Agent**: Codex (OpenAI) autonome, strict, zero-regression
 - **Rule**: Always read CLAUDE.md, MEMORY.md, TASKS.md, DECISIONS.md before any action
 

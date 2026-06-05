@@ -9,7 +9,7 @@ class DeepLinkService {
   void dispose() {}
 
   String generateReferralUrl(String code) =>
-      'https://aironbot.app/referral?code=$code';
+      'https://corelia.app/referral?code=$code';
 
   Future<void> shareReferralLink(String code) async {
     debugPrint('[DeepLinkService] Web stub: share non disponible');

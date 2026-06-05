@@ -295,7 +295,7 @@ REVENUECAT_API_KEY_IOS=appl_xxxxxxxxxxxxxxxxxxxx
 3. Copiez :
    - **Publishable key** : commence par `pk_live_`
    - **Secret key** : commence par `sk_live_` (à stocker côté backend uniquement)
-   - **Webhook secret** : dans **Webhooks** → **Add endpoint** → URL de votre backend (`https://api.aironbot.app/webhook`) → copiez le secret `whsec_`
+   - **Webhook secret** : dans **Webhooks** → **Add endpoint** → URL de votre backend (`https://api.corelia.app/webhook`) → copiez le secret `whsec_`
 
 **Valider**
 
@@ -340,12 +340,12 @@ Dans le projet Firebase :
 
 1. **Android** :
    - Cliquez sur l'icône Android
-   - Package name : `com.aironbot.corely` (ou votre package)
+   - Package name : `com.corelia.corely` (ou votre package)
    - Téléchargez `google-services.json` → placez-le dans `android/app/`
 
 2. **iOS** :
    - Cliquez sur l'icône Apple
-   - Bundle ID : `com.aironbot.corely`
+   - Bundle ID : `com.corelia.corely`
    - Téléchargez `GoogleService-Info.plist` → placez-le dans `ios/Runner/` via Xcode
 
 3. **Web** :
@@ -383,7 +383,7 @@ Aucune variable `.env` nécessaire — tout est compilé dans `firebase_options.
 
 ### 7.1 Backend URL — **Optionnel**
 
-**Rôle** : Le backend FastAPI déployé sur un serveur cloud (ex: `api.aironbot.app`). Fournit le scraping intelligent, le téléchargement média, le crawling, et la recherche avancée. L'APK et l'extension fonctionnent **100% hors-ligne** sans backend, mais certaines fonctionnalités avancées nécessitent ce endpoint.
+**Rôle** : Le backend FastAPI déployé sur un serveur cloud (ex: `api.corelia.app`). Fournit le scraping intelligent, le téléchargement média, le crawling, et la recherche avancée. L'APK et l'extension fonctionnent **100% hors-ligne** sans backend, mais certaines fonctionnalités avancées nécessitent ce endpoint.
 
 **Créer le serveur**
 
@@ -395,13 +395,13 @@ Aucune variable `.env` nécessaire — tout est compilé dans `firebase_options.
 
 Une fois déployé, l'URL sera par exemple :
 ```
-https://api.aironbot.app
+https://api.corelia.app
 ```
 
 **Valider**
 
 ```bash
-curl https://api.aironbot.app/health
+curl https://api.corelia.app/health
 ```
 
 Doit retourner `{"status": "ok"}`.
@@ -410,7 +410,7 @@ Doit retourner `{"status": "ok"}`.
 
 ```bash
 # .env
-BACKEND_URL=https://api.aironbot.app
+BACKEND_URL=https://api.corelia.app
 ```
 
 ---

@@ -1,4 +1,4 @@
-# PLAN D'ACTION — Transformation vers AironBot
+# PLAN D'ACTION — Transformation vers CorelIA
 
 > Date : 2026-04-24
 > Statut : Phase 2 — Approuvé pour exécution
@@ -206,7 +206,7 @@ Utilisateur mobile (WiFi local)
 ```bash
 # Ollama
 OLLAMA_LOCAL_URL=http://localhost:11434
-OLLAMA_CLOUD_URL=https://ollama.aironbot.app  # Optionnel : instance cloud dédiée
+OLLAMA_CLOUD_URL=https://ollama.corelia.app  # Optionnel : instance cloud dédiée
 OLLAMA_CLOUD_API_KEY=ollama_cloud_key_xxx
 
 # DeepSeek

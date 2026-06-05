@@ -83,7 +83,7 @@ Documenter et comparer les options TTS (Text-to-Speech) pour le mode conversatio
 | **Streaming** | Non — inference par phrase complete |
 | **Hesitations** | Possible via controle prosodique dans le modele |
 
-**Verdict** : **Rejete pour mobile** — modele trop lourd, complexite d'integration elevee. Option interessante pour un backend cloud dedie a la synthese vocale (`api.aironbot.app/tts`).
+**Verdict** : **Rejete pour mobile** — modele trop lourd, complexite d'integration elevee. Option interessante pour un backend cloud dedie a la synthese vocale (`api.corelia.app/tts`).
 
 ---
 

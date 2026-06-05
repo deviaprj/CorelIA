@@ -11,8 +11,8 @@ import 'referral_service.dart';
 /// Utilise `app_links` pour capturer les liens entrants (Android/iOS)
 /// et `url_launcher` + `share_plus` pour générer et partager les liens.
 class DeepLinkService {
-  static const _baseReferralUrl = 'https://aironbot.app/referral';
-  static const _referralScheme = 'aironbot://referral';
+  static const _baseReferralUrl = 'https://corelia.app/referral';
+  static const _referralScheme = 'corelia://referral';
 
   final AppLinks _appLinks = AppLinks();
   StreamSubscription? _linkSubscription;
@@ -44,12 +44,12 @@ class DeepLinkService {
   }
 
   String? _extractCode(Uri uri) {
-    // Schemes supportés : https://aironbot.app/referral?code=ABC123
-    //                      aironbot://referral?code=ABC123
-    if (uri.host == 'aironbot.app' && uri.path == '/referral') {
+    // Schemes supportés : https://corelia.app/referral?code=ABC123
+    //                      corelia://referral?code=ABC123
+    if (uri.host == 'corelia.app' && uri.path == '/referral') {
       return uri.queryParameters['code'];
     }
-    if (uri.scheme == 'aironbot' && uri.host == 'referral') {
+    if (uri.scheme == 'corelia' && uri.host == 'referral') {
       return uri.queryParameters['code'];
     }
     return null;

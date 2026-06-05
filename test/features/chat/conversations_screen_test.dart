@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:airon_bot/features/chat/domain/conversation.dart';
+import 'package:corel_ia/features/chat/domain/conversation.dart';
 
 // Tests simplifiés qui ne dépendent pas des providers Riverpod
 void main() {

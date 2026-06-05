@@ -1,6 +1,6 @@
-# AironBot Cloudflare Worker — API REST
+# CorelIA Cloudflare Worker — API REST
 
-Backend sécurisé du chatbot AironBot, déployé sur Cloudflare Workers.
+Backend sécurisé du chatbot CorelIA, déployé sur Cloudflare Workers.
 Route tout le trafic IA via un proxy unique avec rate limiting, sanitization et fallback automatique.
 
 ## Architecture
@@ -15,7 +15,7 @@ Client Flutter / Extension Chrome
         ▼
 ┌──────────────────────────────┐
 │   Cloudflare Worker          │
-│   api.aironbot.app           │
+│   api.corelia.app           │
 │                              │
 │  ┌────────────────────────┐  │
 │  │ Rate Limiting          │  │  100 req/min/IP (/chat)
@@ -57,7 +57,7 @@ Client Flutter / Extension Chrome
 ### POST /chat
 
 ```bash
-curl -X POST https://api.aironbot.app/chat \
+curl -X POST https://api.corelia.app/chat \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $API_SECRET_KEY" \
   -H "Accept: text/event-stream" \
@@ -155,12 +155,12 @@ Le workflow GitHub Actions `.github/workflows/deploy-worker.yml` déploie automa
 **Secrets GitHub requis :**
 - `CLOUDFLARE_API_TOKEN` — Token API Cloudflare avec permissions Workers
 - `CLOUDFLARE_ACCOUNT_ID` — ID du compte Cloudflare
-- `CF_ZONE_ID` — ID de la zone DNS `aironbot.app`
+- `CF_ZONE_ID` — ID de la zone DNS `corelia.app`
 
 ### Après le premier déploiement
 
-1. Vérifier que le Worker répond : `curl https://api.aironbot.app/health`
-2. Configurer le DNS : ajouter un enregistrement CNAME `api.aironbot.app` → Worker
+1. Vérifier que le Worker répond : `curl https://api.corelia.app/health`
+2. Configurer le DNS : ajouter un enregistrement CNAME `api.corelia.app` → Worker
 3. Activer SSL/TLS "Complet (strict)" dans le dashboard Cloudflare
 4. Configurer le client Flutter avec les mêmes `BACKEND_URL` et `API_SECRET_KEY`
 
@@ -170,7 +170,7 @@ Le workflow GitHub Actions `.github/workflows/deploy-worker.yml` déploie automa
 
 ```
 Flutter App (.env)
-  ├── BACKEND_URL=https://api.aironbot.app
+  ├── BACKEND_URL=https://api.corelia.app
   ├── API_SECRET_KEY=<même valeur que dans le Worker>
   └── DEEPSEEK_API_KEY / OPENROUTER_API_KEY (fallback dev uniquement)
 
@@ -190,7 +190,7 @@ clés API embarquées. Ce mode est utile pour le développement local mais ne do
 
 ```bash
 flutter build apk --release \
-  --dart-define=BACKEND_URL=https://api.aironbot.app \
+  --dart-define=BACKEND_URL=https://api.corelia.app \
   --dart-define=API_SECRET_KEY=... \
   --dart-define=DEEPSEEK_API_KEY=... \
   --dart-define=OPENROUTER_API_KEY=...

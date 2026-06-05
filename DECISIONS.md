@@ -1,6 +1,6 @@
-# AironBot — Décisions Architecturales (ADR)
+# CorelIA — Décisions Architecturales (ADR)
 
-Ce fichier documente les décisions architecturales importantes prises durant le développement d'AironBot.
+Ce fichier documente les décisions architecturales importantes prises durant le développement d'CorelIA.
 
 ---
 
@@ -435,7 +435,7 @@ Les commandes slash (`/summarize`, `/extract`, `/links`, `/metadata`) ne fonctio
 - ✅ Commandes slash fonctionnent sur mobile, web, extension
 - ✅ Résultats de recherche avec vrais prix et offres extraits des comparateurs
 - ✅ Pas de dépendance CORS côté client
-- ⚠️ Dépendance au backend cloud `api.aironbot.app` (mais le fallback "liens directs" reste disponible côté client si le backend est down)
+- ⚠️ Dépendance au backend cloud `api.corelia.app` (mais le fallback "liens directs" reste disponible côté client si le backend est down)
 - ⚠️ Latence réseau ajoutée (~1-3s pour le scraping multi-source)
 - ⚠️ Les sélecteurs CSS des sites peuvent changer — nécessite un mécanisme de mise à jour des `_LEARNED_SELECTORS`
 
@@ -701,7 +701,7 @@ Le mode vocal V16 (half-duplex tour-par-tour) avait une régression bloquante : 
 **Statut** : Accepté
 
 ### Contexte
-Le projet avait deux identités visuelles en coexistence : l'ancien thème AironBot (`#6C63FF` violet, `Icons.auto_awesome`) visible sur le login screen et l'onboarding, et le nouveau thème Cofely (`#003F5C` bleu foncé, logo "C") visible sur les écrans principaux (chat, settings). Les icônes Android et web étaient encore les icônes Flutter génériques.
+Le projet avait deux identités visuelles en coexistence : l'ancien thème CorelIA (`#6C63FF` violet, `Icons.auto_awesome`) visible sur le login screen et l'onboarding, et le nouveau thème Cofely (`#003F5C` bleu foncé, logo "C") visible sur les écrans principaux (chat, settings). Les icônes Android et web étaient encore les icônes Flutter génériques.
 
 ### Décision
 **Centralisation complète du design system dans `lib/app/cofely_theme.dart`** :

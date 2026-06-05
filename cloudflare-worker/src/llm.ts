@@ -205,8 +205,8 @@ async function* streamOpenRouter(
     headers: {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${apiKey}`,
-      'HTTP-Referer': 'https://aironbot.app',
-      'X-Title': 'AironBot API',
+      'HTTP-Referer': 'https://corelia.app',
+      'X-Title': 'CorelIA API',
     },
     body: JSON.stringify({
       model,
@@ -351,8 +351,8 @@ export async function routeChatCompletionSync(
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${env.OPENROUTER_API_KEY}`,
-          'HTTP-Referer': 'https://aironbot.app',
-          'X-Title': 'AironBot API',
+          'HTTP-Referer': 'https://corelia.app',
+          'X-Title': 'CorelIA API',
         },
         body: JSON.stringify({
           model: options.model || 'deepseek/deepseek-r1:free',

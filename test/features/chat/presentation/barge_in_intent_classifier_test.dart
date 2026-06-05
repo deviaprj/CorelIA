@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:airon_bot/features/chat/presentation/barge_in_intent_classifier.dart';
+import 'package:corel_ia/features/chat/presentation/barge_in_intent_classifier.dart';
 
 void main() {
   group('BargeInIntentClassifier', () {
