@@ -1,9 +1,10 @@
 """Search engine with DuckDuckGo primary and SerpAPI fallback."""
 
+from datetime import datetime, timezone
 from typing import Any
 
 import httpx
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, Tag
 
 from backend.core.config import settings
 from backend.core.logging import get_logger
@@ -113,10 +114,8 @@ async def scrape_url(url: str, selectors: dict[str, str] | None = None) -> dict[
 
     result: dict[str, Any] = {"url": url, "title": "", "data": []}
     title_tag = soup.find("title")
-    if title_tag and isinstance(title_tag, BeautifulSoup):
+    if isinstance(title_tag, Tag):
         result["title"] = title_tag.get_text(strip=True)
-    elif title_tag:
-        result["title"] = str(title_tag)
 
     if selectors:
         # Extract using provided CSS selectors
@@ -199,3 +198,93 @@ async def scrape_url(url: str, selectors: dict[str, str] | None = None) -> dict[
             })
 
     return result
+
+
+async def get_weather(location: str, units: str = "metric") -> dict[str, Any]:
+    """Get current weather for a location using Open-Meteo (free, no API key).
+
+    First geocodes the location name to coordinates, then fetches weather data.
+
+    Args:
+        location: City name or coordinates (e.g. "Paris" or "48.8566,2.3522")
+        units: "metric" (Celsius, km/h) or "imperial" (Fahrenheit, mph)
+
+    Returns:
+        Dict with temperature, humidity, wind, conditions, and location info.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            # Step 1: Geocode the location
+            geo_url = "https://geocoding-api.open-meteo.com/v1/search"
+            geo_params: dict[str, Any] = {"name": location, "count": 1, "language": "fr"}
+            geo_resp = await client.get(geo_url, params=geo_params)
+            geo_resp.raise_for_status()
+            geo_data = geo_resp.json()
+
+            if not geo_data.get("results"):
+                # Try with English as fallback
+                geo_params["language"] = "en"
+                geo_resp = await client.get(geo_url, params=geo_params)
+                geo_resp.raise_for_status()
+                geo_data = geo_resp.json()
+
+            if not geo_data.get("results"):
+                return {
+                    "location": location,
+                    "error": f"Location '{location}' not found",
+                    "temperature": None,
+                    "units": units,
+                }
+
+            result = geo_data["results"][0]
+            lat = result["latitude"]
+            lon = result["longitude"]
+            display_name = (
+                result.get("name", location)
+                + (f", {result.get('country', '')}" if result.get("country") else "")
+            )
+
+            # Step 2: Fetch weather from Open-Meteo
+            temp_unit = "celsius" if units == "metric" else "fahrenheit"
+            wind_unit = "kmh" if units == "metric" else "mph"
+            weather_url = "https://api.open-meteo.com/v1/forecast"
+            weather_params: dict[str, Any] = {
+                "latitude": lat,
+                "longitude": lon,
+                "current_weather": True,
+                "daily": "temperature_2m_max,temperature_2m_min,precipitation_probability_max",
+                "temperature_unit": temp_unit,
+                "wind_speed_unit": wind_unit,
+                "timezone": "auto",
+            }
+            weather_resp = await client.get(weather_url, params=weather_params)
+            weather_resp.raise_for_status()
+            weather_data = weather_resp.json()
+
+            current = weather_data.get("current_weather", {})
+            daily = weather_data.get("daily", {})
+
+            return {
+                "location": display_name,
+                "latitude": lat,
+                "longitude": lon,
+                "temperature": current.get("temperature"),
+                "windspeed": current.get("windspeed"),
+                "winddirection": current.get("winddirection"),
+                "weathercode": current.get("weathercode"),
+                "units": units,
+                "forecast": {
+                    "today_max": daily.get("temperature_2m_max", [None])[0] if daily.get("temperature_2m_max") else None,
+                    "today_min": daily.get("temperature_2m_min", [None])[0] if daily.get("temperature_2m_min") else None,
+                    "precipitation_probability": daily.get("precipitation_probability_max", [None])[0] if daily.get("precipitation_probability_max") else None,
+                },
+            }
+
+    except Exception as exc:
+        logger.error("Weather fetch failed", extra={"location": location, "error": str(exc)})
+        return {
+            "location": location,
+            "temperature": None,
+            "units": units,
+            "error": f"Weather service unavailable: {exc}",
+        }

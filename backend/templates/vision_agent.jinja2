@@ -1,0 +1,88 @@
+{%- set image_count = namespace(value=0) -%}
+{%- set video_count = namespace(value=0) -%}
+{%- for msg in messages -%}
+{%- if msg.role == 'user' -%}
+<|im_start|>user
+{%- if msg.content is string -%}
+{{ msg.content }}
+{%- else -%}
+{%- for part in msg.content -%}
+{%- if part.type == 'image' or part.type == 'image_url' or 'image' in part -%}
+{%- set image_count.value = image_count.value + 1 -%}
+{%- if add_vision_id %}Picture {{ image_count.value }}: {% endif -%}
+<|vision_start|><|image_pad|><|vision_end|>
+{%- elif part.type == 'video' or 'video' in part -%}
+{%- set video_count.value = video_count.value + 1 -%}
+{%- if add_vision_id %}Video {{ video_count.value }}: {% endif -%}
+<|vision_start|><|video_pad|><|vision_end|>
+{%- elif 'text' in part -%}
+{{ part.text }}
+{%- elif part is mapping and 'content' in part -%}
+{{ part.content }}
+{%- else -%}
+{{ part }}
+{%- endif -%}
+{%- endfor -%}
+{%- endif -%}
+<|im_end|>
+{%- elif msg.role == 'assistant' -%}
+<|im_start|>assistant
+{%- if msg.content is string -%}
+{{ msg.content }}
+{%- else -%}
+{%- for part in msg.content -%}
+{%- if 'text' in part -%}
+{{ part.text }}
+{%- elif part is mapping and 'content' in part -%}
+{{ part.content }}
+{%- else -%}
+{{ part }}
+{%- endif -%}
+{%- endfor -%}
+{%- endif -%}
+{%- if msg.tool_calls -%}
+{%- for tc in msg.tool_calls -%}
+{%- if tc.function -%}
+{%- set tc = tc.function -%}
+{%- endif -%}
+<tool_call>
+{"name": "{{ tc.name }}", "arguments": {% if tc.arguments is string %}{{ tc.arguments }}{% else %}{{ tc.arguments | tojson }}{% endif %}}
+</tool_call>
+{%- endfor -%}
+{%- endif -%}
+<|im_end|>
+{%- elif msg.role == 'tool' -%}
+{%- if loop.first or (loop.index0 > 0 and messages[loop.index0 - 1].role != 'tool') -%}
+<|im_start|>user
+{%- endif -%}
+<tool_response>
+{%- if msg.content is string -%}
+{{ msg.content }}
+{%- else -%}
+{%- for part in msg.content -%}
+{%- if part.type == 'image' or part.type == 'image_url' or 'image' in part -%}
+{%- set image_count.value = image_count.value + 1 -%}
+{%- if add_vision_id %}Picture {{ image_count.value }}: {% endif -%}
+<|vision_start|><|image_pad|><|vision_end|>
+{%- elif part.type == 'video' or 'video' in part -%}
+{%- set video_count.value = video_count.value + 1 -%}
+{%- if add_vision_id %}Video {{ video_count.value }}: {% endif -%}
+<|vision_start|><|video_pad|><|vision_end|>
+{%- elif 'text' in part -%}
+{{ part.text }}
+{%- elif part is mapping and 'content' in part -%}
+{{ part.content }}
+{%- else -%}
+{{ part }}
+{%- endif -%}
+{%- endfor -%}
+{%- endif -%}
+</tool_response>
+{%- if loop.last or (not loop.last and messages[loop.index0 + 1].role != 'tool') -%}
+<|im_end|>
+{%- endif -%}
+{%- endif -%}
+{%- endfor -%}
+{%- if add_generation_prompt -%}
+<|im_start|>assistant
+{%- endif -%}

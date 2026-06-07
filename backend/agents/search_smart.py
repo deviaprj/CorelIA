@@ -158,7 +158,7 @@ async def _classify_intent(query: str) -> dict[str, Any]:
                 "Authorization": f"Bearer {key}",
             }
             if provider == "openrouter":
-                headers["HTTP-Referer"] = "https://corelia.app"
+                headers["HTTP-Referer"] = "https://zentic.fr"
                 headers["X-Title"] = "CorelIA"
 
             payload = {

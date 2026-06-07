@@ -199,7 +199,7 @@ docker build -t corelia-backend .
 ```env
 DEEPSEEK_API_KEY=sk-xxx
 OPENROUTER_API_KEY=sk-or-xxx
-OLLAMA_CLOUD_URL=https://ollama.corelia.app
+OLLAMA_CLOUD_URL=https://ollama.zentic.fr
 OLLAMA_CLOUD_API_KEY=xxx
 SERPAPI_KEY=xxx
 FIREBASE_PROJECT_ID=corelia-prod

@@ -14,7 +14,7 @@
  *   - CORS configuré pour l'extension Chrome et le Flutter app
  * 
  * Déploiement:
- *   npm run deploy          → production (api.corelia.app)
+ *   npm run deploy          → production (api.zentic.fr)
  *   npm run deploy:staging  → staging
  *   npm run dev             → local (wrangler dev)
  */
@@ -48,12 +48,13 @@ app.use('*', cors({
     // Allow Chrome extensions, localhost, and the main domain
     const allowed = [
       'chrome-extension://',
-      'https://corelia.app',
+      'https://zentic.fr',
       'http://localhost:',
     ];
-    if (!origin) return '*';
+    if (!origin) return 'https://zentic.fr'; // No origin = direct API call, use main domain
     if (allowed.some(prefix => origin.startsWith(prefix))) return origin;
-    return 'https://corelia.app';
+    // Use CORS_ORIGINS env var for additional allowed origins
+    return 'https://zentic.fr';
   },
   allowMethods: ['GET', 'POST', 'OPTIONS'],
   allowHeaders: ['Content-Type', 'Authorization', 'X-Request-ID'],
@@ -66,8 +67,12 @@ app.use('*', cors({
  * Verify the API secret key from the Authorization header.
  * Uses constant-time comparison to prevent timing attacks.
  */
-function verifyApiKey(request: Request, secret?: string): boolean {
-  if (!secret) return true; // No secret configured — allow all (dev mode)
+function verifyApiKey(request: Request, env: string | undefined, secret?: string): boolean {
+  // In production, API key is REQUIRED. In dev/staging, missing key is allowed.
+  if (!secret) {
+    if (env === 'production') return false;
+    return true; // dev/staging: allow unauthenticated
+  }
   
   const authHeader = request.headers.get('Authorization') || '';
   if (!authHeader.startsWith('Bearer ')) return false;
@@ -140,7 +145,7 @@ app.post('/chat', async (c) => {
   }
 
   // ── Auth ──
-  if (!verifyApiKey(c.req.raw, c.env.API_SECRET_KEY)) {
+  if (!verifyApiKey(c.req.raw, c.env.ENVIRONMENT, c.env.API_SECRET_KEY)) {
     log('warn', 'Unauthorized request', { path: '/chat' });
     return c.json({ error: 'Unauthorized' }, 401);
   }

@@ -30,7 +30,7 @@ def test_health_check(client: TestClient) -> None:
 
 
 @patch("backend.core.auth._get_firebase_app", new_callable=lambda: lambda: None)
-@patch("backend.core.auth.firebase_auth.verify_id_token", new_callable=AsyncMock)
+@patch("firebase_admin.auth.verify_id_token", new_callable=AsyncMock)
 def test_chat_streaming_mock(
     mock_verify: AsyncMock,
     mock_get_app: object,
@@ -69,7 +69,7 @@ def test_chat_streaming_mock(
 
 
 @patch("backend.core.auth._get_firebase_app", new_callable=lambda: lambda: None)
-@patch("backend.core.auth.firebase_auth.verify_id_token", new_callable=AsyncMock)
+@patch("firebase_admin.auth.verify_id_token", new_callable=AsyncMock)
 def test_chat_non_streaming_mock(
     mock_verify: AsyncMock,
     mock_get_app: object,

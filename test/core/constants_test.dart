@@ -37,7 +37,7 @@ void main() {
     test('should have correct API URLs', () {
       expect(
         AppConstants.deepSeekBaseUrl,
-        equals('https://api.deepseek.com/chat/completions'),
+        equals('https://api.deepseek.com/v1/chat/completions'),
       );
       expect(
         AppConstants.openRouterBaseUrl,

@@ -8,7 +8,7 @@ abstract class ApiConfig {
   /// URL de base du backend FastAPI.
   /// En dev local : http://10.0.2.2:8000 (Android emulator) ou localhost (iOS/web)
   static const baseUrl = String.fromEnvironment('BACKEND_URL',
-      defaultValue: 'https://api.corelia.app');
+      defaultValue: 'https://api.zentic.fr');
 
   /// Timeout pour les requêtes classiques (recherche, auth, etc.)
   static const connectTimeout = Duration(seconds: 10);

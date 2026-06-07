@@ -295,7 +295,7 @@ REVENUECAT_API_KEY_IOS=appl_xxxxxxxxxxxxxxxxxxxx
 3. Copiez :
    - **Publishable key** : commence par `pk_live_`
    - **Secret key** : commence par `sk_live_` (à stocker côté backend uniquement)
-   - **Webhook secret** : dans **Webhooks** → **Add endpoint** → URL de votre backend (`https://api.corelia.app/webhook`) → copiez le secret `whsec_`
+   - **Webhook secret** : dans **Webhooks** → **Add endpoint** → URL de votre backend (`https://api.zentic.fr/webhook`) → copiez le secret `whsec_`
 
 **Valider**
 
@@ -383,7 +383,7 @@ Aucune variable `.env` nécessaire — tout est compilé dans `firebase_options.
 
 ### 7.1 Backend URL — **Optionnel**
 
-**Rôle** : Le backend FastAPI déployé sur un serveur cloud (ex: `api.corelia.app`). Fournit le scraping intelligent, le téléchargement média, le crawling, et la recherche avancée. L'APK et l'extension fonctionnent **100% hors-ligne** sans backend, mais certaines fonctionnalités avancées nécessitent ce endpoint.
+**Rôle** : Le backend FastAPI déployé sur un serveur cloud (ex: `api.zentic.fr`). Fournit le scraping intelligent, le téléchargement média, le crawling, et la recherche avancée. L'APK et l'extension fonctionnent **100% hors-ligne** sans backend, mais certaines fonctionnalités avancées nécessitent ce endpoint.
 
 **Créer le serveur**
 
@@ -395,13 +395,13 @@ Aucune variable `.env` nécessaire — tout est compilé dans `firebase_options.
 
 Une fois déployé, l'URL sera par exemple :
 ```
-https://api.corelia.app
+https://api.zentic.fr
 ```
 
 **Valider**
 
 ```bash
-curl https://api.corelia.app/health
+curl https://api.zentic.fr/health
 ```
 
 Doit retourner `{"status": "ok"}`.
@@ -410,7 +410,7 @@ Doit retourner `{"status": "ok"}`.
 
 ```bash
 # .env
-BACKEND_URL=https://api.corelia.app
+BACKEND_URL=https://api.zentic.fr
 ```
 
 ---

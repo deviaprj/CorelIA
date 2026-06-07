@@ -241,8 +241,9 @@ class InputBarState extends ConsumerState<InputBar> {
                           child: TextField(
                             controller: _controller,
                             focusNode: _focusNode,
-                            maxLines: 5,
+                            maxLines: 8,
                             minLines: 1,
+                            expands: false,
                             textCapitalization: TextCapitalization.sentences,
                             decoration: InputDecoration(
                               hintText: attachments.isNotEmpty ? 'Ajoutez votre question...' : 'Posez une question...',
@@ -275,10 +276,11 @@ class InputBarState extends ConsumerState<InputBar> {
                   duration: const Duration(milliseconds: 150),
                   child: FilledButton(
                     onPressed: widget.isLoading ? null : _send,
-                    style: FilledButton.styleFrom(
-                      shape: const CircleBorder(),
-                      padding: const EdgeInsets.all(14),
-                    ),
+                  style: FilledButton.styleFrom(
+                    shape: const CircleBorder(),
+                    padding: const EdgeInsets.all(15),
+                    minimumSize: const Size(52, 52),
+                  ),
                     child: widget.isLoading
                         ? const SizedBox(
                             width: 20,

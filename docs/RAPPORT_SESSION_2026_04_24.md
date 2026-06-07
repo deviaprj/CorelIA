@@ -361,7 +361,7 @@ adb -s 6db039ac install -r build/app/outputs/flutter-apk/app-release.apk
 
 ### Lancer l'app
 ```bash
-adb -s 6db039ac shell am start -n com.corelia.corel_ia/.MainActivity
+adb -s 6db039ac shell am start -n com.corelia.corely/.MainActivity
 ```
 
 ### Capture d'écran

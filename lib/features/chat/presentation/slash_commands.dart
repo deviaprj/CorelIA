@@ -214,6 +214,27 @@ class SlashCommands {
       icon: Icons.web,
     ),
     SlashCommand(
+      name: 'scrape-script',
+      description: 'Générer et exécuter un script Python à la volée pour extraire des données',
+      usage: '/scrape-script <url> <instruction>',
+      params: ['url', 'instruction'],
+      icon: Icons.auto_fix_high,
+    ),
+    SlashCommand(
+      name: 'exec',
+      description: "Générer et exécuter un script Python à partir d'instructions",
+      usage: '/exec <instruction>',
+      params: ['instruction'],
+      icon: Icons.terminal,
+    ),
+    SlashCommand(
+      name: 'api-fetch',
+      description: 'Appeler une API REST et transformer la réponse JSON',
+      usage: '/api-fetch <url> <instruction>',
+      params: ['url', 'instruction'],
+      icon: Icons.api,
+    ),
+    SlashCommand(
       name: 'crawl',
       description: 'Crawler récursivement un site pour trouver vidéos, images et liens (HTTrack-style)',
       usage: '/crawl <url> [max_depth] [max_pages]',
@@ -263,6 +284,9 @@ class SlashCommands {
   /// l'extension Chrome (`BrowserActionType.download`).
   static const Set<String> mobileRunnableWithUrl = {
     'scrape',
+    'scrape-script',
+    'exec',
+    'api-fetch',
     'crawl',
     'summarize',
     'extract',
@@ -276,6 +300,9 @@ class SlashCommands {
   static const Set<String> universalCommandNames = {
     'docgen',
     'scrape',
+    'scrape-script',
+    'exec',
+    'api-fetch',
     'summarize',
     'extract',
     'links',

@@ -42,7 +42,7 @@ export async function scrapeUrl(
   // Fetch the page
   const response = await fetch(url, {
     headers: {
-      'User-Agent': 'Mozilla/5.0 (compatible; CorelIA/2.0; +https://corelia.app)',
+      'User-Agent': 'Mozilla/5.0 (compatible; CorelIA/2.0; +https://zentic.fr)',
       'Accept': 'text/html,application/xhtml+xml',
     },
     redirect: 'follow',
@@ -246,7 +246,7 @@ export async function searchWeb(
   
   const response = await fetch(searchUrl, {
     headers: {
-      'User-Agent': 'Mozilla/5.0 (compatible; CorelIA/2.0; +https://corelia.app)',
+      'User-Agent': 'Mozilla/5.0 (compatible; CorelIA/2.0; +https://zentic.fr)',
     },
   });
 

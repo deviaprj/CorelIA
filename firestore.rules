@@ -3,10 +3,24 @@ service cloud.firestore {
   match /databases/{database}/documents {
 
     // ── Utilisateurs ──────────────────────────────────────────────────────────
-    // Un utilisateur ne peut lire/écrire que SON propre document
+    // Un utilisateur ne peut lire/écrire que SON propre document.
+    // Le champ 'plan' ne peut PAS être modifié par l'utilisateur lui-même
+    // (seulement par le backend ou Cloud Functions).
     match /users/{userId} {
       allow read: if isSignedIn() && request.auth.uid == userId;
-      allow write: if isSignedIn() && request.auth.uid == userId;
+
+      // L'utilisateur peut créer son document mais sans définir plan='pro'
+      allow create: if isSignedIn()
+        && request.auth.uid == userId
+        && (!('plan' in request.resource.data) || request.resource.data.plan != 'pro');
+
+      // L'update interdit d'écrire ou modifier le champ 'plan' vers 'pro'
+      allow update: if isSignedIn()
+        && request.auth.uid == userId
+        && (!('plan' in request.resource.data) || request.resource.data.plan == resource.data.plan)
+        && request.resource.data.plan != 'pro';
+
+      allow delete: if isSignedIn() && request.auth.uid == userId;
 
       // ── Préférences synchronisées ──────────────────────────────────────────
       match /preferences/sync {

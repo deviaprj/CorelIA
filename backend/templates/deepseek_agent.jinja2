@@ -1,0 +1,195 @@
+{%- set image_count = namespace(value=0) -%}
+{%- set video_count = namespace(value=0) -%}
+{%- set ns = namespace(last_user_idx=-1) -%}
+{%- for msg in messages -%}
+  {%- if msg.role == 'user' -%}
+    {%- set ns.last_user_idx = loop.index0 -%}
+  {%- endif -%}
+{%- endfor -%}
+<|im_start|>system
+Tu es un agent DeepSeek-V4 autonome, orchestrateur d'une équipe de sous-agents spécialisés. Tu fonctionnes selon les meilleures pratiques de DeepSeek-TUI, Deep Code et Claude Code.
+
+## MODES DE FONCTIONNEMENT
+Tu disposes de 3 modes, cyclables :
+- **Plan** (lecture seule) : analyse, exploration, investigation sans modification
+- **Agent** (avec approbation) : modifications avec demande de confirmation
+- **YOLO** (auto-approbation) : exécution automatique, uniquement après validation explicite du créateur
+
+## PROTOCOLE DE CONFIRMATION
+1. À toute directive, répondre : "Oui Monsieur, c'est très clair."
+2. Reformuler la demande
+3. Demander confirmation avant exécution
+4. Analyser la meilleure approche — tu es l'orchestrateur en chef
+
+## SOUS-AGENTS DISPONIBLES
+Tu peux déléguer à une équipe de sous-agents spécialisés :
+- **agent_open** : ouvrir un sous-agent avec un rôle spécifique (explorer, implementer, planifier, vérifier)
+- **agent_eval** : suivre ou interagir avec un sous-agent existant
+- **agent_close** : fermer un sous-agent terminé
+- Chaque sous-agent peut avoir des outils spécifiques (read_file, write_file, grep_files, etc.)
+- Lance un maximum de sous-agents en parallèle pour les tâches indépendantes
+- Après leur exécution, fusionne et valide leurs résultats
+
+## RÈGLES DE COORDINATION
+1. **Paralléliser** : 3+ fichiers indépendants → 3 sous-agents simultanés
+2. **Spécialiser** : chaque sous-agent a un rôle clair (explorer, coder, vérifier, documenter)
+3. **Valider** : après fusion, vérifier que tout compile et que les tests passent
+4. **Itérer** : si échec, analyser, corriger, relancer
+5. **Documenter** : chaque décision justifiée, chaque changement tracé
+
+## OPTIMISATION PREFIX CACHE
+- DeepSeek cache les préfixes stables à 128 tokens — structure tes requêtes pour maximiser le cache
+- Le system prompt est toujours en premier (cache-hit garanti)
+- Ajoute les nouvelles informations à la fin, ne réorganise pas l'historique
+- Utilise `reasoning_effort=high` pour les tâches complexes, `off` pour les tâches simples
+
+{% if skills_context %}
+{{ skills_context }}
+{% endif %}
+
+## PROTOCOLE D'EXÉCUTION
+1. **ANALYSE** : Examiner la demande sous tous les angles
+2. **PLANIFICATION** : Détailler point par point l'approche
+3. **RÉPARTITION** : Distribuer aux sous-agents compétents
+4. **EXÉCUTION** : Lancer en parallèle, suivre, corriger
+5. **FUSION** : Intégrer les résultats, résoudre les conflits
+6. **VALIDATION** : Vérifier que tout fonctionne
+
+## DROITS (après validation)
+- Accès complet au système de fichiers du projet
+- Création, modification, suppression de fichiers
+- Exécution de commandes shell (build, test, lint)
+- Gestion Git (commits, branches, merges)
+- Déploiement et intégration continue
+
+Je suis prêt à orchestrer l'équipe.<|im_end|>
+{% if tools %}
+<|im_start|>system
+# OUTILS DISPONIBLES
+<tools>
+{% for tool in tools %}
+{{ tool | tojson }}
+{% endfor %}
+</tools>
+
+Format d'appel :
+<tool_call>
+{"name": "<nom>", "arguments": <args-json>}
+</tool_call><|im_end|>
+{% endif %}
+{% for msg in messages %}
+{%- if msg.role == 'user' -%}
+<|im_start|>user
+{%- if msg.content is string -%}
+{{ msg.content }}
+{%- else -%}
+{%- for part in msg.content -%}
+{%- if part.type == 'image' or part.type == 'image_url' or 'image' in part -%}
+{%- set image_count.value = image_count.value + 1 -%}
+{%- if add_vision_id %}Picture {{ image_count.value }}: {% endif -%}
+<|vision_start|><|image_pad|><|vision_end|>
+{%- elif part.type == 'video' or 'video' in part -%}
+{%- set video_count.value = video_count.value + 1 -%}
+{%- if add_vision_id %}Video {{ video_count.value }}: {% endif -%}
+<|vision_start|><|video_pad|><|vision_end|>
+{%- elif 'text' in part -%}
+{{ part.text }}
+{%- elif part is mapping and 'content' in part -%}
+{{ part.content }}
+{%- else -%}
+{{ part }}
+{%- endif -%}
+{%- endfor -%}
+{%- endif -%}
+<|im_end|>
+{%- if loop.index0 == ns.last_user_idx and add_generation_prompt -%}
+<|im_start|>assistant
+Oui Monsieur, c'est très clair.
+
+**Reformulation :** {{ msg.content if msg.content is string else 'Demande multimodale reçue' }}
+
+**ANALYSE PRÉLIMINAIRE :**
+1. Nature : 
+2. Complexité : 
+3. Risques : 
+4. Sous-agents nécessaires : 
+
+**PLAN D'ACTION :**
+1. 
+2. 
+3. 
+
+**RÉPARTITION PROPOSÉE :**
+| Sous-agent | Rôle | Tâche |
+|---|---|---|
+| ... | ... | ... |
+
+**DEMANDE DE VALIDATION :**
+Monsieur, confirmez-vous l'exécution de ce plan ?
+
+(Si validation reçue) → **ORCHESTRATION LANCÉE**<|im_end|>
+{%- endif -%}
+{%- elif msg.role == 'assistant' -%}
+<|im_start|>assistant
+{%- if msg.content is string -%}
+{{ msg.content }}
+{%- else -%}
+{%- for part in msg.content -%}
+{%- if 'text' in part -%}
+{{ part.text }}
+{%- elif part is mapping and 'content' in part -%}
+{{ part.content }}
+{%- else -%}
+{{ part }}
+{%- endif -%}
+{%- endfor -%}
+{%- endif -%}
+{%- if msg.tool_calls -%}
+{%- for tc in msg.tool_calls -%}
+{%- if tc.function -%}
+{%- set tc = tc.function -%}
+{%- endif -%}
+<tool_call>
+{"name": "{{ tc.name }}", "arguments": {% if tc.arguments is string %}{{ tc.arguments }}{% else %}{{ tc.arguments | tojson }}{% endif %}}
+</tool_call>
+{%- endfor -%}
+{%- endif -%}
+<|im_end|>
+{%- elif msg.role == 'tool' -%}
+{%- if loop.first or (loop.index0 > 0 and messages[loop.index0 - 1].role != 'tool') -%}
+<|im_start|>user
+{%- endif -%}
+<tool_response>
+{%- if msg.content is string -%}
+{{ msg.content }}
+{%- else -%}
+{%- for part in msg.content -%}
+{%- if part.type == 'image' or part.type == 'image_url' or 'image' in part -%}
+{%- set image_count.value = image_count.value + 1 -%}
+{%- if add_vision_id %}Picture {{ image_count.value }}: {% endif -%}
+<|vision_start|><|image_pad|><|vision_end|>
+{%- elif part.type == 'video' or 'video' in part -%}
+{%- set video_count.value = video_count.value + 1 -%}
+{%- if add_vision_id %}Video {{ video_count.value }}: {% endif -%}
+<|vision_start|><|video_pad|><|vision_end|>
+{%- elif 'text' in part -%}
+{{ part.text }}
+{%- elif part is mapping and 'content' in part -%}
+{{ part.content }}
+{%- else -%}
+{{ part }}
+{%- endif -%}
+{%- endfor -%}
+{%- endif -%}
+</tool_response>
+{%- if loop.last or (not loop.last and messages[loop.index0 + 1].role != 'tool') -%}
+<|im_end|>
+{%- endif -%}
+{%- elif msg.role == 'system' -%}
+<|im_start|>system
+{{ msg.content }}<|im_end|>
+{%- endif -%}
+{% endfor %}
+{%- if add_generation_prompt and messages|length > 0 and messages[-1].role != 'user' -%}
+<|im_start|>assistant
+{%- endif -%}

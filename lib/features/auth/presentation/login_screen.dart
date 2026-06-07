@@ -15,7 +15,7 @@ class LoginScreen extends ConsumerStatefulWidget {
 }
 
 class _LoginScreenState extends ConsumerState<LoginScreen> {
-  final _emailCtrl = TextEditingController(text: 'test@corelia.app');
+  final _emailCtrl = TextEditingController(text: 'test@zentic.fr');
   final _passCtrl = TextEditingController(text: 'test1234');
   bool _isRegister = false;
   bool _obscurePass = true;
@@ -194,7 +194,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                               const SizedBox(width: 8),
                               Flexible(
                                 child: Text(
-                                  'Compte test : test@corelia.app / test1234',
+                                  'Compte test : test@zentic.fr / test1234',
                                   style: TextStyle(
                                     fontFamily: 'Inter',
                                     fontSize: 11.5,

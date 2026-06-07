@@ -21,8 +21,12 @@
 
 set -euo pipefail
 
-# Ensure Flutter is in PATH
-export PATH="$HOME/flutter/bin:$PATH"
+# Ensure Flutter is in PATH — respect FLUTTER_HOME env var if set
+if [[ -n "${FLUTTER_HOME:-}" ]]; then
+  export PATH="$FLUTTER_HOME/bin:$PATH"
+elif [[ -d "$HOME/flutter/bin" ]]; then
+  export PATH="$HOME/flutter/bin:$PATH"
+fi
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUILD_WEB="$PROJECT_ROOT/build/web"
@@ -41,17 +45,19 @@ if [[ -f "$ENV_FILE" ]]; then
 fi
 
 # Ajouter les args supplémentaires passés au script
-EXTRA_DEFINES="${*:-}"
+EXTRA_DEFINES=("$@")
 
 # ── 2. Build Flutter Web ──────────────────────────────────────────────────────
 echo "⚙️  Build Flutter Web (release)..."
 cd "$PROJECT_ROOT"
+# $DART_DEFINES is a single string, we use it unquoted for word splitting
+# EXTRA_DEFINES is an array, we expand with "${EXTRA_DEFINES[@]}"
 flutter build web \
   --release \
   --pwa-strategy=none \
   --base-href=/ \
-  $DART_DEFINES \
-  $EXTRA_DEFINES
+  ${DART_DEFINES:-} \
+  "${EXTRA_DEFINES[@]:+${EXTRA_DEFINES[@]}}"
 
 echo "✅ Flutter build web terminé."
 
@@ -59,6 +65,14 @@ echo "✅ Flutter build web terminé."
 echo "📂 Préparation de build/extension/..."
 rm -rf "$BUILD_EXT"
 cp -r "$BUILD_WEB" "$BUILD_EXT"
+
+# ── 3b. Flutter 3.38+ : flutter.js → flutter_bootstrap.js ──────────────────────
+# Flutter 3.38+ génère flutter.js au lieu de flutter_bootstrap.js.
+# Le reste du script (HTML, patching) attend flutter_bootstrap.js.
+if [[ ! -f "$BUILD_EXT/flutter_bootstrap.js" ]] && [[ -f "$BUILD_EXT/flutter.js" ]]; then
+  mv "$BUILD_EXT/flutter.js" "$BUILD_EXT/flutter_bootstrap.js"
+  echo "🩹  flutter.js → flutter_bootstrap.js (Flutter 3.38+ compat)"
+fi
 
 # Copier les fichiers spécifiques à l'extension
 cp_files() { local f; for f in "$@"; do [[ -f "$WEB_SRC/$f" ]] && cp "$WEB_SRC/$f" "$BUILD_EXT/$f" || echo "⚠️  $f non trouvé, ignoré."; done; }
@@ -85,6 +99,10 @@ if [[ -f "$INDEX" ]]; then
   # 5a. Corriger <base href="/"> → <base href="./">
   sed -i 's|<base href="/">|<base href="./">|g' "$INDEX"
   echo "🩹  base href corrigé : / → ./"
+
+  # 5a2. Flutter 3.38+ : flutter.js → flutter_bootstrap.js dans le HTML
+  sed -i 's|flutter\.js|flutter_bootstrap.js|g' "$INDEX"
+  echo "🩹  script src flutter.js → flutter_bootstrap.js dans index.html"
 
   # 5b. Retirer toute référence au Service Worker Flutter
   sed -i '/serviceWorker/d' "$INDEX"

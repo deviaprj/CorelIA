@@ -74,26 +74,37 @@ class ModelRouter {
   static final rateLimiter = RateLimitTracker();
 
   /// Registre de tous les modèles disponibles.
+  /// [isFree] = true signifie "gratuit ou assez économique pour les utilisateurs gratuits"
+  /// (DeepSeek direct API ou OpenRouter free tier).
   static const _registry = <String, ModelEntry>{
-    // DeepSeek direct API
+    // DeepSeek direct API (économique, notre clé)
     'deepseek-v4-flash': ModelEntry(
       modelId: 'deepseek-v4-flash',
       provider: 'deepseek',
+      isFree: true,
       supportsSearch: true,
     ),
     'deepseek-v4-pro': ModelEntry(
       modelId: 'deepseek-v4-pro',
       provider: 'deepseek',
+      isFree: true,
       supportsSearch: true,
     ),
     'deepseek-reasoner': ModelEntry(
       modelId: 'deepseek-reasoner',
       provider: 'deepseek',
+      isFree: true,
     ),
     'deepseek-chat': ModelEntry(
       modelId: 'deepseek-chat',
       provider: 'deepseek',
+      isFree: true,
       supportsVision: true,
+    ),
+    'deepseek-coder': ModelEntry(
+      modelId: 'deepseek-coder',
+      provider: 'deepseek',
+      isFree: true,
     ),
     // OpenRouter free
     'deepseek/deepseek-r1:free': ModelEntry(
@@ -122,7 +133,7 @@ class ModelRouter {
       provider: 'openrouter',
       isFree: true,
     ),
-    // OpenRouter paid / cheap
+    // OpenRouter paid — réservés aux utilisateurs Pro
     'google/gemini-flash-1.5': ModelEntry(
       modelId: 'google/gemini-flash-1.5',
       provider: 'openrouter',
@@ -140,6 +151,7 @@ class ModelRouter {
   };
 
   /// Table de routage : tâche → chaîne de fallback ordonnée.
+  /// Pour les utilisateurs gratuits, les modèles payants sont filtrés par [resolveModel].
   static const _routingTable = <TaskType, List<String>>{
     TaskType.general: [
       'deepseek-v4-flash',
@@ -151,8 +163,8 @@ class ModelRouter {
       'deepseek-v4-pro',
     ],
     TaskType.vision: [
-      'google/gemini-flash-1.5',
       'deepseek-chat',
+      'google/gemini-flash-1.5',
       'openai/gpt-4o-mini',
     ],
     TaskType.document: [
@@ -160,6 +172,7 @@ class ModelRouter {
       'deepseek-v4-flash',
     ],
     TaskType.code: [
+      'deepseek-coder',
       'deepseek-v4-pro',
       'qwen/qwen3-coder:free',
       'deepseek-v4-flash',
@@ -210,9 +223,11 @@ class ModelRouter {
   }
 
   /// Résout le meilleur modèle disponible pour une tâche.
+  /// [isPro] : si false, les modèles payants (isFree == false) sont exclus.
   static ModelEntry? resolveModel(
     TaskType taskType, {
     String? userOverride,
+    bool isPro = true,
   }) {
     // Si l'utilisateur a sélectionné un modèle explicite (pas 'auto'/'task:*')
     if (userOverride != null &&
@@ -220,7 +235,12 @@ class ModelRouter {
         !userOverride.startsWith('task:')) {
       final entry = _registry[userOverride];
       if (entry != null && !rateLimiter.isCoolingDown(userOverride)) {
-        return entry;
+        // Les utilisateurs gratuits ne peuvent pas forcer un modèle payant
+        if (!isPro && !entry.isFree) {
+          print('[ModelRouter] Free user tried to force paid model: $userOverride');
+        } else {
+          return entry;
+        }
       }
     }
 
@@ -236,10 +256,15 @@ class ModelRouter {
       final entry = _registry[modelId];
       if (entry == null) continue;
       if (rateLimiter.isCoolingDown(modelId)) continue;
+      // Utilisateurs gratuits : sauter les modèles payants
+      if (!isPro && !entry.isFree) {
+        print('[ModelRouter] Skipping paid model for free user: $modelId');
+        continue;
+      }
       return entry;
     }
 
-    // Dernier recours : deepseek-v4-pro
+    // Dernier recours : deepseek-v4-pro (toujours accessible, même pour les gratuits)
     return _registry['deepseek-v4-pro'];
   }
 

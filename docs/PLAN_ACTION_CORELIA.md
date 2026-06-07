@@ -206,7 +206,7 @@ Utilisateur mobile (WiFi local)
 ```bash
 # Ollama
 OLLAMA_LOCAL_URL=http://localhost:11434
-OLLAMA_CLOUD_URL=https://ollama.corelia.app  # Optionnel : instance cloud dédiée
+OLLAMA_CLOUD_URL=https://ollama.zentic.fr  # Optionnel : instance cloud dédiée
 OLLAMA_CLOUD_API_KEY=ollama_cloud_key_xxx
 
 # DeepSeek

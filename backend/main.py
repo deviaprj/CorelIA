@@ -16,7 +16,8 @@ from backend.agents.data_insights import router as insights_router
 from backend.agents.search_engine import search
 from backend.core.config import settings
 from backend.core.logging import get_logger, set_request_id
-from backend.schemas.chat import SearchResponse, DownloadMediaRequest, DownloadMediaResponse, CrawlRequest, CrawlResponse
+from backend.core.skills_discovery import discover_skills, load_skill
+from backend.schemas.chat import SearchResponse, DownloadMediaRequest, DownloadMediaResponse, CrawlRequest, CrawlResponse, ScriptExecutionRequest, ScriptExecRequest, ApiFetchRequest, ScriptExecutionResponse
 
 logger = get_logger(__name__)
 
@@ -70,7 +71,8 @@ app.add_middleware(
 @app.middleware("http")
 async def request_id_middleware(request: Request, call_next):  # type: ignore[no-untyped-def]
     """Attach a request ID to every incoming request for tracing."""
-    rid = request.headers.get("X-Request-ID") or str(__import__("uuid").uuid4())
+    import uuid as _uuid
+    rid = request.headers.get("X-Request-ID") or str(_uuid.uuid4())
     set_request_id(rid)
     response = await call_next(request)
     response.headers["X-Request-ID"] = rid
@@ -182,6 +184,76 @@ async def crawl_endpoint(
             success=False,
             errors=[f"Crawl failed: {exc}"],
         )
+
+
+@app.post("/script/scrape", response_model=ScriptExecutionResponse)
+@_limiter.limit(settings.rate_limit)
+async def script_scrape_endpoint(
+    request: Request,
+    body: ScriptExecutionRequest,
+) -> ScriptExecutionResponse:
+    """Generate and execute a Python scraping script from natural language.
+
+    - **url**: target URL to scrape
+    - **instruction**: natural language description of what to extract
+
+    The backend uses DeepSeek to generate a Python script that scrapes
+    the URL, executes it in a sandbox, and returns structured JSON results.
+    """
+    from backend.agents.script_executor import scrape_with_script
+
+    result = await scrape_with_script(body.url, body.instruction)
+    return ScriptExecutionResponse(**result)
+
+
+@app.post("/script/exec", response_model=ScriptExecutionResponse)
+@_limiter.limit(settings.rate_limit)
+async def script_exec_endpoint(
+    request: Request,
+    body: ScriptExecRequest,
+) -> ScriptExecutionResponse:
+    """Generate and execute a Python script from natural-language instructions."""
+    from backend.agents.script_executor import exec_with_instruction
+
+    result = await exec_with_instruction(body.instruction)
+    return ScriptExecutionResponse(**result)
+
+
+@app.post("/script/api-fetch", response_model=ScriptExecutionResponse)
+@_limiter.limit(settings.rate_limit)
+async def script_api_fetch_endpoint(
+    request: Request,
+    body: ApiFetchRequest,
+) -> ScriptExecutionResponse:
+    """Fetch an API URL and transform JSON per natural-language instructions."""
+    from backend.agents.script_executor import api_fetch_with_script
+
+    result = await api_fetch_with_script(body.url, body.instruction)
+    return ScriptExecutionResponse(**result)
+
+
+# ── Skills ──────────────────────────────────────────────────────────────────
+
+@app.get("/skills")
+async def skills_list() -> dict[str, Any]:
+    """Liste tous les skills disponibles (découverte runtime).
+
+    Inspiré de DeepSeek-TUI / Deep Code — les skills sont des dossiers
+    contenant un SKILL.md dans .github/skills/, .codewhale/skills/,
+    ~/.agents/skills/, etc.
+    """
+    skills = discover_skills()
+    return {"skills": skills, "total": len(skills)}
+
+
+@app.get("/skills/{skill_id}")
+async def skills_get(skill_id: str) -> dict[str, Any]:
+    """Charge le contenu complet d'un skill."""
+    skill = load_skill(skill_id)
+    if not skill:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail=f"Skill '{skill_id}' introuvable")
+    return skill
 
 
 # Include routers

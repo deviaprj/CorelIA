@@ -190,6 +190,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   controller: _systemPromptController,
                   maxLines: 8,
                   minLines: 6,
+                  autofocus: false,
+                  keyboardType: TextInputType.multiline,
                   decoration: InputDecoration(
                     hintText: 'Décrivez comment Corely doit se comporter...',
                     border: OutlineInputBorder(
@@ -448,7 +450,7 @@ class _ReferralSectionState extends ConsumerState<_ReferralSection> {
   void _shareCode(String code) {
     final text = 'Rejoins Corely avec mon code parrain : $code\n'
         'On gagne chacun +5 requêtes IA gratuites !\n'
-        'https://corelia.app';
+        'https://zentic.fr';
     Share.share(text);
   }
 

@@ -2,6 +2,7 @@
 
 import json
 import uuid
+from datetime import datetime, timezone
 from typing import Any, AsyncGenerator
 
 import httpx
@@ -12,6 +13,7 @@ from backend.agents.tools import execute_tool, get_tool_definitions
 from backend.core.auth import verify_firebase_token
 from backend.core.config import settings
 from backend.core.logging import get_logger
+from backend.core.template_renderer import render_and_parse
 from backend.schemas.chat import ChatRequest, ChatResponse, Message, Role
 
 logger = get_logger(__name__)
@@ -21,18 +23,30 @@ router = APIRouter(prefix="/chat", tags=["chat"])
 async def _stream_deepseek(
     messages: list[dict[str, Any]],
     model: str = "deepseek-v4-flash",
+    temperature: float = 0.7,
+    reasoning_effort: str | None = None,
 ) -> AsyncGenerator[str, None]:
-    """Stream completions from DeepSeek API."""
+    """Stream completions from DeepSeek API.
+
+    Args:
+        messages: Liste des messages formatés
+        model: Identifiant du modèle (ex: 'deepseek-v4-pro')
+        temperature: Température (0.0-2.0)
+        reasoning_effort: 'off', 'high', ou 'max' — contrôle le budget thinking tokens
+    """
     if not settings.deepseek_api_key:
         raise RuntimeError("DeepSeek API key not configured")
 
     url = "https://api.deepseek.com/v1/chat/completions"
-    payload = {
+    payload: dict[str, Any] = {
         "model": model,
         "messages": messages,
         "stream": True,
-        "temperature": 0.7,
+        "temperature": temperature,
     }
+    # Injecter reasoning_effort si spécifié (paramètre officiel DeepSeek)
+    if reasoning_effort and reasoning_effort in ("off", "high", "max"):
+        payload["reasoning_effort"] = reasoning_effort
     headers = {
         "Content-Type": "application/json",
         "Authorization": f"Bearer {settings.deepseek_api_key}",
@@ -59,22 +73,23 @@ async def _stream_deepseek(
 async def _stream_openrouter(
     messages: list[dict[str, Any]],
     model: str = "mistralai/mistral-7b-instruct",
+    temperature: float = 0.7,
 ) -> AsyncGenerator[str, None]:
     """Stream completions from OpenRouter."""
     if not settings.openrouter_api_key:
         raise RuntimeError("OpenRouter API key not configured")
 
     url = "https://openrouter.ai/api/v1/chat/completions"
-    payload = {
+    payload: dict[str, Any] = {
         "model": model,
         "messages": messages,
         "stream": True,
-        "temperature": 0.7,
+        "temperature": temperature,
     }
     headers = {
         "Content-Type": "application/json",
         "Authorization": f"Bearer {settings.openrouter_api_key}",
-        "HTTP-Referer": "https://corelia.app",
+        "HTTP-Referer": "https://zentic.fr",
         "X-Title": "CorelIA",
     }
 
@@ -99,20 +114,29 @@ async def _stream_openrouter(
 async def _chat_with_fallback(
     messages: list[dict[str, Any]],
     preferred_model: str | None = None,
+    temperature: float = 0.7,
+    reasoning_effort: str | None = None,
 ) -> AsyncGenerator[str, None]:
     """Route chat request through fallback chain: DeepSeek -> OpenRouter."""
 
     providers: list[tuple[str, Any]] = []
 
-    if preferred_model and preferred_model.startswith("deepseek/"):
-        providers.append(("deepseek", lambda msgs: _stream_deepseek(msgs, model=preferred_model)))
-    elif preferred_model and "/" in preferred_model:
-        providers.append(("openrouter", lambda msgs: _stream_openrouter(msgs, model=preferred_model)))
+    if preferred_model:
+        # Modèle DeepSeek direct (ex: "deepseek-v4-pro", "deepseek-v4-flash")
+        if preferred_model.startswith("deepseek-"):
+            providers.append(("deepseek", lambda msgs, t=temperature, re=reasoning_effort: _stream_deepseek(msgs, model=preferred_model, temperature=t, reasoning_effort=re)))
+        # Modèle OpenRouter (ex: "openai/gpt-4o-mini", "deepseek/deepseek-v4-pro")
+        elif "/" in preferred_model:
+            providers.append(("openrouter", lambda msgs, t=temperature: _stream_openrouter(msgs, model=preferred_model, temperature=t)))
+        else:
+            # Modèle non reconnu → fallback chain par défaut
+            providers.append(("deepseek", lambda msgs, t=temperature, re=reasoning_effort: _stream_deepseek(msgs, temperature=t, reasoning_effort=re)))
+            providers.append(("openrouter", lambda msgs, t=temperature: _stream_openrouter(msgs, model="mistralai/mistral-7b-instruct", temperature=t)))
     else:
-        # Default fallback chain
-        providers.append(("deepseek", lambda msgs: _stream_deepseek(msgs)))
+        # Aucun modèle spécifié → fallback chain par défaut
+        providers.append(("deepseek", lambda msgs, t=temperature, re=reasoning_effort: _stream_deepseek(msgs, temperature=t, reasoning_effort=re)))
         providers.append(
-            ("openrouter", lambda msgs: _stream_openrouter(msgs, model="mistralai/mistral-7b-instruct"))
+            ("openrouter", lambda msgs, t=temperature: _stream_openrouter(msgs, model="mistralai/mistral-7b-instruct", temperature=t))
         )
 
     last_error: Exception | None = None
@@ -141,14 +165,47 @@ async def chat_completions(
     """Chat completions with SSE streaming and provider fallback."""
     messages_raw = [m.model_dump(exclude_none=True) for m in body.messages]
 
+    # Appliquer le template Jinja2 si spécifié
+    if body.template:
+        try:
+            from backend.core.skills_discovery import get_skills_context
+            skills_ctx = get_skills_context() if body.template == "deepseek_agent" else ""
+            messages_raw = render_and_parse(
+                name=body.template,
+                messages=messages_raw,
+                tools=body.tools,
+                add_generation_prompt=True,
+                skills_context=skills_ctx,
+            )
+            logger.info(
+                "Template applied",
+                extra={
+                    "template": body.template,
+                    "input_msgs": len(body.messages),
+                    "output_msgs": len(messages_raw),
+                },
+            )
+        except FileNotFoundError as exc:
+            logger.warning("Template not found, falling back to raw messages", extra={"error": str(exc)})
+        except Exception as exc:
+            logger.error("Template rendering failed, falling back to raw messages", extra={"error": str(exc)})
+
     # Inject system tools if none provided by client
-    tools = body.tools or get_tool_definitions()
+    tools = body.tools or get_tool_definitions(is_pro=True)
+
+    # Note: le suffixe [1m] pour le contexte 1M tokens est géré automatiquement
+    # par l'API DeepSeek quand le modèle le supporte. Pas besoin d'ajout manuel.
 
     if body.stream:
 
         async def event_generator() -> AsyncGenerator[str, None]:
             try:
-                async for chunk in _chat_with_fallback(messages_raw, preferred_model=body.model):
+                async for chunk in _chat_with_fallback(
+                    messages_raw,
+                    preferred_model=body.model,
+                    temperature=body.temperature,
+                    reasoning_effort=body.reasoning_effort,
+                ):
                     yield chunk
                 yield "data: [DONE]\n\n"
             except Exception as exc:
@@ -167,7 +224,12 @@ async def chat_completions(
 
     # Non-streaming path (gather full response)
     full_content = ""
-    async for chunk in _chat_with_fallback(messages_raw, preferred_model=body.model):
+    async for chunk in _chat_with_fallback(
+        messages_raw,
+        preferred_model=body.model,
+        temperature=body.temperature,
+        reasoning_effort=body.reasoning_effort,
+    ):
         prefix = "data: "
         if chunk.startswith(prefix):
             data_str = chunk[len(prefix):].strip()
@@ -183,5 +245,5 @@ async def chat_completions(
         id=str(uuid.uuid4()),
         model=body.model or "fallback",
         message=Message(role=Role.ASSISTANT, content=full_content),
-        created_at=__import__("datetime").datetime.utcnow(),
+        created_at=datetime.now(timezone.utc),
     )

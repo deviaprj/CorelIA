@@ -132,7 +132,7 @@ abstract class AppConstants {
   // ── Stripe ──────────────────────────────────────────────────────────────────
   static String get stripePublicKey => _env('STRIPE_PUBLIC_KEY') ??
       (kDebugMode ? 'pk_test_fallback' : '');
-  static const stripeCheckoutBaseUrl = 'https://corelia.app/checkout';
+  static const stripeCheckoutBaseUrl = 'https://zentic.fr/checkout';
 
   // ── Search APIs ───────────────────────────────────────────────────────────────
   static String? get serpApiKey => _env('SERPAPI_API_KEY');
@@ -141,11 +141,11 @@ abstract class AppConstants {
   // ── App ─────────────────────────────────────────────────────────────────────
   static const appName = 'Corely';
   static const appVersion = '1.1.0';
-  static const appWebUrl = 'https://corelia.app';
-  static const shareTagline = '— Genere par Corely\nhttps://corelia.app';
+  static const appWebUrl = 'https://zentic.fr';
+  static const shareTagline = '— Généré par Corely\nhttps://zentic.fr';
 
   // ── Backend Cloudflare Worker ────────────────────────────────────────────────
-  // URL de base du Worker Cloudflare (ex: https://api.corelia.app)
+  // URL de base du Worker Cloudflare (ex: https://api.zentic.fr)
   static String get backendBaseUrl => _env('BACKEND_URL') ?? '';
 
   // URL complète du endpoint /chat du Worker (SSE streaming)

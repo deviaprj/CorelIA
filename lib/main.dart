@@ -91,7 +91,7 @@ Future<void> main() async {
       // Compte de test automatique pour acces immediat au chat
       try {
         await mockAuthRepository.signInWithEmail(
-          'test@corelia.app',
+          'test@zentic.fr',
           'test1234',
         );
         debugPrint('[DEMO] Connexion compte de test reussie');
@@ -99,7 +99,7 @@ Future<void> main() async {
         // Le compte n'existe pas encore : le creer
         try {
           await mockAuthRepository.registerWithEmail(
-            'test@corelia.app',
+            'test@zentic.fr',
             'test1234',
             'Utilisateur Test',
           );

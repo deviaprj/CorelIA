@@ -106,7 +106,7 @@ void main() {
     test('should have Stripe checkout base URL', () {
       expect(
         AppConstants.stripeCheckoutBaseUrl,
-        equals('https://corelia.app/checkout'),
+        equals('https://zentic.fr/checkout'),
       );
     });
   });

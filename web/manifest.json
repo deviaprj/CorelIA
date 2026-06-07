@@ -53,7 +53,8 @@
     "https://api.openweathermap.org/*",
     "https://lite.duckduckgo.com/*",
     "https://html.duckduckgo.com/*",
-    "https://api.duckduckgo.com/*"
+    "https://api.duckduckgo.com/*",
+    "https://api.zentic.fr/*"
   ],
 
   "content_security_policy": {

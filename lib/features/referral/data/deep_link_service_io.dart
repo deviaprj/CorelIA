@@ -11,7 +11,7 @@ import 'referral_service.dart';
 /// Utilise `app_links` pour capturer les liens entrants (Android/iOS)
 /// et `url_launcher` + `share_plus` pour générer et partager les liens.
 class DeepLinkService {
-  static const _baseReferralUrl = 'https://corelia.app/referral';
+  static const _baseReferralUrl = 'https://zentic.fr/referral';
   static const _referralScheme = 'corelia://referral';
 
   final AppLinks _appLinks = AppLinks();
@@ -44,9 +44,9 @@ class DeepLinkService {
   }
 
   String? _extractCode(Uri uri) {
-    // Schemes supportés : https://corelia.app/referral?code=ABC123
+    // Schemes supportés : https://zentic.fr/referral?code=ABC123
     //                      corelia://referral?code=ABC123
-    if (uri.host == 'corelia.app' && uri.path == '/referral') {
+    if (uri.host == 'zentic.fr' && uri.path == '/referral') {
       return uri.queryParameters['code'];
     }
     if (uri.scheme == 'corelia' && uri.host == 'referral') {

@@ -5,7 +5,7 @@ import 'package:http/http.dart' as http;
 import '../../../core/constants.dart';
 import 'ai_client.dart';
 
-/// Client de chat via le Worker Cloudflare (api.corelia.app/chat).
+/// Client de chat via le Worker Cloudflare (api.zentic.fr/chat).
 ///
 /// Le Worker Cloudflare est le point d'entrée sécurisé pour toutes les
 /// requêtes LLM. Il gère :

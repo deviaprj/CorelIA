@@ -10,7 +10,7 @@ echo "🚀 Déploiement du backend CorelIA"
 echo "==================================="
 
 # Configuration (override via env vars)
-REMOTE_HOST="${REMOTE_HOST:-api.corelia.app}"
+REMOTE_HOST="${REMOTE_HOST:-api.zentic.fr}"
 REMOTE_USER="${REMOTE_USER:-root}"
 DOCKER_IMAGE="${DOCKER_IMAGE:-corelia-backend}"
 DOCKER_TAG="${DOCKER_TAG:-latest}"

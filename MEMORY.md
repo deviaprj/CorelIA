@@ -221,7 +221,110 @@ if (!status.isGranted) {
 
 ---
 
-*Dernière mise à jour : 2026-05-21*
+*Dernière mise à jour : 2026-06-07*
+
+---
+
+### Session 2026-06-07 — Reprise : Audit Critique + Documentation Drift Fix + Vérification isPro
+
+#### Contexte
+Session de reprise autonome. Lecture complète des 4 fichiers de contexte (CLAUDE.md, MEMORY.md, DECISIONS.md, TASKS.md), audit critique de l'existant, correction de la dérive documentaire, vérification de l'intégrité du threading `isPro`.
+
+#### Audit critique — Constats
+1. **Documentation drift** : `CLAUDE.md` décrivait encore le TTS avec chunks de 120 chars, speed 0.90/0.75, et sans mention du tier-aware routing. Corrigé.
+2. **isPro threading** : vérifié tous les call sites dans `chat_notifier.dart` (28 occurrences), `voice_service.dart`, `tts_natural_service.dart` — correctement threadé. Le `voice_conversation_service.dart` délègue à `voice_service.dart` qui gère `isPro`.
+3. **AdRewardTracker** : le code persiste déjà via `SharedPreferences` (`ad_videos_watched_today`, `ad_videos_date`, `ad_last_watch_time_ms`), contrairement à la note "en mémoire uniquement" dans le TODO.
+4. **TTS patchs multiples** : 3 sessions de patchs sur le TTS (V16 markdown cleanup, V17 anti-saccade, 2026-05-27 paramètres). L'approche regex de `cleanMarkdown()` restera fragile. Piste créative : « oralize pass » — un 2e appel LLM qui oralise le markdown.
+
+#### Piste créative — Oralize Pass
+Plutôt que de continuer à patcher les regex de `cleanMarkdown()`, faire produire par le LLM une version « oralisée » de sa réponse avant TTS. Coût : ~100 tokens par réponse, négligeable. Élimine la fragilité des regex.
+
+#### Actions réalisées
+- `CLAUDE.md` : TTS section mise à jour (chunks 300, rates émotion, isPro, pauses naturelles, cleanMarkdown complet)
+- `CLAUDE.md` : ModelRouter section mise à jour (isPro/isFree, tier-aware routing, TTS tier-aware)
+- `CLAUDE.md` : Slash Commands section mise à jour (26→29 commandes, ajout scrape-script/exec/api-fetch, ScriptExecutionService)
+- `CLAUDE.md` : AdRewardTracker TODO marqué comme résolu (SharedPreferences)
+- `flutter analyze` : passage vérifié (exit 0)
+- `git status` : branche `br-corely-agent-pro`, 54 fichiers modifiés, 56 non trackés
+
+#### Implémentation — Oralize Pass (LLM-based markdown cleanup)
+- **Fichier créé** : `lib/features/chat/data/oralize_service.dart` — Service statique `OralizeService.oralize()`
+- **Fichier modifié** : `lib/features/chat/presentation/tts_natural_service.dart` — `speakNaturally()` appelle `OralizeService.oralize()` avant `cleanMarkdown()`
+- **Principe** : au lieu de nettoyer le markdown avec des regex fragiles, un appel LLM léger (DeepSeek Flash, ~100 tokens, ~0.5-1s) convertit le markdown en texte oral naturel. Le LLM comprend le contexte et sait exactement ce qui doit être dit à l'oral (supprime sources, convertit tableaux en phrases, ignore URLs, etc.)
+- **Cache** : LRU 32 entrées pour éviter les appels redondants
+- **Détection intelligente** : `_needsOralization()` détecte si le texte contient du markdown problématique (tableaux, code, liens, listes, headers) — skip automatique pour texte déjà propre
+- **Fallback** : si l'appel LLM échoue (timeout 8s, pas de clé API, erreur réseau), `cleanMarkdown` continue de fonctionner comme filet de sécurité
+- **Coût** : ~$0.00003 par appel, uniquement si markdown détecté
+- **Latence** : ~0.5-1s, masquée par le temps de réponse du LLM principal
+
+### Session 2026-06-05 — Optimisation Coûts API (Tier-Aware Routing)
+
+#### Problème
+Le routage des modèles IA ne tenait pas compte du statut Pro/Free de l'utilisateur. Les utilisateurs gratuits pouvaient consommer des modèles OpenRouter payants (gpt-4o-mini, gemini-flash-1.5, mistral-large-2407) via les chaînes de fallback. Le TTS utilisait OpenRouter TTS (payant) en primaire même pour les gratuits.
+
+#### Solution — Tier-Aware ModelRouter
+**Fichier** : `lib/features/chat/data/model_router.dart`
+
+1. **`isFree: true`** ajouté à tous les modèles DeepSeek direct API (`deepseek-v4-flash`, `deepseek-v4-pro`, `deepseek-reasoner`, `deepseek-chat`). Sémantique : "assez économique pour les utilisateurs gratuits".
+
+2. **Chaîne vision réordonnée** : `[deepseek-chat, google/gemini-flash-1.5, openai/gpt-4o-mini]` — DeepSeek (économique) en premier, modèles OpenRouter payants en fallback.
+
+3. **`resolveModel(isPro:)`** : nouveau paramètre `bool isPro = true`. Si `isPro == false`, les modèles avec `isFree == false` (OpenRouter payants) sont sautés. Les utilisateurs gratuits ne peuvent pas forcer un modèle payant via `userOverride`.
+
+4. **Fallback ultime** : `deepseek-v4-pro` toujours accessible (marqué `isFree: true`).
+
+#### Solution — Threading isPro dans chat_notifier
+**Fichier** : `lib/features/chat/presentation/chat_notifier.dart`
+
+- `isPro` passé à `ModelRouter.resolveModel(taskType, isPro: isPro)` dans tous les appels
+- `isPro` passé à `_getVisionStream(history, isPro: isPro)` → filtré pour la chaîne vision
+- `isPro` threadé à travers `_getWorkerStream()` → `_fallbackToDirectApiStream()` → `ModelRouter.resolveModel()`
+
+#### Solution — TTS gratuit par défaut
+**Fichiers** : `lib/features/chat/presentation/tts_natural_service.dart`, `voice_service.dart`
+
+- `speakNaturally(text, {bool isPro = true})` : si `isPro == false`, OpenRouter TTS est sauté → flutter_tts natif (gratuit) utilisé directement
+- `VoiceServiceNotifier` lit `isProProvider` et passe `isPro` à chaque appel TTS
+
+#### Impact attendu
+- **Utilisateurs gratuits** : $0.00 de coût API par requête (DeepSeek direct uniquement, TTS natif)
+- **Utilisateurs Pro** : inchangé, accès à tous les modèles OpenRouter + TTS OpenRouter
+- **Vision gratuite** : deepseek-chat (économique) au lieu de gemini-flash-1.5 (payant)
+- **Fallback** : si tous les modèles gratuits sont en rate-limit, fallback sur deepseek-v4-pro
+
+#### Règle
+- Tout nouveau modèle ajouté au registre doit avoir `isFree` correctement défini
+- `isFree = true` = DeepSeek direct API ou OpenRouter free tier
+- `isFree = false` (défaut) = OpenRouter payant, réservé aux Pro
+
+### Session 2026-06-06 — Scripts à la volée (Scraping IA)
+
+#### Problème
+Le scraping était statique : 26 commandes slash codées en dur, aucune capacité de génération de script à la volée. Pour extraire des données d'une page inconnue, il fallait soit utiliser les sélecteurs CSS manuels (`/scrape`), soit espérer que le backend `search_smart` ait un sélecteur pré-appris.
+
+#### Solution — `/scrape-script <url> <instruction>`
+**Fichiers créés** :
+- `backend/agents/script_executor.py` — Sandbox Python isolé qui génère et exécute des scripts via DeepSeek
+- `lib/features/chat/data/script_execution_service.dart` — Client Dart avec formatage markdown
+
+**Fichiers modifiés** :
+- `backend/main.py` — Nouvel endpoint `POST /script/scrape`
+- `backend/schemas/chat.py` — `ScriptExecutionRequest` / `ScriptExecutionResponse`
+- `lib/features/chat/presentation/slash_commands.dart` — Commande `scrape-script` (27e commande)
+- `lib/features/chat/presentation/chat_notifier.dart` — Handler `_handleSlashScrapeScript()`
+
+**Flux** :
+1. Utilisateur tape `/scrape-script https://... "extraire tous les prix"`
+2. Backend appelle DeepSeek V4 Flash → génère un script Python sur mesure
+3. Script exécuté dans un subprocess isolé (timeout 30s, imports restreints)
+4. Résultat JSON structuré retourné et affiché dans le chat
+
+**Sécurité** :
+- Sandbox : `subprocess.run()` dans `/tmp`, timeout 30s
+- Imports bloqués : `os`, `sys`, `subprocess`, `eval`, `exec`, `open()`, etc.
+- Imports autorisés : `httpx`, `BeautifulSoup`, `json`, `re`, `urllib.parse`
+- Vérification `_is_safe_script()` avant exécution
+- Coût : ~$0.0001 par script (DeepSeek V4 Flash)
 
 ### Session 2026-05-21
 
@@ -420,7 +523,7 @@ Rendre la recherche avancée réellement utile en scrapant les comparateurs pour
 #### Backend deployment
 - Dockerfile buildée localement mais `apt-get` échoue sans internet (DNS Docker local).
 - **Action requise** : exécuter `bash scripts/deploy_backend.sh` depuis la machine de l'utilisateur où Docker a internet.
-- Cible : `api.corelia.app` (FastAPI + uvicorn 4 workers + Docker).
+- Cible : `api.zentic.fr` (FastAPI + uvicorn 4 workers + Docker).
 
 #### Notes pour la prochaine session
 - **Vocal turn-taking** : priorité CRITIQUE. L'IA doit savoir exactement quand parler sans couper la parole. Cela passe par :
@@ -428,9 +531,9 @@ Rendre la recherche avancée réellement utile en scrapant les comparateurs pour
   2. Latence quasi nulle entre la fin de phrase utilisateur et le début du son IA (<300ms)
   3. Voix qui respire : hésitations naturelles ("euh", "hmm"), intonations, pauses
   4. Modèles à évaluer : **StyleTTS 2** (open-source, fine-grained style control) et **ElevenLabs** (multilingue, low-latency, émotion)
-  5. Barge-in intelligent : ne pas interrompre l'utilisateur sauf "stop" explicite ou changement de sujet clair
-- **Tests parsing vols** : tester en conditions réelles avec requêtes lowercase + mots parasites
+   5. Barge-in intelligent : ne pas interrompre l'utilisateur sauf "stop" explicite ou changement de sujet clair
+ - **Tests parsing vols** : tester en conditions réelles avec requêtes lowercase + mots parasites
 
 ---
 
-*Dernière mise à jour : 2026-05-21*
+*Dernière mise à jour : 2026-06-05*

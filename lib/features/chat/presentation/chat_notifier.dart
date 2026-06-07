@@ -15,6 +15,7 @@ import '../data/search_service.dart';
 import '../data/enhanced_search_service.dart';
 import '../data/search_service_global.dart';
 import '../data/search_intent_extractor.dart';
+import '../data/script_execution_service.dart';
 import '../data/weather_service.dart';
 import '../data/location_service.dart';
 import '../data/file_quota_service.dart';
@@ -341,6 +342,12 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
         return await _handleSlashDocgen(parsed, bridge);
       case 'scrape':
         return await _handleSlashScrape(parsed, bridge);
+      case 'scrape-script':
+        return await _handleSlashScrapeScript(parsed, bridge);
+      case 'exec':
+        return await _handleSlashExec(parsed, bridge);
+      case 'api-fetch':
+        return await _handleSlashApiFetch(parsed, bridge);
       case 'crawl':
         return await _handleSlashCrawl(parsed, bridge);
       default:
@@ -568,7 +575,7 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
           await _persistAssistantMessage(
             '❌ Backend non configuré\n\n'
             'BACKEND_URL est vide ou contient localhost. '
-            'Ajoutez `BACKEND_URL=https://api.corelia.app` dans `.env` et recompilez.',
+            'Ajoutez `BACKEND_URL=https://api.zentic.fr` dans `.env` et recompilez.',
           );
           state = state.copyWith(isStreaming: false);
           return true;
@@ -2391,6 +2398,121 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
     return true;
   }
 
+  /// Génère et exécute un script de scraping Python à la volée.
+  /// Usage: /scrape-script <url> <instruction naturelle>
+  Future<bool> _handleSlashScrapeScript(ParsedSlashCommand cmd, ExtensionBridge bridge) async {
+    if (cmd.args.isEmpty) {
+      await _persistAssistantMessage(
+        '❌ Usage incorrect\n\n'
+        'Commande `/scrape-script` nécessite une URL et une instruction.\n\n'
+        '💡 **Usage** : `/scrape-script <url> <instruction>`\n'
+        '📝 **Exemple** : `/scrape-script https://leboncoin.fr extraire tous les iPhone < 300€ avec prix et vendeur`',
+      );
+      state = state.copyWith(isStreaming: false);
+      return true;
+    }
+
+    final url = cmd.args[0];
+    final instruction = cmd.args.length > 1
+        ? cmd.args.sublist(1).join(' ')
+        : 'Extraire les données principales de la page';
+
+    await _persistAssistantMessage(
+      '🔬 **Génération de script en cours...**\n\n'
+      '**URL**: $url\n'
+      '**Instruction**: $instruction\n\n'
+      '_DeepSeek génère un script Python sur mesure..._',
+    );
+
+    try {
+      final result = await ScriptExecutionService.scrapeWithScript(url, instruction);
+      await _persistAssistantMessage(result.formatScrapeMarkdown(url, instruction));
+    } catch (e) {
+      await _persistAssistantMessage(
+        '❌ Échec du script\n\n'
+        'Erreur : $e\n\n'
+        '💡 Vérifiez que l\'URL est accessible et que le backend est disponible.',
+      );
+    }
+    state = state.copyWith(isStreaming: false);
+    return true;
+  }
+
+  /// Génère et exécute un script Python générique à la volée.
+  /// Usage: /exec <instruction naturelle>
+  Future<bool> _handleSlashExec(ParsedSlashCommand cmd, ExtensionBridge bridge) async {
+    final instruction = cmd.args.join(' ').trim();
+    if (instruction.isEmpty) {
+      await _persistAssistantMessage(
+        '❌ Usage incorrect\n\n'
+        'Commande `/exec` nécessite une instruction.\n\n'
+        '💡 **Usage** : `/exec <instruction>`\n'
+        '📝 **Exemple** : `/exec convertir 42 USD en EUR via une API publique`',
+      );
+      state = state.copyWith(isStreaming: false);
+      return true;
+    }
+
+    await _persistAssistantMessage(
+      '🚀 **Génération de script en cours...**\n\n'
+      '**Instruction**: $instruction\n\n'
+      '_DeepSeek génère un script Python sur mesure..._',
+    );
+
+    try {
+      final result = await ScriptExecutionService.execWithInstruction(instruction);
+      await _persistAssistantMessage(result.formatExecMarkdown(instruction));
+    } catch (e) {
+      await _persistAssistantMessage(
+        '❌ Échec du script\n\n'
+        'Erreur : $e\n\n'
+        '💡 Vérifiez que le backend est disponible.',
+      );
+    }
+    state = state.copyWith(isStreaming: false);
+    return true;
+  }
+
+  /// Appelle une API REST et transforme la réponse JSON.
+  /// Usage: /api-fetch <url> <instruction>
+  Future<bool> _handleSlashApiFetch(ParsedSlashCommand cmd, ExtensionBridge bridge) async {
+    if (cmd.args.isEmpty) {
+      await _persistAssistantMessage(
+        '❌ Usage incorrect\n\n'
+        'Commande `/api-fetch` nécessite une URL et une instruction.\n\n'
+        '💡 **Usage** : `/api-fetch <url> <instruction>`\n'
+        '📝 **Exemple** : `/api-fetch https://api.open-meteo.com/v1/forecast?latitude=48.85&longitude=2.35 météo 3 prochains jours Paris en tableau`',
+      );
+      state = state.copyWith(isStreaming: false);
+      return true;
+    }
+
+    final url = cmd.args[0];
+    final instruction = cmd.args.length > 1
+        ? cmd.args.sublist(1).join(' ')
+        : 'Retourner les données principales en JSON structuré';
+
+    await _persistAssistantMessage(
+      '🌐 **API fetch en cours...**\n\n'
+      '**URL**: $url\n'
+      '**Instruction**: $instruction\n\n'
+      '_DeepSeek génère un script de transformation JSON..._',
+    );
+
+    try {
+      final result = await ScriptExecutionService.apiFetchWithScript(url, instruction);
+      await _persistAssistantMessage(result.formatApiFetchMarkdown(url, instruction));
+    } catch (e) {
+      await _persistAssistantMessage(
+        '❌ Échec API fetch\n\n'
+        'Erreur : $e\n\n'
+        "💡 Vérifiez l'URL et que le backend est disponible.",
+      );
+    }
+    state = state.copyWith(isStreaming: false);
+    return true;
+  }
+
   String _normalizeDocFormat(String raw) {
     final lower = raw.toLowerCase();
     if (lower == 'txt' || lower == 'text') return 'text';
@@ -3107,7 +3229,7 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
 
     // Insérer le prompt système en tête
     historyMessages.insert(0, Message(
-      id: 'corely_system_${DateTime.now().millisecondsSinceEpoch}',
+      id: 'corely_system',
       conversationId: arg,
       role: Role.system,
       content: fullSystemPrompt,
@@ -3229,7 +3351,7 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
     final lastContent = lastUserMsg['content'];
     final hasImage = lastContent is List;
     if (hasImage) {
-      return _getVisionStream(history);
+      return _getVisionStream(history, isPro: isPro);
     }
 
     // 2. Cloudflare Worker — chemin primaire sécurisé (pas de clés API dans l'APK)
@@ -3245,11 +3367,12 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
         attachmentTypes: attachmentTypes,
       );
       final effectiveModel = modelOverride ?? state.selectedModel;
-      final entry = ModelRouter.resolveModel(taskType, userOverride: effectiveModel);
+      final entry = ModelRouter.resolveModel(taskType, userOverride: effectiveModel, isPro: isPro);
       return _getWorkerStream(
         history,
         model: entry?.modelId,
         isVoiceConversation: isVoiceConversation,
+        isPro: isPro,
       );
     }
 
@@ -3265,7 +3388,7 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
     );
     final params = ModelRouter.resolveParams(taskType);
     final effectiveOverride = modelOverride ?? state.selectedModel;
-    final entry = ModelRouter.resolveModel(taskType, userOverride: effectiveOverride);
+    final entry = ModelRouter.resolveModel(taskType, userOverride: effectiveOverride, isPro: isPro);
 
     if (entry == null) {
       return _mockResponseStream();
@@ -3288,6 +3411,7 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
     List<Map<String, dynamic>> history, {
     String? model,
     bool isVoiceConversation = false,
+    bool isPro = true,
   }) async* {
     debugPrint('[ChatNotifier] Routing via Cloudflare Worker (model: ${model ?? 'auto'})');
     _lastUsedModelId = model ?? 'worker:auto';
@@ -3313,11 +3437,11 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
       // Si le Worker n'a produit aucun contenu, fallback direct
       if (!workerProducedContent) {
         debugPrint('[ChatNotifier] Worker returned empty content — falling back to direct API');
-        yield* _fallbackToDirectApiStream(history, isVoiceConversation: isVoiceConversation);
+        yield* _fallbackToDirectApiStream(history, isVoiceConversation: isVoiceConversation, isPro: isPro);
       }
     } on AiException catch (e) {
       debugPrint('[ChatNotifier] Worker failed: $e — falling back to direct API');
-      yield* _fallbackToDirectApiStream(history, isVoiceConversation: isVoiceConversation);
+      yield* _fallbackToDirectApiStream(history, isVoiceConversation: isVoiceConversation, isPro: isPro);
     }
   }
 
@@ -3325,9 +3449,10 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
   Stream<String> _fallbackToDirectApiStream(
     List<Map<String, dynamic>> history, {
     bool isVoiceConversation = false,
+    bool isPro = true,
   }) async* {
     final taskType = TaskType.general;
-    final entry = ModelRouter.resolveModel(taskType);
+    final entry = ModelRouter.resolveModel(taskType, isPro: isPro);
     if (entry != null) {
       _lastUsedModelId = entry.modelId;
       yield* _buildStreamForModel(
@@ -3380,7 +3505,7 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
 
   /// Route une requete avec image vers un modele vision.
   /// Priorite : Ollama (si configure) > ModelRouter vision chain.
-  Stream<String> _getVisionStream(List<Map<String, dynamic>> history) async* {
+  Stream<String> _getVisionStream(List<Map<String, dynamic>> history, {bool isPro = true}) async* {
     // 0. Ollama vision locale (si configuré et disponible)
     final ollama = ref.read(ollamaVisionServiceProvider);
     await ollama.loadConfig();
@@ -3423,8 +3548,8 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
       }
     }
 
-    // 1. ModelRouter vision chain (gemini-flash → deepseek-chat → gpt-4o-mini)
-    final entry = ModelRouter.resolveModel(TaskType.vision);
+    // 1. ModelRouter vision chain (deepseek-chat → gemini-flash → gpt-4o-mini)
+    final entry = ModelRouter.resolveModel(TaskType.vision, isPro: isPro);
     if (entry != null) {
       debugPrint('[ChatNotifier] Vision via ${entry.modelId}');
       _lastUsedModelId = entry.modelId;

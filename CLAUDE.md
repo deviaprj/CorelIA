@@ -7,12 +7,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Corely is a cross-platform AI chat application (Flutter/Dart) targeting 1M+ users. It includes:
 - **Mobile app**: Android/iOS with Firebase Auth, chat, voice input
 - **Chrome Extension**: Same codebase, built with Flutter Web + Manifest V3
-- **Backend** (optional cloud): Python FastAPI at `api.corelia.app` with Redis rate limiting
+- **Backend** (optional cloud): Python FastAPI at `api.zentic.fr` with Redis rate limiting
 - **Monetization**: AdMob ads (free tier), RevenueCat subscriptions (Pro tier)
 - **AI**: DeepSeek-V4-Flash (free text), DeepSeek-Chat (vision fallback), OpenRouter (Pro: Mistral-Large, GPT-4o-mini)
 
 ### Contrainte d'autonomie (règle d'or)
-L'APK Android et l'extension Chrome doivent être 100% autonomes. Aucun backend local requis. Toutes les fonctionnalités doivent fonctionner via services natifs, appels API directs, ou packages Dart/Flutter embarqués. Le backend cloud (`api.corelia.app`) est un bonus, pas une dépendance.
+L'APK Android et l'extension Chrome doivent être 100% autonomes. Aucun backend local requis. Toutes les fonctionnalités doivent fonctionner via services natifs, appels API directs, ou packages Dart/Flutter embarqués. Le backend cloud (`api.zentic.fr`) est un bonus, pas une dépendance.
 
 ## Architecture
 
@@ -48,7 +48,7 @@ lib/
 ├── features/
 │   ├── auth/                    # FirebaseAuth + email/Google/Apple + mock auth
 │   ├── chat/
-│   │   ├── data/                # ai_client, search_service, file/image upload, quotas
+│   │   ├── data/                # ai_client, search_service, oralize_service, file/image upload, quotas
 │   │   ├── domain/              # Message, Conversation models
 │   │   └── presentation/        # ChatNotifier, voice services, UI screens
 │   ├── projects/                # Pro feature: saved projects/folders
@@ -166,17 +166,18 @@ flutter build web --dart-define=DEEPSEEK_API_KEY=sk-xxx --dart-define=OPENROUTER
 **ModelRouter** (`lib/features/chat/data/model_router.dart`):
 - TaskType : general, reasoning, vision, document, code, longFile, vocal, vocalFast
 - `classifyTask()` : détermine le type de tâche (message normal, code, document, vision, etc.)
-- `resolveModel()` : résout le modèle via routing table + rate limit tracking
+- `resolveModel(taskType, {userOverride, isPro})` : résout le modèle via routing table + rate limit tracking
+- **Tier-aware** : `isFree: true` sur les modèles DeepSeek direct API. Si `isPro == false`, les modèles OpenRouter payants (`isFree: false`) sont filtrés.
 - `markRateLimited()` : cooldown automatique en cas de 429
 
 **Routage des requêtes** (`_getDirectAiStream` dans `chat_notifier.dart`):
 1. **modelOverride** (ex: `task:vocal`) → ModelRouter → chaîne spécifique
-2. **Image détectée** (`content` est un `List`) → `_getVisionStream()`
-   - OpenRouter GPT-4o-mini (si clé dispo)
-   - Sinon DeepSeek `deepseek-chat` (modèle vision)
+2. **Image détectée** (`content` est un `List`) → `_getVisionStream(history, isPro:)`
+   - `deepseek-chat` (isFree) en priorité → OpenRouter GPT-4o-mini (Pro uniquement)
    - Sinon `AiException` avec message clair
 3. Pro sans image → OpenRouter Mistral
-4. Free sans image → DeepSeek V4 Flash
+4. Free sans image → DeepSeek V4 Flash (isFree)
+5. **TTS tier-aware** : OpenRouter TTS (`/audio/speech`) uniquement si `isPro == true`, gratuit → flutter_tts natif
 
 **System prompt** — Injecté en tête de chaque conversation:
 - Par défaut: personnalité Corely (chaleureux, direct, tutoiement, français)
@@ -229,17 +230,20 @@ flutter build web --dart-define=DEEPSEEK_API_KEY=sk-xxx --dart-define=OPENROUTER
 - `_pendingTranscript` protège contre les doublons de callback
 
 **TTS** (`lib/features/chat/presentation/tts_natural_service.dart`):
-- **Primaire (mobile)** : OpenRouter TTS (`/audio/speech`) — voix réalistes (nova, shimmer, alloy, echo, fable, onyx)
+- **Tier-aware** : OpenRouter TTS réservé aux Pro (`speakNaturally(text, isPro: true)`). Utilisateurs gratuits → flutter_tts natif.
+- **Oralize Pass (LLM)** : `OralizeService.oralize()` appelle DeepSeek Flash pour convertir le markdown en texte oral naturel AVANT le TTS. Remplace l'approche regex fragile de `cleanMarkdown`. Coût ~$0.00003/appel, latence ~0.5-1s. Fallback automatique vers `cleanMarkdown` si l'appel LLM échoue.
+- **Primaire (mobile Pro)** : OpenRouter TTS (`/audio/speech`) — voix réalistes (nova, shimmer, alloy, echo, fable, onyx)
 - **Fallback universel** : flutter_tts natif avec **sélection dynamique de voix** (`getVoices` → meilleure fr-FR neural/premium)
 - **Préchauffage** : utterance vide dans `init()` pour réduire la latence de la première phrase
-- **Speed adaptatif** : 0.90 pour réponses courtes (<150 chars), 0.75 pour longues
-- **Chunks courts** : 120 caractères max par utterance (meilleure fluidité)
-- OpenRouter TTS speed : 1.0, flutter_tts pitch : 1.10
+- **Speed adaptatif par émotion** : base `_speechRate = 0.42`, adapté via `emotionTtsConfigs` (neutral 0.52, joyful 0.58, sad 0.46). Court texte (<150 chars) : +5%, long texte : -5%.
+- **Chunks intelligents** : max 300 caractères, découpe sur limites de phrases (`.!?`) > clauses (`,;`) > mots. **Jamais au milieu d'un mot.**
+- **Pauses naturelles** : 60ms inter-phrase, 350ms inter-paragraphe (anti-robotique)
+- OpenRouter TTS speed : 1.0, flutter_tts base pitch : 1.10
 - Chaîne : gpt-4o-mini-tts → kokoro-82m (fallback) → flutter_tts (dernier recours)
 - Cache TTS : `TtsCacheService` avec `putBytes()` pour audio OpenRouter
 - `AudioPlayerFactory` : just_audio (mobile) / stub (web)
-- Nettoyage markdown : strip URLs, citations `[n]`, emojis, formatting
-- `speakNaturally()` : nettoye → lit → attend la fin via `Completer`
+- Nettoyage markdown : `cleanMarkdown()` strippe sources, citations `[n]`, tableaux, blocs ` ```reasoning`, artefacts `* - _ | [ ] # >`
+- `speakNaturally()` : parse émotion → cleanMarkdown → lit → attend la fin via `Completer`
 - `TtsEmotion` → voix : neutral→nova, joyful→shimmer, serious→echo, excited→fable, sad→onyx
 
 **Vocal LLM Routing** (`lib/features/chat/data/model_router.dart`):
@@ -378,9 +382,10 @@ flutter build web --dart-define=DEEPSEEK_API_KEY=sk-xxx --dart-define=OPENROUTER
 
 ## Slash Commands Architecture
 
-**26 commands** defined in `slash_commands.dart` :
+**29 commands** defined in `slash_commands.dart` :
 - **Extension-only** : `scroll`, `open`, `click`, `fill`, `screenshot`, `back`, `forward`, `forms`, `tables`, `media`, `autofill`, `inspect`, `highlight`, `waitfor`, `monitor`, `translate`, `searchpage`
 - **Universal (cross-platform)** : `download`, `links`, `pdf`, `summarize`, `extract`, `metadata`, `export`, `docgen`, `scrape`, `crawl`
+- **Script IA (backend)** : `scrape-script` (scraping via script Python généré par IA), `exec` (exécution script Python générique), `api-fetch` (appel API REST + transformation JSON)
 
 **Routing logic** (`_handleSlashCommand()` in `chat_notifier.dart`):
 1. Parse command + args via `SlashCommands.parse()`
@@ -417,6 +422,12 @@ flutter build web --dart-define=DEEPSEEK_API_KEY=sk-xxx --dart-define=OPENROUTER
 - `/links <url> [type]` — liste les liens trouvés (filtrable par video/image/audio/document)
 - `/metadata <url>` — extrait les balises meta (title, description, OG, auteur)
 - **Règle** : si l'argument commence par `http`, le backend `/scrape` est appelé. Sinon, comportement DOM local (extension uniquement).
+
+**Script IA** (`lib/features/chat/data/script_execution_service.dart` + `backend/agents/script_executor.py`):
+- `scrapeWithScript(url, instruction)` → DeepSeek génère un script Python de scraping sur mesure, backend l'exécute
+- `execWithInstruction(instruction)` → DeepSeek génère un script Python générique (calculs, API calls, transformations)
+- `apiFetchWithScript(url, instruction)` → fetch API REST + DeepSeek génère un script de transformation JSON → markdown
+- Commandes slash : `/scrape-script <url> <instruction>`, `/exec <instruction>`, `/api-fetch <url> <instruction>`
 
 ## Multilingue
 
@@ -542,7 +553,7 @@ flutter build web --dart-define=DEEPSEEK_API_KEY=sk-xxx --dart-define=OPENROUTER
 
 ### 🔴 À faire — Priorité CRITIQUE (prochaine session)
 - [ ] **Tester mode vocal V16 sur Xiaomi 12** : 5 tours complets, pas de monologue, barge-in >3 mots, TTS fluide sans sources/asterisques, quota retry auto après vidéo
-- [ ] **Déployer le backend** : `bash scripts/deploy_backend.sh` depuis la machine utilisateur (Docker nécessite internet). Cible `api.corelia.app`.
+- [ ] **Déployer le backend** : `bash scripts/deploy_backend.sh` depuis la machine utilisateur (Docker nécessite internet). Cible `api.zentic.fr`.
 - [ ] **Tester parsing vols réel** : "trouve un billet paris-londre direct du 29/05", requêtes lowercase + mots parasites
 - [ ] **Tester slash commands mobile** : `/scrape https://example.com`, `/summarize <url>`, `/links <url>` avec backend local `192.168.1.38:8000`
 - [ ] **TTS qualité** : évaluer si le nettoyage markdown suffit ou si des artefacts persistent (tableaux complexes, emojis non standards)
@@ -555,7 +566,7 @@ flutter build web --dart-define=DEEPSEEK_API_KEY=sk-xxx --dart-define=OPENROUTER
 - [ ] Tests non-régression : `_tryParseFlightParamsGeneric`, `_isValidCityPair`, IATA fuzzy per-word
 - [ ] Recherche hôtels : `searchHotels` n'utilise pas checkIn/checkOut/guests depuis les params → vérifier passage dans `_performEnhancedSearch`
 - [ ] Retention UI : afficher les streaks, stats d'usage, et question du jour dans l'écran de profil/paramètres
-- [ ] AdRewardTracker : persister l'état tier entre sessions (actuellement en mémoire uniquement)
+- [x] AdRewardTracker : persister l'état tier entre sessions — Fixed V20 : SharedPreferences avec `ad_videos_watched_today`, `ad_videos_date`, `ad_last_watch_time_ms` + reset quotidien minuit
 
 ### 🟢 À faire — Priorité basse
 - [ ] Synchronisation temps réel des préférences entre mobile et extension

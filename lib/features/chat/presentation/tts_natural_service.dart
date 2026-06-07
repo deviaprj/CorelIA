@@ -5,6 +5,7 @@ import 'package:flutter_tts/flutter_tts.dart';
 
 import '../../../core/platform/platform_service.dart';
 import '../data/openrouter_tts_service.dart';
+import '../data/oralize_service.dart';
 import '../data/tts_cache_service.dart';
 import 'audio_player_factory.dart';
 import 'emotion_parser.dart';
@@ -154,14 +155,22 @@ class TtsNaturalService {
   }
 
   /// Parle le texte complet d'un bloc (pas de streaming par phrases).
-  Future<void> speakNaturally(String text) async {
+  Future<void> speakNaturally(String text, {bool isPro = true}) async {
     if (_isSpeaking) await stop();
 
     final parseResult = EmotionParser.parse(text);
     final emotion = parseResult.hasEmotionTag ? parseResult.emotion : _currentEmotion;
-    // CRITICAL: always run cleanMarkdown, even when emotion tags were detected,
-    // so that markdown artifacts (asterisks, pipes, citations, URLs) are stripped.
-    var cleanText = cleanMarkdown(parseResult.cleanText);
+
+    // ── Oralize Pass (LLM) : conversion markdown → texte oral naturel ──
+    // L'approche regex (cleanMarkdown) est fragile face aux tableaux complexes,
+    // blocs de raisonnement imbriqués, et nouveaux patterns markdown.
+    // Le LLM (DeepSeek Flash) comprend le contexte et sait exactement ce qui
+    // doit être dit à l'oral. Coût : ~$0.00003, latence : ~0.5-1s.
+    var cleanText = await OralizeService.oralize(parseResult.cleanText);
+
+    // Light post-processing : cleanMarkdown comme filet de sécurité pour
+    // les artefacts résiduels que le LLM aurait pu manquer.
+    cleanText = cleanMarkdown(cleanText);
 
     // Apply phonetic liaisons for natural prosody
     cleanText = PhoneticLiaisonService.apply(cleanText, _language);
@@ -175,8 +184,9 @@ class TtsNaturalService {
     _isSpeaking = true;
     _currentEmotion = emotion;
 
-    // OpenRouter TTS (mobile, si cle API disponible)
-    if (PlatformService.isMobile && OpenRouterTtsService.isAvailable) {
+    // OpenRouter TTS (mobile, si clé API disponible — Pro uniquement)
+    // Les utilisateurs gratuits utilisent flutter_tts natif (gratuit).
+    if (isPro && PlatformService.isMobile && OpenRouterTtsService.isAvailable) {
       try {
         _activeEngine = TtsEngine.openRouter;
         await _speakWithOpenRouterTts(cleanText, emotion);

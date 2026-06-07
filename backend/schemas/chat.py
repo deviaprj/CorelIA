@@ -34,6 +34,16 @@ class ChatRequest(BaseModel):
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
     max_tokens: int | None = Field(default=None, ge=1, le=8192)
     tools: list[dict[str, Any]] | None = None
+    template: str | None = Field(
+        default=None,
+        description="Template Jinja2 à appliquer (ex: 'commander_agent'). "
+        "Si null, les messages sont envoyés bruts.",
+    )
+    reasoning_effort: str | None = Field(
+        default=None,
+        description="DeepSeek reasoning effort: 'off', 'high', or 'max'. "
+        "Controls thinking token budget. Null = provider default.",
+    )
 
 
 class ChatResponse(BaseModel):
@@ -115,3 +125,38 @@ class CrawlResponse(BaseModel):
     images: list[str] = Field(default_factory=list)
     errors: list[str] = Field(default_factory=list)
     pages: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class ScriptExecutionRequest(BaseModel):
+    """Request body for the /script/scrape endpoint."""
+
+    url: str = Field(..., description="Target URL to scrape")
+    instruction: str = Field(
+        ..., description="Natural language instruction for what to extract"
+    )
+
+
+class ScriptExecRequest(BaseModel):
+    """Request body for the /script/exec endpoint."""
+
+    instruction: str = Field(..., description="Natural language task description")
+
+
+class ApiFetchRequest(BaseModel):
+    """Request body for the /script/api-fetch endpoint."""
+
+    url: str = Field(..., description="API endpoint URL")
+    instruction: str = Field(
+        ..., description="How to transform or filter the API response"
+    )
+
+
+class ScriptExecutionResponse(BaseModel):
+    """Response from the script execution endpoints."""
+
+    success: bool
+    data: Any | None = None
+    error: str | None = None
+    script: str | None = None
+    stdout: str | None = None
+    raw_output: str | None = None

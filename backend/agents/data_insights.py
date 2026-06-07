@@ -7,7 +7,7 @@ Principes de securite :
 - Audit log de toutes les requetes
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -69,7 +69,7 @@ def ingest_insights(
             "action": "ingest",
             "ip": request.client.host if request.client else None,
             "count": len(body.insights),
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
     )
     logger.info(f"Ingested {len(body.insights)} insights")
@@ -87,7 +87,7 @@ def get_trends(
     _: str = Depends(require_api_key),
 ):
     """Retourner les tendances agregees sur les N derniers jours."""
-    cutoff = datetime.utcnow() - timedelta(days=days)
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
     filtered = [
         i for i in _insights_store
         if i["timestamp"] >= cutoff and (type_filter is None or i["type"] == type_filter)
@@ -106,7 +106,7 @@ def get_trends(
             "action": "query_trends",
             "ip": request.client.host if request.client else None,
             "days": days,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
     )
 
@@ -144,7 +144,7 @@ def get_demographics(
         {
             "action": "query_demographics",
             "ip": request.client.host if request.client else None,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
     )
 

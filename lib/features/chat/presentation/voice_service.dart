@@ -8,6 +8,7 @@ import '../data/web_speech_bridge.dart';
 import 'tts_emotion.dart';
 import 'emotion_parser.dart';
 import 'tts_natural_service.dart';
+import '../../monetization/subscription/subscription_service.dart' show isProProvider;
 
 class VoiceState {
   final bool isAvailable;
@@ -264,7 +265,8 @@ class VoiceServiceNotifier extends Notifier<VoiceState> {
     _tts.setEmotion(emotion);
 
     try {
-      await _tts.speakNaturally(text);
+      final isPro = await ref.read(isProProvider.future).catchError((_) => false);
+      await _tts.speakNaturally(text, isPro: isPro);
     } catch (e) {
       debugPrint('[TTS] Error: \$e');
     } finally {
@@ -278,7 +280,8 @@ class VoiceServiceNotifier extends Notifier<VoiceState> {
     _tts.setEmotion(emotion);
     state = state.copyWith(isSpeaking: true, currentEmotion: emotion);
     try {
-      await _tts.speakNaturally(text);
+      final isPro = await ref.read(isProProvider.future).catchError((_) => false);
+      await _tts.speakNaturally(text, isPro: isPro);
     } catch (e) {
       debugPrint('[TTS] Error: \$e');
     } finally {

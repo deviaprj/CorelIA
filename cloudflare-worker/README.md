@@ -15,7 +15,7 @@ Client Flutter / Extension Chrome
         ▼
 ┌──────────────────────────────┐
 │   Cloudflare Worker          │
-│   api.corelia.app           │
+│   api.zentic.fr              │
 │                              │
 │  ┌────────────────────────┐  │
 │  │ Rate Limiting          │  │  100 req/min/IP (/chat)
@@ -57,7 +57,7 @@ Client Flutter / Extension Chrome
 ### POST /chat
 
 ```bash
-curl -X POST https://api.corelia.app/chat \
+curl -X POST https://api.zentic.fr/chat \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $API_SECRET_KEY" \
   -H "Accept: text/event-stream" \
@@ -155,12 +155,12 @@ Le workflow GitHub Actions `.github/workflows/deploy-worker.yml` déploie automa
 **Secrets GitHub requis :**
 - `CLOUDFLARE_API_TOKEN` — Token API Cloudflare avec permissions Workers
 - `CLOUDFLARE_ACCOUNT_ID` — ID du compte Cloudflare
-- `CF_ZONE_ID` — ID de la zone DNS `corelia.app`
+- `CF_ZONE_ID` — ID de la zone DNS `zentic.fr`
 
 ### Après le premier déploiement
 
-1. Vérifier que le Worker répond : `curl https://api.corelia.app/health`
-2. Configurer le DNS : ajouter un enregistrement CNAME `api.corelia.app` → Worker
+1. Vérifier que le Worker répond : `curl https://api.zentic.fr/health`
+2. Configurer le DNS : ajouter un enregistrement CNAME `api.zentic.fr` → Worker
 3. Activer SSL/TLS "Complet (strict)" dans le dashboard Cloudflare
 4. Configurer le client Flutter avec les mêmes `BACKEND_URL` et `API_SECRET_KEY`
 
@@ -170,7 +170,7 @@ Le workflow GitHub Actions `.github/workflows/deploy-worker.yml` déploie automa
 
 ```
 Flutter App (.env)
-  ├── BACKEND_URL=https://api.corelia.app
+  ├── BACKEND_URL=https://api.zentic.fr
   ├── API_SECRET_KEY=<même valeur que dans le Worker>
   └── DEEPSEEK_API_KEY / OPENROUTER_API_KEY (fallback dev uniquement)
 
@@ -190,7 +190,7 @@ clés API embarquées. Ce mode est utile pour le développement local mais ne do
 
 ```bash
 flutter build apk --release \
-  --dart-define=BACKEND_URL=https://api.corelia.app \
+  --dart-define=BACKEND_URL=https://api.zentic.fr \
   --dart-define=API_SECRET_KEY=... \
   --dart-define=DEEPSEEK_API_KEY=... \
   --dart-define=OPENROUTER_API_KEY=...
@@ -199,30 +199,16 @@ flutter build apk --release \
 ## Limites du Worker vs Backend Python
 
 | Fonctionnalité | Cloudflare Worker | Backend Python |
-|----------------|-------------------|----------------|
-| Chat SSE streaming | ✅ | ✅ |
+|---------------|-------------------|----------------|
+| Chat IA (streaming) | ✅ | ✅ |
+| Recherche web | ✅ (DuckDuckGo) | ✅ (DuckDuckGo + SerpAPI) |
 | Scraping HTML | ✅ (HTMLRewriter) | ✅ (BeautifulSoup) |
-| Recherche DuckDuckGo | ✅ | ✅ |
-| Rate limiting | ✅ (built-in WAF) | ✅ (Redis+slowapi) |
-| Extraction média (yt-dlp) | ❌ | ✅ |
-| Crawling récursif (BFS) | ❌ | ✅ |
-| Reconnaissance image (vision) | ⚠️ (via API externe) | ✅ (DeepSeek Vision) |
+| Smart Search | ✅ | ✅ |
+| Download média (yt-dlp) | ❌ | ✅ |
+| Crawling récursif | ❌ | ✅ |
+| Rate limiting | ✅ (Cloudflare WAF + in-code) | ✅ (Redis) |
+| Déploiement | Serverless (zéro maintenance) | Docker / VPS |
 
-> Pour les fonctionnalités marquées ❌, le backend Python peut être déployé en parallèle
-> comme service complémentaire (non requis pour le fonctionnement de base).
+## License
 
-## Structure du projet
-
-```
-cloudflare-worker/
-├── wrangler.jsonc          # Configuration Worker (routes, rate limits, AI binding)
-├── package.json            # Dépendances (Hono, Wrangler, Typescript)
-├── tsconfig.json           # Configuration TypeScript
-├── src/
-│   ├── index.ts            # Routeur Hono (/chat, /search, /scrape, /health)
-│   ├── llm.ts              # Proxy LLM (Workers AI → DeepSeek → OpenRouter)
-│   ├── scrape.ts           # Scraping léger avec HTMLRewriter
-│   ├── sanitize.ts         # Validation et assainissement (injection, XSS)
-│   └── rate_limit.ts       # Rate limiting in-memory (complément au WAF)
-└── README.md
-```
+MIT — voir LICENSE à la racine du projet.

@@ -435,7 +435,7 @@ Les commandes slash (`/summarize`, `/extract`, `/links`, `/metadata`) ne fonctio
 - ✅ Commandes slash fonctionnent sur mobile, web, extension
 - ✅ Résultats de recherche avec vrais prix et offres extraits des comparateurs
 - ✅ Pas de dépendance CORS côté client
-- ⚠️ Dépendance au backend cloud `api.corelia.app` (mais le fallback "liens directs" reste disponible côté client si le backend est down)
+- ⚠️ Dépendance au backend cloud `api.zentic.fr` (mais le fallback "liens directs" reste disponible côté client si le backend est down)
 - ⚠️ Latence réseau ajoutée (~1-3s pour le scraping multi-source)
 - ⚠️ Les sélecteurs CSS des sites peuvent changer — nécessite un mécanisme de mise à jour des `_LEARNED_SELECTORS`
 

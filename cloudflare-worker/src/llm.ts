@@ -205,7 +205,7 @@ async function* streamOpenRouter(
     headers: {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${apiKey}`,
-      'HTTP-Referer': 'https://corelia.app',
+      'HTTP-Referer': 'https://zentic.fr',
       'X-Title': 'CorelIA API',
     },
     body: JSON.stringify({
@@ -351,7 +351,7 @@ export async function routeChatCompletionSync(
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${env.OPENROUTER_API_KEY}`,
-          'HTTP-Referer': 'https://corelia.app',
+          'HTTP-Referer': 'https://zentic.fr',
           'X-Title': 'CorelIA API',
         },
         body: JSON.stringify({

@@ -27,6 +27,7 @@ class DeepSeekClient {
     bool enableSearch = true,
     String? model,
     double? temperature,
+    Map<String, dynamic>? responseFormat,
   }) async* {
     if (apiKey.isEmpty) {
       throw const AiException('Clé API DeepSeek manquante', statusCode: 401);
@@ -56,6 +57,10 @@ class DeepSeekClient {
 
     if (enableSearch) {
       bodyMap['enable_search'] = true;
+    }
+
+    if (responseFormat != null) {
+      bodyMap['response_format'] = responseFormat;
     }
 
     final body = jsonEncode(bodyMap);
@@ -122,6 +127,7 @@ class OpenRouterClient {
     double? temperature,
     double? topP,
     double? frequencyPenalty,
+    Map<String, dynamic>? responseFormat,
   }) async* {
     final bodyMap = <String, dynamic>{
       'model': model,
@@ -136,6 +142,7 @@ class OpenRouterClient {
     if (temperature != null) bodyMap['temperature'] = temperature;
     if (topP != null) bodyMap['top_p'] = topP;
     if (frequencyPenalty != null) bodyMap['frequency_penalty'] = frequencyPenalty;
+    if (responseFormat != null) bodyMap['response_format'] = responseFormat;
 
     final body = jsonEncode(bodyMap);
 

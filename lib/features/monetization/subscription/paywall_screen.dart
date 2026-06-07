@@ -59,10 +59,12 @@ class PaywallScreen extends ConsumerWidget {
                 ),
               ),
               const SizedBox(height: 12),
-              _featureRow('Modèles IA avancés (Mistral Large, GPT-4o)'),
+              _featureRow('Modèles premium (Mistral Large, DeepSeek Pro)'),
               _featureRow('Requêtes illimitées'),
-              _featureRow('Upload de fichiers volumineux (50 MB)'),
-              _featureRow('Recherche web prioritaire'),
+              _featureRow('Fichiers volumineux (50 MB)'),
+              _featureRow('Génération d\'images IA'),
+              _featureRow('Recherche vols & hôtels'),
+              _featureRow('Mémoire agent persistante'),
               const SizedBox(height: 32),
               if (isWeb) ...[
                 Padding(
