@@ -1,0 +1,27 @@
+# ── Configuration bash pour le terminal web CorelIA ─────────────────────
+# Chargé automatiquement quand on se connecte en tant que corelia
+
+# ── Aliases ──────────────────────────────────────────────────────────────
+alias ll='ls -la'
+alias dc='docker compose'
+alias dps='docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"'
+alias dlogs='docker compose logs -f --tail=50'
+alias dcup='docker compose up -d'
+alias dcdown='docker compose down'
+
+# ── Prompt personnalisé ──────────────────────────────────────────────────
+PS1='\[\033[01;34m\]\w\[\033[00m\] \[\033[01;32m\]$\[\033[00m\] '
+
+# ── Éditeur ──────────────────────────────────────────────────────────────
+export EDITOR=nano
+
+# ── Claude Code ──────────────────────────────────────────────────────────
+# Les clés API sont chargées depuis .env monté dans le conteneur
+export CLAUDE_CODE_GLOB_PATTERNS="*.dart,*.py,*.ts,*.js,*.yaml,*.md"
+
+# ── Chargement du .env si monté ──────────────────────────────────────────
+if [ -f /opt/corelia/.env ]; then
+    set -a
+    source /opt/corelia/.env 2>/dev/null
+    set +a
+fi

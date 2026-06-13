@@ -10,25 +10,15 @@
     "head_sampling_rate": 0.1
   },
 
-  "ai": {
-    "binding": "AI"
-  },
-
-  // Le domaine api.zentic.fr est configuré via CNAME DNS → workers.dev
-  // Pas besoin de "routes" explicites quand on utilise un CNAME
-
-  // Rate limiting via Cloudflare WAF (dashboard.cloudflare.com → Security → WAF → Rate limiting rules)
-  // Le code in-code (rate_limit.ts) fournit un fallback par Worker.
+  // Proxy transparent vers le backend Hetzner
+  // Rate limiting géré par Cloudflare WAF (dashboard → Security → WAF)
 
   "vars": {
     "ENVIRONMENT": "production",
-    "CORS_ORIGINS": "chrome-extension://*,https://zentic.fr,http://localhost:*",
-    "DEFAULT_LLM_MODEL": "@cf/meta/llama-3.2-11b-vision-instruct",
-    "DEEPSEEK_API_URL": "https://api.deepseek.com/v1/chat/completions"
+    "BACKEND_HOST": "167.233.100.132:80",
+    "CORS_ORIGINS": "chrome-extension://*,https://zentic.fr,http://localhost:*"
   }
 
   // Secrets à définir via `npx wrangler secret put <NAME>` :
-  //   DEEPSEEK_API_KEY   — DeepSeek API key
-  //   OPENROUTER_API_KEY — OpenRouter API key
-  //   API_SECRET_KEY     — Shared secret for Flutter client auth
+  //   API_SECRET_KEY     — Shared secret for Flutter client auth (optionnel, géré par le backend)
 }

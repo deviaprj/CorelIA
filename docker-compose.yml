@@ -1,0 +1,252 @@
+# ============================================================================
+# CorelIA Cloud Stack — docker-compose.yml
+# Déployé sur Hetzner VPS | api.zentic.fr
+# ============================================================================
+#
+# Architecture :
+#   Internet → Caddy (TLS) → Backend (FastAPI) + CodeWhale Agent
+#                          → Open WebUI (chat)
+#                          → Ollama (LLM local)
+#                          → Unsloth Studio (fine-tuning, GPU)
+#
+# Services internes : Redis (cache/rate-limit), Watchtower (auto-update)
+# Cloudflare Tunnel (optionnel, profil "tunnel")
+# ============================================================================
+
+x-common-env: &common-env
+  DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
+  OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
+  APP_ENV: ${APP_ENV:-production}
+  TZ: Europe/Paris
+
+x-restart-policy: &restart-policy
+  restart: unless-stopped
+
+# ─── Networks ───────────────────────────────────────────────────────────────
+networks:
+  corelia-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
+
+# ─── Volumes ────────────────────────────────────────────────────────────────
+volumes:
+  redis-data:
+  ollama-data:
+  ollama-tmp:
+  unsloth-data:
+  unsloth-models:
+  codewhale-workspace:
+  caddy-data:
+  caddy-config:
+  openwebui-data:
+  terminal-data:
+
+# ══════════════════════════════════════════════════════════════════════════════
+# SERVICES
+# ══════════════════════════════════════════════════════════════════════════════
+
+services:
+
+  # ── Reverse Proxy (Caddy + Let's Encrypt) ───────────────────────────────
+  caddy:
+    <<: *restart-policy
+    image: caddy:2-alpine
+    container_name: corelia-caddy
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks:
+      - corelia-net
+
+  # ── Redis (Rate Limiting + Cache) ───────────────────────────────────────
+  redis:
+    <<: *restart-policy
+    image: redis:7-alpine
+    container_name: corelia-redis
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis-data:/data
+    networks:
+      - corelia-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  # ── CorelIA Backend (FastAPI) ────────────────────────────────────────────
+  backend:
+    <<: *restart-policy
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: corelia-backend
+    environment:
+      <<: *common-env
+      REDIS_URL: redis://redis:6379/0
+      RATE_LIMIT: ${RATE_LIMIT:-100/minute}
+      CORS_ORIGINS: ${CORS_ORIGINS:-https://zentic.fr,https://api.zentic.fr}
+      DEBUG: "false"
+      AGENT_URL: http://codewhale-agent:8001
+    volumes:
+      - ./backend:/app/backend:ro
+      - ./.env:/app/.env:ro
+    networks:
+      - corelia-net
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "sh", "-c", "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\""]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+  # ── CodeWhale Agent API (Actions autonomes) ─────────────────────────────
+  codewhale-agent:
+    <<: *restart-policy
+    build:
+      context: ./codewhale-agent
+      dockerfile: Dockerfile
+    container_name: corelia-codewhale-agent
+    environment:
+      <<: *common-env
+      API_SECRET_KEY: ${API_SECRET_KEY:-}
+      WORKSPACE_DIR: /workspace
+      OLLAMA_HOST: http://ollama:11434
+      MAX_CONCURRENT_TASKS: 5
+      TASK_TIMEOUT_SECONDS: 600
+    volumes:
+      - codewhale-workspace:/workspace
+      - ./:/workspace/corelia:ro
+      - ./.env:/app/.env:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - corelia-net
+    # Ollama est optionnel — l'agent utilise principalement DeepSeek/OpenRouter
+  # ── Ollama (LLM Local — Mistral, Llama, Gemma, Qwen...) ────────────────
+  ollama:
+    <<: *restart-policy
+    image: ollama/ollama:latest
+    container_name: corelia-ollama
+    environment:
+      - OLLAMA_HOST=0.0.0.0:11434
+      - OLLAMA_KEEP_ALIVE=24h
+      - OLLAMA_NUM_PARALLEL=4
+    volumes:
+      - ollama-data:/root/.ollama
+      - ollama-tmp:/tmp
+    ports:
+      - "11434:11434"
+    networks:
+      - corelia-net
+    # ── GPU support (décommente si VPS a un GPU) ──
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+  # ── Open WebUI (Chat Interface multi-LLM) ───────────────────────────────
+  open-webui:
+    <<: *restart-policy
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: corelia-openwebui
+    environment:
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - WEBUI_SECRET_KEY=${WEBUI_SECRET_KEY:-}
+      - ENABLE_OLLAMA_API=true
+      - ENABLE_OPENAI_API=true
+      - OPENAI_API_BASE_URLS=https://api.deepseek.com/v1;https://openrouter.ai/api/v1
+      - OPENAI_API_KEYS=${DEEPSEEK_API_KEY};${OPENROUTER_API_KEY}
+      - WEBUI_NAME=CorelIA Chat
+    volumes:
+      - openwebui-data:/app/backend/data
+    networks:
+      - corelia-net
+    profiles:
+      - full
+
+  # ── Terminal Web (https://terminal.zentic.fr) — ttyd + Claude Code + tmux ──
+  terminal:
+    <<: *restart-policy
+    build:
+      context: ./terminal
+      dockerfile: Dockerfile
+    image: corelia-terminal:latest
+    container_name: corelia-terminal
+    environment:
+      - TZ=Europe/Paris
+      - HOME=/home/corelia
+    volumes:
+      # Projet
+      - /opt/corelia:/opt/corelia:ro
+      # Configs utilisateur (SSH, git, Claude, npm)
+      - /home/corelia/.ssh:/home/corelia/.ssh:ro
+      - /home/corelia/.gitconfig:/home/corelia/.gitconfig:ro
+      - /home/corelia/.claude:/home/corelia/.claude
+      - /home/corelia/.npm:/home/corelia/.npm
+      # Docker (lecture seule)
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - corelia-net
+
+  # ── Unsloth Studio (Fine-tuning Local) ──────────────────────────────────
+  unsloth:
+    <<: *restart-policy
+    image: unslothai/unsloth:latest
+    container_name: corelia-unsloth
+    environment:
+      - HUGGINGFACE_TOKEN=${HF_TOKEN:-}
+      - WANDB_API_KEY=${WANDB_API_KEY:-}
+    volumes:
+      - unsloth-data:/workspace/data
+      - unsloth-models:/workspace/models
+    networks:
+      - corelia-net
+    ports:
+      - "8888:8888"
+      - "7860:7860"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    profiles:
+      - gpu
+
+  # ── Cloudflare Tunnel (Fallback) ─────────────────────────────────────────
+  cloudflared:
+    <<: *restart-policy
+    image: cloudflare/cloudflared:latest
+    container_name: corelia-cloudflared
+    command: tunnel run
+    environment:
+      - TUNNEL_TOKEN=${CF_TUNNEL_TOKEN:-}
+    networks:
+      - corelia-net
+    profiles:
+      - tunnel
+
+  # ── Watchtower (Auto-update containers) ──────────────────────────────────
+  watchtower:
+    <<: *restart-policy
+    image: containrrr/watchtower:latest
+    container_name: corelia-watchtower
+    environment:
+      - WATCHTOWER_CLEANUP=true
+      - WATCHTOWER_SCHEDULE=0 0 3 * * *
+      - WATCHTOWER_NOTIFICATIONS=log
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    profiles:
+      - full

@@ -70,6 +70,24 @@ backend/*.pyc
 # Playwright MCP
 .playwright-mcp/
 
+# Temporary log files from builds/scripts
+.adb.txt
+.analyze_theme.txt
+.apk_*.txt
+.build_*.txt
+.chrome.txt
+.dns_check.txt
+.flutter_*.txt
+.force_install.txt
+.install_*.txt
+.pkg.txt
+.pm_*.txt
+.snap_flutter.txt
+.verify_install.txt
+resp.json
+ssh_key.pub
+~.bashrc
+
 # Cloudflare Worker
 cloudflare-worker/node_modules/
 cloudflare-worker/dist/

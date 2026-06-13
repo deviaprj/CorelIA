@@ -48,7 +48,7 @@ void main() {
     test('should have correct share tagline', () {
       expect(
         AppConstants.shareTagline,
-        contains('Genere par Corely'),
+        contains('Généré par Corely'),
       );
     });
 

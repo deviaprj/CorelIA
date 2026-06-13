@@ -553,10 +553,11 @@ flutter build web --dart-define=DEEPSEEK_API_KEY=sk-xxx --dart-define=OPENROUTER
 
 ### 🔴 À faire — Priorité CRITIQUE (prochaine session)
 - [ ] **Tester mode vocal V16 sur Xiaomi 12** : 5 tours complets, pas de monologue, barge-in >3 mots, TTS fluide sans sources/asterisques, quota retry auto après vidéo
-- [ ] **Déployer le backend** : `bash scripts/deploy_backend.sh` depuis la machine utilisateur (Docker nécessite internet). Cible `api.zentic.fr`.
+- [x] **Déployer le backend** : ✅ Déployé 2026-06-13 sur `api.zentic.fr` (Hetzner VPS). Stack : Caddy + Backend FastAPI + CodeWhale Agent + Redis + Ollama + ttyd. Voir `DEPLOY.md` pour les détails.
 - [ ] **Tester parsing vols réel** : "trouve un billet paris-londre direct du 29/05", requêtes lowercase + mots parasites
-- [ ] **Tester slash commands mobile** : `/scrape https://example.com`, `/summarize <url>`, `/links <url>` avec backend local `192.168.1.38:8000`
+- [ ] **Tester slash commands mobile** : `/scrape https://example.com`, `/summarize <url>`, `/links <url>` avec backend cloud `api.zentic.fr`
 - [ ] **TTS qualité** : évaluer si le nettoyage markdown suffit ou si des artefacts persistent (tableaux complexes, emojis non standards)
+- [ ] **Terminal web** : changer le mot de passe `TTYD_PASS` par défaut (`changeme`) dans `docker-compose.yml` sur le VPS, rebuild et redémarrer
 
 ### 🟡 À faire — Priorité moyenne
 - [ ] Analyse fichiers TXT/MD : tester l'injection comme contexte conversationnel

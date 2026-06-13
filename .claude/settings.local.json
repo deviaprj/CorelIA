@@ -56,7 +56,19 @@
       "Read(//tmp/**)",
       "Bash(unzip -q /home/geekai/Documents/GitHub/CorelIA/docs/pres_2nd_guerre_mondial2.pptx)",
       "Bash(rtk ls *)",
-      "Bash(unzip /home/geekai/Documents/GitHub/CorelIA/docs/pres_2nd_guerre_mondial2.pptx)"
-    ]
+      "Bash(unzip /home/geekai/Documents/GitHub/CorelIA/docs/pres_2nd_guerre_mondial2.pptx)",
+      "Bash(ssh *)",
+      "Bash(rtk read *)",
+      "Bash(rtk git *)",
+      "Bash(python3 -c \"import ast; ast.parse\\(open\\('backend/agents/agent_router.py'\\).read\\(\\)\\); print\\('OK'\\)\")",
+      "Bash(python3 *)",
+      "Bash(rtk grep *)",
+      "Bash(/home/geekai/flutter/bin/flutter analyze *)",
+      "Bash(rtk pytest *)",
+      "Bash(/home/geekai/flutter/bin/flutter --version)",
+      "Bash(/home/geekai/flutter/bin/dart --version)",
+      "Bash(/home/geekai/flutter/bin/flutter doctor *)"
+    ],
+    "additionalDirectories": []
   }
 }

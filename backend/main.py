@@ -11,7 +11,9 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
+from backend.agents.agent_router import router as agent_router
 from backend.agents.chat_router import router as chat_router
+from backend.agents.config_agent import router as config_router
 from backend.agents.data_insights import router as insights_router
 from backend.agents.search_engine import search
 from backend.core.config import settings
@@ -257,5 +259,7 @@ async def skills_get(skill_id: str) -> dict[str, Any]:
 
 
 # Include routers
+app.include_router(agent_router)
+app.include_router(config_router)
 app.include_router(chat_router)
 app.include_router(insights_router)

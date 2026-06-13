@@ -1,6 +1,172 @@
 # TASKS.md — Suivi Corely
 
-Dernière mise à jour : 2026-05-28 — Session V20 : Thème Cofely unifié + nouvelles icônes
+Dernière mise à jour : 2026-06-13 — Session : Infra Hetzner + Cleanup + Corrections sécurité
+
+---
+
+## Terminé — Session 2026-06-12 — CodeWhale Agent + Infra Hetzner + Cleanup Cloudflare Worker ✅
+
+### Problèmes résolus
+
+1. **Nettoyage Cloudflare Worker**
+   - Fichiers morts supprimés : `llm.ts`, `rate_limit.ts`, `sanitize.ts`, `scrape.ts`
+   - Le worker est désormais un proxy reverse transparent uniquement (Hono + CORS + proxy vers Hetzner)
+   - `index.ts` réduit à 167 lignes propres
+
+2. **Création du CodeWhale Agent**
+   - Microservice dans `codewhale-agent/` : FastAPI avec endpoints `/agent/run`, `/agent/tools`, `/agent/status/{id}`, `/agent/result/{id}`, `/agent/stream/{id}`, `/health`
+   - Architecture : tâches asynchrones avec stockage in-memory, tool calling (shell read-only, docker status, disk usage, read file, list directory), LLM via DeepSeek/OpenRouter
+   - Compatible avec `agent_router.py` (bridge backend → codewhale-agent)
+
+3. **Infra Hetzner**
+   - Clé SSH deploy générée (`~/.ssh/id_ed25519_github`)
+   - `~/.ssh/config` configuré pour github.com
+   - Service ttyd ajouté dans `docker-compose.yml` (terminal.zentic.fr)
+   - Caddyfile : routes `terminal.zentic.fr` et `chat.zentic.fr`
+   - Claude Code v2.1.176 + Codewhale v0.8.58 + Node.js v22.22.3 installés
+
+4. **Corrections sécurité & robustesse**
+   - `terminal/Dockerfile` : mot de passe ttyd retiré du hardcoding → variable d'environnement `TTYD_PASS`
+   - `docker-compose.yml` : healthcheck ajouté au service `backend` (curl `/health`)
+   - `docker-compose.yml` : dépendance stricte `codewhale-agent` → `ollama` supprimée (Ollama est optionnel)
+   - `lib/app/cofely_theme.dart` : `DialogThemeData` → `DialogTheme` (API Flutter 3.41)
+   - `test/core/constants_test.dart` : `Genere` → `Généré` (accent)
+
+### Fichiers modifiés
+- `cloudflare-worker/src/index.ts` — refait (proxy pur)
+- `cloudflare-worker/wrangler.jsonc` — vars simplifiées
+- `scripts/deploy_backend.sh` — ajout gestion secrets `.env`
+- `docker-compose.yml` — ajout service `terminal`, healthcheck backend, suppression dépendance agent→ollama
+- `Caddyfile` — ajout routes terminal.zentic.fr et chat.zentic.fr
+- `terminal/Dockerfile` — nouveau (ttyd + Claude Code + Codewhale)
+- `codewhale-agent/` — nouveau (microservice agent complet)
+- `lib/app/cofely_theme.dart` — DialogThemeData → DialogTheme
+- `test/core/constants_test.dart` — fix accent
+
+---
+
+## Terminé — Session 2026-06-13 — Déploiement Backend Réel sur Hetzner ✅
+
+### Problèmes résolus
+
+1. **Déploiement backend cloud**
+   - **Action** : Exécution de `scripts/deploy_backend.sh --full` depuis la machine locale
+   - **Résultat** : Stack complète déployée sur `167.233.100.132` (Hetzner VPS)
+   - **Services UP** : Caddy, Backend FastAPI, CodeWhale Agent, Redis, Ollama, ttyd, Open WebUI
+   - **URLs fonctionnelles** :
+     - `https://api.zentic.fr/health` → `{"status":"ok"}`
+     - `https://agent.zentic.fr/health` → `{"status":"ok", "service":"codewhale-agent"}`
+     - `https://terminal.zentic.fr` → Terminal web ttyd (auth basique)
+
+2. **Corrections post-déploiement**
+   - `docker-compose.yml` : healthcheck backend corrigé (`curl` → Python `urllib.request`, car `python:3.12-slim` n'a pas `curl`)
+   - `docker-compose.yml` : Watchtower `WATCHTOWER_NOTIFICATIONS=log` (correction crash boucle)
+   - `terminal/Dockerfile` : mot de passe externalisé via `TTYD_USER`/`TTYD_PASS` + script `start-ttyd.sh`
+   - `docker-compose.yml` : suppression `depends_on: ollama` pour `codewhale-agent` (Ollama optionnel, pas de GPU)
+
+3. **Sécurité**
+   - `.env` : ajout `CORS_ORIGINS`, `RATE_LIMIT`, `WEBUI_SECRET_KEY`
+   - `terminal/Dockerfile` : mot de passe retiré du hardcoding
+   - `.gitignore` : ajout règles pour fichiers temporaires `.build_*.txt`, `.flutter_*.txt`, etc.
+   - `TACHES_RESTANTES.md` : archivé (obsolète, avril 2026)
+
+4. **Documentation**
+   - `DEPLOY.md` : guide complet de déploiement + troubleshooting + checklist validation
+   - `CLAUDE.md` : marqué backend comme déployé
+   - `DECISIONS.md` : ADR-023 (Infra Hetzner + Caddy) + ADR-024 (CodeWhale Agent)
+
+### Fichiers modifiés
+- `docker-compose.yml` — healthcheck backend, watchtower fix, terminal env vars
+- `terminal/Dockerfile` — mot de passe externalisé, script start-ttyd.sh
+- `terminal/start-ttyd.sh` — nouveau (interpolation variables d'environnement)
+- `.env` — ajout variables manquantes (CORS, RATE_LIMIT, WEBUI_SECRET_KEY)
+- `.gitignore` — règles fichiers temporaires
+- `DEPLOY.md` — nouveau (guide ops complet)
+- `CLAUDE.md` — backend déployé
+- `DECISIONS.md` — ADR-023 + ADR-024
+- `TASKS.md` — sessions juin 2026
+- `MEMORY.md` — session déploiement
+
+---
+
+## TODO next-session (2026-06-14) — Priorités
+
+### 🔴 CRITIQUE
+- [ ] **Changer mot de passe ttyd** sur le VPS : modifier `TTYD_PASS` dans `docker-compose.yml`, rebuild terminal, redémarrer
+- [ ] **Tester mode vocal V16** : 5 tours complets sur Xiaomi 12, barge-in >3 mots, TTS fluide (Oralize Pass), pas de monologue
+- [ ] **Tester parsing vols réel** : "trouve un billet paris-londre direct du 29/05", requêtes lowercase + mots parasites
+- [ ] **Tester slash commands mobile** : `/scrape`, `/summarize`, `/links` avec backend cloud `api.zentic.fr`
+
+### 🟡 MOYEN
+- [ ] **Codewhale binaire** : fix `libdbus-1.so.3` manquant dans le conteneur terminal (`apt-get install libdbus-1-3`)
+- [ ] **GitHub SSH** : ajouter la clé deploy dans GitHub Settings (pour push/pull depuis le VPS)
+- [ ] **TTS qualité** : évaluer Oralize Pass vs cleanMarkdown sur tableaux complexes
+- [ ] **Open WebUI** : tester `chat.zentic.fr` si record DNS Cloudflare ajouté
+
+### 🟢 BAS
+- [ ] **Tests non-régression** : flutter test, vérifier 0 nouveaux échecs
+- [ ] **Extension Chrome** : build + test avec backend cloud (pas seulement localhost)
+- [ ] **Ollama modèles** : pull Mistral/Llama via `scripts/pull_ollama_models.sh` si GPU disponible
+
+---
+
+## Terminé — Session 2026-06-07 — Reprise : Audit Critique + Oralize Pass + Documentation Drift Fix ✅
+
+### Problèmes résolus
+1. **Documentation drift** : `CLAUDE.md` décrivait encore le TTS avec chunks de 120 chars et sans tier-aware. Corrigé.
+2. **isPro threading** : vérifié tous les call sites dans `chat_notifier.dart` (28 occurrences), `voice_service.dart`, `tts_natural_service.dart` — correctement threadé.
+3. **AdRewardTracker persistance** : le code persiste déjà via SharedPreferences, contrairement à la note "en mémoire uniquement" dans le TODO. Corrigé dans la doc.
+4. **TTS patchs multiples** : après 3+ sessions de patchs, création de l'**Oralize Pass** — appel LLM léger (DeepSeek Flash, ~100 tokens) qui convertit le markdown en texte oral naturel AVANT le TTS. Remplace l'approche regex fragile de `cleanMarkdown()`.
+
+### Implémentation — Oralize Pass
+- **Fichier créé** : `lib/features/chat/data/oralize_service.dart` — Service statique `OralizeService.oralize()`
+- **Principe** : appel LLM léger convertit markdown → texte oral naturel. Cache LRU 32 entrées. Fallback automatique vers `cleanMarkdown()`.
+- **Coût** : ~$0.00003 par appel, uniquement si markdown détecté.
+- **Latence** : ~0.5-1s, masquée par le temps de réponse du LLM principal.
+
+### Fichiers modifiés
+- `CLAUDE.md` — TTS section, ModelRouter section, Slash Commands section mises à jour
+- `lib/features/chat/data/oralize_service.dart` — nouveau
+- `lib/features/chat/presentation/tts_natural_service.dart` — `speakNaturally()` appelle OralizeService
+
+---
+
+## Terminé — Session 2026-06-06 — Scripts à la volée (Scraping IA) ✅
+
+### Problème
+Le scraping était statique : 26 commandes slash codées en dur, aucune capacité de génération de script à la volée.
+
+### Solution — `/scrape-script <url> <instruction>`
+- **Backend** : `backend/agents/script_executor.py` — Sandbox Python isolé qui génère et exécute des scripts via DeepSeek
+- **Frontend** : `lib/features/chat/data/script_execution_service.dart` — Client Dart avec formatage markdown
+- **Flux** : DeepSeek V4 Flash génère un script Python sur mesure → exécution dans subprocess isolé (timeout 30s, imports restreints)
+- **Sécurité** : `_is_safe_script()` bloque `os`, `sys`, `subprocess`, `eval`, `exec`, `open()`. Imports autorisés : `httpx`, `BeautifulSoup`, `json`, `re`, `urllib.parse`
+
+### Fichiers créés / modifiés
+- `backend/agents/script_executor.py` — nouveau
+- `lib/features/chat/data/script_execution_service.dart` — nouveau
+- `backend/main.py` — endpoints `POST /script/scrape`, `/script/exec`, `/script/api-fetch`
+- `lib/features/chat/presentation/slash_commands.dart` — commande `scrape-script` (27e)
+- `lib/features/chat/presentation/chat_notifier.dart` — Handler `_handleSlashScrapeScript()`
+
+---
+
+## Terminé — Session 2026-06-05 — Optimisation Coûts API (Tier-Aware Routing) ✅
+
+### Problème
+Le routage IA ne tenait pas compte du statut Pro/Free. Les utilisateurs gratuits pouvaient consommer des modèles OpenRouter payants via les chaînes de fallback.
+
+### Solution — Tier-Aware ModelRouter
+- **`isFree: true`** ajouté à tous les modèles DeepSeek direct API (`deepseek-v4-flash`, `deepseek-chat`, etc.)
+- **`resolveModel(isPro:)`** : si `isPro == false`, les modèles `isFree == false` (OpenRouter payants) sont sautés
+- **TTS gratuit par défaut** : `speakNaturally(text, isPro: true)` → si `isPro == false`, OpenRouter TTS sauté → flutter_tts natif directement
+- **Threading isPro** : passé à travers `chat_notifier.dart`, `voice_service.dart`, `tts_natural_service.dart`
+
+### Impact
+- **Utilisateurs gratuits** : $0.00 de coût API par requête (DeepSeek direct uniquement, TTS natif)
+- **Utilisateurs Pro** : inchangé, accès à tous les modèles OpenRouter + TTS OpenRouter
+
+---
 
 ## Terminé — Session 2026-05-28 — Thème Cofely Unifié + Icônes + Login/Onboarding ✅
 

@@ -1,0 +1,53 @@
+# Caddyfile — Reverse Proxy pour CorelIA Cloud
+# Mode TLS automatique via Let's Encrypt (Caddy gère les certificats)
+#
+# DNS requis dans Cloudflare :
+#   api.zentic.fr      A → 167.233.100.132  (proxy ON)
+#   agent.zentic.fr    A → 167.233.100.132  (proxy ON)
+#   chat.zentic.fr     A → 167.233.100.132  (proxy ON)
+#   terminal.zentic.fr A → 167.233.100.132  (proxy OFF — WebSocket)
+
+{
+    # Forcer HTTPS (redirection automatique http→https)
+    auto_https disable_redirects
+}
+
+# API Backend (port 8000 interne)
+api.zentic.fr {
+    tls {
+        issuer acme
+    }
+    reverse_proxy backend:8000 {
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Real-IP {remote_host}
+    }
+}
+
+# CodeWhale Agent
+agent.zentic.fr {
+    tls {
+        issuer acme
+    }
+    reverse_proxy codewhale-agent:8001
+}
+
+# Open WebUI (chat interface)
+chat.zentic.fr {
+    tls {
+        issuer acme
+    }
+    reverse_proxy open-webui:8080
+}
+
+# Terminal web (ttyd) — sans proxy Cloudflare (WebSocket)
+terminal.zentic.fr {
+    tls {
+        issuer acme
+    }
+    reverse_proxy terminal:7681
+}
+
+# Fallback : IP directe → Caddy welcome
+:80 {
+    respond "CorelIA Cloud — configure un sous-domaine valide"
+}

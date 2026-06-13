@@ -1,0 +1,240 @@
+#cloud-config
+# ============================================================================
+# CorelIA Cloud — Hetzner VPS Provisioning
+# ============================================================================
+# Usage:
+#   1. Dans la console Hetzner, crée un VPS (CX22 minimum, Ubuntu 24.04)
+#   2. Colle ce fichier dans le champ "Cloud config" (Advanced > Cloud init)
+#   3. Ajoute ta clé SSH publique
+#   4. Lance la création — le serveur se configure tout seul en ~5 min
+#
+# Après déploiement :
+#   ssh corelia@<IP>                          # Connexion
+#   cd /opt/corelia && docker compose ps      # Vérifier les services
+#   curl https://api.zentic.fr/health         # Tester l'API
+# ============================================================================
+
+# ─── Hostname & FQDN ───────────────────────────────────────────────────────
+hostname: corelia
+fqdn: api.zentic.fr
+manage_etc_hosts: true
+
+# ─── Packages système ──────────────────────────────────────────────────────
+packages:
+  - apt-transport-https
+  - ca-certificates
+  - curl
+  - gnupg
+  - lsb-release
+  - software-properties-common
+  - git
+  - ufw
+  - fail2ban
+  - htop
+  - iotop
+  - ncdu
+  - tree
+  - jq
+  - unzip
+  - build-essential
+
+# ─── Users ─────────────────────────────────────────────────────────────────
+users:
+  - name: corelia
+    groups: sudo, docker
+    shell: /bin/bash
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    ssh_authorized_keys:
+      # REMPLACE par ta clé SSH publique (~/.ssh/id_ed25519.pub)
+      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPT9+lf4Ej3bvVVkkoQt1ScF5KR5SucraTdmewzMQ17s corelia@zentic.fr
+
+# ─── Write Files ───────────────────────────────────────────────────────────
+write_files:
+
+  # ── Docker daemon config (log rotation, metrics) ──
+  - path: /etc/docker/daemon.json
+    permissions: '0644'
+    content: |
+      {
+        "log-driver": "json-file",
+        "log-opts": {
+          "max-size": "10m",
+          "max-file": "3"
+        },
+        "metrics-addr": "127.0.0.1:9323",
+        "experimental": false
+      }
+
+  # ── UFW rules ──
+  - path: /etc/ufw/before.rules
+    permissions: '0640'
+    append: true
+    content: |
+      # Allow Docker networks through UFW
+      *filter
+      :DOCKER-USER - [0:0]
+      -A DOCKER-USER -p tcp --dport 80 -j ACCEPT
+      -A DOCKER-USER -p tcp --dport 443 -j ACCEPT
+      COMMIT
+
+  # ── systemd service for docker compose ──
+  - path: /etc/systemd/system/corelia.service
+    permissions: '0644'
+    content: |
+      [Unit]
+      Description=CorelIA Docker Stack
+      Requires=docker.service
+      After=docker.service network-online.target
+      Wants=network-online.target
+
+      [Service]
+      Type=oneshot
+      RemainAfterExit=yes
+      WorkingDirectory=/opt/corelia
+      ExecStart=/usr/bin/docker compose up -d --remove-orphans
+      ExecStop=/usr/bin/docker compose down
+      ExecReload=/usr/bin/docker compose up -d --remove-orphans
+      StandardOutput=journal
+      StandardError=journal
+
+      [Install]
+      WantedBy=multi-user.target
+
+  # ── fail2ban jail for SSH ──
+  - path: /etc/fail2ban/jail.local
+    permissions: '0644'
+    content: |
+      [sshd]
+      enabled = true
+      port = ssh
+      filter = sshd
+      logpath = /var/log/auth.log
+      maxretry = 3
+      bantime = 3600
+      findtime = 600
+
+  # ── Daily system update cron ──
+  - path: /etc/cron.daily/corelia-update
+    permissions: '0755'
+    content: |
+      #!/bin/bash
+      apt-get update -qq && apt-get upgrade -y -qq
+      docker system prune -af --volumes --filter "until=72h"
+
+  # ── Swap file (4GB) pour éviter OOM ──
+  - path: /etc/sysctl.d/99-swappiness.conf
+    permissions: '0644'
+    content: |
+      vm.swappiness=10
+      vm.vfs_cache_pressure=50
+
+# ─── Boot Commands (runcmd) ────────────────────────────────────────────────
+runcmd:
+  # ── 1. System update ──
+  - apt-get update -y && apt-get upgrade -y
+
+  # ── 2. Install Docker ──
+  - curl -fsSL https://get.docker.com | sh
+  - systemctl enable docker
+  - systemctl start docker
+
+  # ── 3. Install Docker Compose plugin ──
+  - apt-get install -y docker-compose-plugin
+
+  # ── 4. Configure firewall ──
+  - ufw default deny incoming
+  - ufw default allow outgoing
+  - ufw allow 22/tcp comment 'SSH'
+  - ufw allow 80/tcp comment 'HTTP'
+  - ufw allow 443/tcp comment 'HTTPS'
+  - echo "y" | ufw enable
+
+  # ── 5. Enable fail2ban ──
+  - systemctl enable fail2ban
+  - systemctl start fail2ban
+
+  # ── 6. Setup swap (4GB) ──
+  - fallocate -l 4G /swapfile
+  - chmod 600 /swapfile
+  - mkswap /swapfile
+  - swapon /swapfile
+  - echo '/swapfile none swap sw 0 0' >> /etc/fstab
+  - sysctl -p /etc/sysctl.d/99-swappiness.conf
+
+  # ── 7. Clone CorelIA repository ──
+  - mkdir -p /opt
+  - git clone https://github.com/TON_COMPTE/CorelIA.git /opt/corelia || git clone https://github.com/zentic/CorelIA.git /opt/corelia
+  - chown -R corelia:corelia /opt/corelia
+
+  # ── 8. Create .env from template ──
+  - |
+    cat > /opt/corelia/.env << 'ENVEOF'
+    # CorelIA Production Environment
+    # Généré automatiquement par cloud-init — REMPLIR les clés API !
+    APP_ENV=production
+    DEBUG=false
+
+    # AI Providers
+    DEEPSEEK_API_KEY=sk-REMPLACER_PAR_TA_CLE
+    OPENROUTER_API_KEY=sk-or-v1-REMPLACER_PAR_TA_CLE
+
+    # Backend
+    BACKEND_URL=https://api.zentic.fr
+    API_SECRET_KEY=REMPLACER_PAR_UNE_CLE_SECRETE_64_CHARS
+    REDIS_URL=redis://redis:6379/0
+    RATE_LIMIT=100/minute
+    CORS_ORIGINS=https://zentic.fr,https://api.zentic.fr
+
+    # Cloudflare Tunnel (optionnel)
+    CF_TUNNEL_TOKEN=
+
+    # HuggingFace (pour Unsloth)
+    HF_TOKEN=
+
+    # WebUI
+    WEBUI_SECRET_KEY=REMPLACER_PAR_UNE_CLE_SECRETE
+    ENVEOF
+
+  # ── 9. Pull Docker images ──
+  - cd /opt/corelia && docker compose pull 2>/dev/null || true
+
+  # ── 10. Start CorelIA stack ──
+  - systemctl enable corelia.service
+  - systemctl start corelia.service
+
+  # ── 11. Post-install message ──
+  - |
+    cat > /etc/motd << 'MOTD'
+    
+    ╔══════════════════════════════════════════════════════════════╗
+    ║              CorelIA Cloud — api.zentic.fr                   ║
+    ╠══════════════════════════════════════════════════════════════╣
+    ║  Services:                                                  ║
+    ║    Backend  → https://api.zentic.fr                         ║
+    ║    Agent    → https://agent.zentic.fr                       ║
+    ║    Ollama   → http://localhost:11434                        ║
+    ║                                                             ║
+    ║  Commandes utiles:                                          ║
+    ║    docker compose -f /opt/corelia/docker-compose.yml ps     ║
+    ║    docker compose -f /opt/corelia/docker-compose.yml logs   ║
+    ║    systemctl status corelia                                 ║
+    ║    journalctl -u corelia -f                                 ║
+    ║                                                             ║
+    ║  ⚠ PENSE À REMPLIR les clés API dans /opt/corelia/.env     ║
+    ║    puis : systemctl restart corelia                         ║
+    ╚══════════════════════════════════════════════════════════════╝
+    
+    MOTD
+
+# ─── Final Message ─────────────────────────────────────────────────────────
+final_message: |
+  
+  ✅ CorelIA Cloud provisionné avec succès !
+  
+  Prochaines étapes :
+    1. ssh corelia@<IP>
+    2. Remplir les clés API : nano /opt/corelia/.env
+    3. Redémarrer : systemctl restart corelia
+    4. Vérifier : curl https://api.zentic.fr/health
+  
+  Temps total d'installation : ~5 minutes.

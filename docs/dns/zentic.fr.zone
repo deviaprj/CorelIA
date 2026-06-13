@@ -1,0 +1,4 @@
+;; A Records (NOUVEAU — CorelIA Cloud sur Hetzner)
+api.zentic.fr.	1	IN	A	167.233.100.132 ; cf_tags=cf-proxied:false
+agent.zentic.fr.	1	IN	A	167.233.100.132 ; cf_tags=cf-proxied:false
+ollama.zentic.fr.	1	IN	A	167.233.100.132 ; cf_tags=cf-proxied:false

@@ -737,4 +737,68 @@ Le projet avait deux identités visuelles en coexistence : l'ancien thème Corel
 
 ---
 
-*Dernière mise à jour : 2026-05-28*
+## ADR-023 : Infrastructure Cloud — Hetzner VPS + Caddy Reverse Proxy
+
+**Date** : 2026-06-13
+**Statut** : Accepté
+
+### Contexte
+Le backend FastAPI et les services associés (CodeWhale Agent, Ollama, Open WebUI) nécessitaient un hébergement cloud stable. Le Cloudflare Worker précédent était un proxy limité ; il fallait un serveur dédié pour le scraping, les scripts IA et les services stateful (Redis, Ollama).
+
+### Décision
+Déploiement sur **Hetzner VPS** (`167.233.100.132`) avec stack Docker Compose :
+- **Caddy** : Reverse proxy + TLS automatique (Let's Encrypt)
+- **Backend FastAPI** (`api.zentic.fr`) : Python 3.12, uvicorn 4 workers, Redis rate limiting
+- **CodeWhale Agent** (`agent.zentic.fr`) : Microservice FastAPI autonome avec tool calling
+- **Redis** : Cache + rate limiting LRU
+- **Ollama** : LLM local (Mistral, Llama, etc.) — GPU optionnel
+- **Open WebUI** (`chat.zentic.fr`) : Interface chat multi-LLM (profil `full`)
+- **ttyd** (`terminal.zentic.fr`) : Terminal web avec Claude Code + Codewhale + tmux
+- **Watchtower** : Auto-update containers (profil `full`)
+
+### Sécurité
+- Clés API via `.env` monté en read-only dans les conteneurs
+- TTYD authentification basique via variables d'environnement (jamais en dur dans Dockerfile)
+- Healthchecks Python natifs (pas de `curl` dans `python:3.12-slim`)
+- Dépendances optionnelles non bloquantes (Ollama non requis pour l'agent)
+
+### Conséquences
+- ✅ Backend cloud stable et scalable
+- ✅ Terminal web accessible depuis n'importe où
+- ✅ Scraping côté serveur (pas de CORS client)
+- ⚠️ Maintenance ops requise (updates système, certificats)
+- ⚠️ Coûts serveur mensuels (Hetzner VPS ~24€/mois)
+
+---
+
+## ADR-024 : CodeWhale Agent — Microservice Autonome avec Tool Calling
+
+**Date** : 2026-06-13
+**Statut** : Accepté
+
+### Contexte
+Besoin d'un agent IA capable d'exécuter des tâches complexes (analyse de code, refactoring, recherche web) de manière autonome dans un environnement isolé. L'agent doit être accessible via API REST et compatible avec le backend CorelIA.
+
+### Décision
+Microservice **CodeWhale Agent** dans `codewhale-agent/` :
+- FastAPI avec endpoints `/agent/run`, `/agent/status/{id}`, `/agent/result/{id}`, `/agent/stream/{id}`
+- Stockage in-memory des tâches (TaskStore) avec events SSE
+- Tool calling OpenAI/DeepSeek format : `read_file`, `write_file`, `list_directory`, `run_command`, `search_web`, `git_diff`, `git_log`, `task_complete`
+- Sandbox : path traversal protection, timeout 60s sur les commandes shell
+- Workspace isolé dans `/workspace`
+
+### Alternatives Considérées
+- Exécution directe dans le backend FastAPI (trop monolithique, pas isolé)
+- GitHub Actions (pas temps réel, pas de persistance workspace)
+- AutoGen/CrewAI (trop lourds, pas de contrôle fin des outils)
+
+### Conséquences
+- ✅ Tâches longues asynchrones sans bloquer le backend
+- ✅ Tool calling extensible (ajouter des outils = modifier une liste)
+- ✅ Workspace persistant entre les appels
+- ⚠️ Stockage in-memory uniquement (pas de Redis/DB pour les tâches)
+- ⚠️ Pas d'authentification sur l'agent (à ajouter via API key)
+
+---
+
+*Dernière mise à jour : 2026-06-13*

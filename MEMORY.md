@@ -537,3 +537,142 @@ Rendre la recherche avancée réellement utile en scrapant les comparateurs pour
 ---
 
 *Dernière mise à jour : 2026-06-05*
+
+### Session 2026-06-13 — Reprise : Corrections Sécurité + Documentation + Infra
+
+#### Contexte
+Session de reprise autonome. Audit critique de l'existant, correction de la dérive documentaire, corrections de sécurité et robustesse sur l'infra Docker.
+
+#### Actions réalisées
+
+1. **Sécurité — Mot de passe ttyd**
+   - **Problème** : `terminal/Dockerfile` contenait le mot de passe en dur : `CMD ["-p", "7681", "-c", "corelia:Cmq+WWtEGS29/gnB", ...]`
+   - **Fix** : Remplacé par des variables d'environnement `TTYD_USER` et `TTYD_PASS` (défaut `changeme`).
+   - **Fichier** : `terminal/Dockerfile`
+
+2. **Robustesse — Healthcheck backend**
+   - **Problème** : Le service `backend` dans `docker-compose.yml` n'avait pas de `healthcheck`. Caddy pouvait router vers un container non-prêt.
+   - **Fix** : Ajout `healthcheck` avec `curl -sf http://localhost:8000/health`, intervalle 15s, 3 retries.
+   - **Fichier** : `docker-compose.yml`
+
+3. **Robustesse — Dépendance Ollama optionnelle**
+   - **Problème** : `codewhale-agent` dépendait strictement de `ollama` (`depends_on: ollama`). Si Ollama était down ou non-configuré (pas de GPU), l'agent ne démarrait pas.
+   - **Fix** : Suppression de `depends_on: ollama` pour le service `codewhale-agent`. L'agent utilise principalement DeepSeek/OpenRouter ; Ollama est un fallback optionnel.
+   - **Fichier** : `docker-compose.yml`
+
+4. **Documentation drift — TASKS.md**
+   - **Problème** : `TASKS.md` dernier update 2026-05-28. 4 sessions de juin 2026 manquantes.
+   - **Fix** : Ajout des sessions 2026-06-05 (Tier-Aware), 2026-06-06 (Scraping IA), 2026-06-07 (Oralize Pass), 2026-06-12 (CodeWhale + Infra).
+   - **Fichier** : `TASKS.md`
+
+#### Vérifications
+- `docker-compose.yml` : syntaxe valide (pas de duplication de clés)
+- `terminal/Dockerfile` : syntaxe valide, mot de passe externalisé
+- `codewhale-agent/main.py` : présent à la racine (pas dans `app/`), cohérent avec Dockerfile
+
+#### Blocages restants
+1. 🔴 **DNS Cloudflare** : records A manquants pour `api.zentic.fr`, `chat.zentic.fr`, `terminal.zentic.fr`
+2. 🔴 **GitHub SSH** : clé deploy pas encore ajoutée dans GitHub Settings
+3. 🔴 **Déploiement backend** : `scripts/deploy_backend.sh` prêt mais nécessite exécution depuis la machine avec clé SSH Hetzner
+
+---
+
+*Dernière mise à jour : 2026-06-13*
+
+---
+
+### Session 2026-06-12 — CodeWhale Agent + Infra Hetzner + Cleanup
+
+#### Action 1 : Nettoyage Cloudflare Worker
+- Fichiers morts supprimés : `llm.ts`, `rate_limit.ts`, `sanitize.ts`, `scrape.ts`
+- Le worker est désormais un proxy reverse transparent uniquement (Hono + CORS + proxy vers Hetzner)
+- `index.ts` réduit à 167 lignes propres
+
+#### Action 2 : Création du CodeWhale Agent
+- **Nouveau microservice** dans `codewhale-agent/` :
+  - `app/main.py` — FastAPI complet avec endpoints : `/agent/run`, `/agent/tools`, `/agent/status/{id}`, `/agent/result/{id}`, `/agent/stream/{id}`, `/health`
+  - `app/__init__.py`
+  - `Dockerfile` — image Python 3.12-slim, port 8001, healthcheck
+  - `requirements.txt` — fastapi, uvicorn, httpx, pydantic
+- Architecture : tâches asynchrones avec stockage in-memory, tool calling (shell read-only, docker status, disk usage, read file, list directory), LLM via DeepSeek/OpenRouter
+- Compatible avec `agent_router.py` (bridge backend → codewhale-agent)
+
+#### Action 3 : Consolidation déploiement
+- `scripts/deploy_backend.sh` : ajout gestion des secrets `.env` (vérification vars requises, scp du .env vers le serveur)
+- `docker-compose.yml` : fix commentaire Traefik → Caddy
+- `backend/main.py` : déjà configuré avec agent_router + config_agent
+
+#### Action 4 : Corrections tests
+- `lib/app/cofely_theme.dart` : `DialogThemeData` → `DialogTheme` (API Flutter 3.41)
+- `test/core/constants_test.dart` : `Genere` → `Généré` (accent)
+
+#### État tests
+- 632 passés, 9 échecs pré-existants (login_screen refonte Cofely, chat_bubble alignment, http_client singleton)
+- `flutter analyze` : 4695 infos (0 erreurs, 0 warnings — uniquement des lints stylistiques)
+
+#### Fichiers modifiés
+- `cloudflare-worker/src/index.ts` — refait (proxy pur)
+- `cloudflare-worker/src/llm.ts` — **supprimé**
+- `cloudflare-worker/src/rate_limit.ts` — **supprimé**
+- `cloudflare-worker/src/sanitize.ts` — **supprimé**
+- `cloudflare-worker/src/scrape.ts` — **supprimé**
+- `cloudflare-worker/wrangler.jsonc` — vars simplifiées
+- `scripts/deploy_backend.sh` — ajout secrets .env
+- `docker-compose.yml` — fix commentaire, section codewhale-agent
+- `lib/app/cofely_theme.dart` — DialogThemeData → DialogTheme
+- `test/core/constants_test.dart` — fix accent share tagline
+
+#### Fichiers créés
+- `codewhale-agent/main.py` — microservice agent complet (FastAPI, endpoints `/agent/run`, `/agent/status/{id}`, etc.)
+- `codewhale-agent/Dockerfile` — image Python 3.12-slim, port 8001, healthcheck
+- `codewhale-agent/requirements.txt` — fastapi, uvicorn, httpx, pydantic, openai
+
+#### Blocages restants
+1. ✅ CodeWhale Agent résolu (microservice créé)
+2. 🔴 Déploiement réel sur Hetzner : nécessite clé SSH + `.env` sur la machine hôte
+3. 🟡 Neigloo : workspace vide, retiré des `additionalDirectories`
+
+
+### Session 2026-06-12 — Infrastructure Hetzner : DNS + GitHub SSH + ttyd + Claude Code
+
+#### Actions réalisées
+
+**Phase 1 — DNS Cloudflare (instructions)**
+- Identifié les name servers : `dax.ns.cloudflare.com` / `jasmine.ns.cloudflare.com`
+- `agent.zentic.fr` et `ollama.zentic.fr` déjà configurés (records A existants)
+- `api.zentic.fr`, `chat.zentic.fr`, `terminal.zentic.fr` → NXDOMAIN (à créer)
+
+**Phase 2 — GitHub SSH bidirectionnel**
+- Clé deploy générée sur le VPS : `~/.ssh/id_ed25519_github`
+- Clé publique : `ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIL2bATliKhhYFGOU3buyweXnm8KWxKr+eLPhfgEW4eHO corelia@hetzner-deploy`
+- `~/.ssh/config` configuré pour github.com avec IdentityFile
+- **Action utilisateur** : ajouter la clé dans GitHub Settings > SSH Keys
+
+**Phase 3 — Terminal web ttyd**
+- Service ajouté dans `docker-compose.yml` (tsl0922/ttyd:latest)
+- Route ajoutée dans `Caddyfile` (terminal.zentic.fr → reverse_proxy terminal:7681)
+- Mot de passe généré dans `.env` : `TTYD_PASSWORD=Cmq+WWtEGS29/gnB`
+- Image Docker pullée et conteneur créé sur le VPS
+- **Action utilisateur** : `ssh corelia@167.233.100.132 "cd /opt/corelia && docker compose up -d terminal"` pour finaliser
+
+**Phase 4 — Claude Code + DeepSeek TUI**
+- Claude Code v2.1.176 installé dans `/usr/bin/claude`
+- Codewhale v0.8.58 installé (`deepseek-tui` renommé, compatible)
+- Node.js v22.22.3 installé
+- tmux installé
+- Git config : user.name + user.email
+
+**Phase 5 — Synchronisation**
+- docker-compose.yml, Caddyfile, settings.local.json, cofely_theme.dart, scripts/ → synced vers VPS
+- Fichiers Cloudflare Worker morts supprimés
+
+#### Fichiers modifiés
+- `docker-compose.yml` — ajout service `terminal` (ttyd avec auth)
+- `Caddyfile` — ajout routes terminal.zentic.fr et chat.zentic.fr
+- `codewhale-agent/Dockerfile` — fix CMD pour main.py à la racine
+
+#### Blocages
+1. 🔴 DNS Cloudflare : ajouter records A manuellement dans le dashboard
+2. 🔴 GitHub SSH : ajouter la clé deploy dans GitHub Settings
+3. 🟡 ttyd : redémarrer le conteneur avec la bonne config (docker compose up -d terminal)
+

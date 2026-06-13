@@ -284,7 +284,7 @@ abstract class CofelyTokens {
         ),
 
         // ── Dialog ────────────────────────────────────────────────────────────
-        dialogTheme: DialogThemeData(
+        dialogTheme: DialogTheme(
           backgroundColor: botBubble,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16),
