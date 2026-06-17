@@ -21,9 +21,8 @@ import '../../../core/platform/extension_providers.dart';
 import '../../../core/platform/extension_bridge.dart';
 import '../../monetization/ads/ad_banner_widget.dart';
 import '../../monetization/ads/quota_exceeded_dialog.dart';
-import '../../monetization/subscription/subscription_service.dart';
-import '../../monetization/credits/credit_service.dart';
 import '../../monetization/credits/credit_providers.dart';
+import '../../monetization/subscription/subscription_service.dart';
 
 class ChatScreen extends ConsumerStatefulWidget {
   const ChatScreen({super.key, required this.conversationId});
@@ -451,7 +450,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         : await service.pickFromGallery();
     if (results.isEmpty || !mounted) return;
 
-    // Vérification limite agrégée 5MB
+    final isPro = await ref.read(isProProvider.future).catchError((_) => false);
+    final limit = attachmentLimitFor(isPro: isPro);
+    final limitMB = limit ~/ (1024 * 1024);
+
+    // Vérification limite agrégée (50MB Pro / 5MB gratuit)
     var currentTotal = _pendingAttachments.fold<int>(0, (sum, a) {
       if (a.imageBase64 != null) return sum + a.imageBase64!.length;
       if (a.fileContent != null) return sum + a.fileContent!.length;
@@ -460,12 +463,12 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
 
     for (final result in results) {
       final addedSize = result.imageBase64?.length ?? result.extractedText?.length ?? 0;
-      if (currentTotal + addedSize > maxAttachmentsTotalBytes) {
+      if (currentTotal + addedSize > limit) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Taille limite dépassée (5MB par message). Vous pouvez ajouter plusieurs fichiers, mais la taille totale ne doit pas dépasser 5MB.'),
-              duration: Duration(seconds: 4),
+            SnackBar(
+              content: Text('Taille limite dépassée (${limitMB}MB par message). Vous pouvez ajouter plusieurs fichiers, mais la taille totale ne doit pas dépasser ${limitMB}MB.'),
+              duration: const Duration(seconds: 4),
             ),
           );
         }
@@ -484,13 +487,16 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   }
 
   Future<void> _handleFilePick(ChatNotifier notifier) async {
-    final isPro = await notifier.ref.read(isProProvider.future).catchError((_) => false);
     final service = FileUploadService();
     try {
       final results = await service.pickAndExtract();
       if (results.isEmpty || !mounted) return;
 
-      // Vérification limite agrégée 5MB
+      final isPro = await ref.read(isProProvider.future).catchError((_) => false);
+      final limit = attachmentLimitFor(isPro: isPro);
+      final limitMB = limit ~/ (1024 * 1024);
+
+      // Vérification limite agrégée (50MB Pro / 5MB gratuit)
       var currentTotal = _pendingAttachments.fold<int>(0, (sum, a) {
         if (a.imageBase64 != null) return sum + a.imageBase64!.length;
         if (a.fileContent != null) return sum + a.fileContent!.length;
@@ -499,12 +505,12 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
 
       for (final result in results) {
         final addedSize = result.sizeBytes;
-        if (currentTotal + addedSize > maxAttachmentsTotalBytes) {
+        if (currentTotal + addedSize > limit) {
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Taille limite dépassée (5MB par message). Vous pouvez ajouter plusieurs fichiers, mais la taille totale ne doit pas dépasser 5MB.'),
-                duration: Duration(seconds: 4),
+              SnackBar(
+                content: Text('Taille limite dépassée (${limitMB}MB par message). Vous pouvez ajouter plusieurs fichiers, mais la taille totale ne doit pas dépasser ${limitMB}MB.'),
+                duration: const Duration(seconds: 4),
               ),
             );
           }
@@ -762,7 +768,6 @@ class _VoiceConversationBannerOnly extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
     return Container(
       width: double.infinity,
       color: Theme.of(context).colorScheme.errorContainer.withOpacity(0.4),

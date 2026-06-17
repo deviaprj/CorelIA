@@ -11,7 +11,6 @@ class LocationService {
 
     try {
       final geolocation = html.window.navigator.geolocation;
-      if (geolocation == null) return null;
 
       final position = await geolocation.getCurrentPosition(
         timeout: const Duration(seconds: 10),

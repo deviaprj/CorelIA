@@ -110,7 +110,7 @@ class WeatherService {
 
       // Get current weather
       final weatherResp =
-          await _dio.get('$_baseUrl/weather', queryParameters: {
+          await _dio.get<dynamic>('$_baseUrl/weather', queryParameters: {
         'lat': latitude,
         'lon': longitude,
         'appid': key,
@@ -128,7 +128,7 @@ class WeatherService {
 
       // Get forecast
       final forecastResp =
-          await _dio.get('$_baseUrl/forecast', queryParameters: {
+          await _dio.get<dynamic>('$_baseUrl/forecast', queryParameters: {
         'lat': latitude,
         'lon': longitude,
         'appid': key,
@@ -202,7 +202,7 @@ class WeatherService {
     final key = _apiKey;
     if (key == null || key.isEmpty) return null;
     try {
-      final resp = await _dio.get('$_geoUrl/direct', queryParameters: {
+      final resp = await _dio.get<dynamic>('$_geoUrl/direct', queryParameters: {
         'q': '$city,$countryCode',
         'limit': 1,
         'appid': key,
@@ -219,7 +219,7 @@ class WeatherService {
     final key = _apiKey;
     if (key == null || key.isEmpty) return null;
     try {
-      final resp = await _dio.get('$_geoUrl/zip', queryParameters: {
+      final resp = await _dio.get<dynamic>('$_geoUrl/zip', queryParameters: {
         'zip': '$zip,$countryCode',
         'appid': key,
       });

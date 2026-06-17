@@ -359,8 +359,8 @@ class FileUploadService {
           .where((f) => f.name.startsWith('ppt/slides/slide') && f.name.endsWith('.xml'))
           .toList()
         ..sort((a, b) {
-          final numA = int.tryParse(a.name.replaceAll(RegExp(r'[^\d]'), '') ?? '0') ?? 0;
-          final numB = int.tryParse(b.name.replaceAll(RegExp(r'[^\d]'), '') ?? '0') ?? 0;
+          final numA = int.tryParse(a.name.replaceAll(RegExp(r'[^\d]'), '')) ?? 0;
+          final numB = int.tryParse(b.name.replaceAll(RegExp(r'[^\d]'), '')) ?? 0;
           return numA.compareTo(numB);
         });
       if (slideFiles.isEmpty) return '[Aucune diapositive trouvee]';

@@ -39,7 +39,9 @@ COPY --chown=corelia:corelia bashrc.corelia /home/corelia/.bashrc
 # On garde ttyd comme binaire principal avec l'option -W (writable)
 # pour permettre les modifications de fichiers
 ENV TTYD_USER=corelia
-ENV TTYD_PASS=changeme
+# TTYD_PASS ne doit JAMAIS avoir de valeur par défaut ici — le mot de passe est
+# fourni au runtime via docker-compose (lui-même lu depuis .env). Voir
+# start-ttyd.sh qui refuse de démarrer si TTYD_PASS est vide ou reste "changeme".
 
 # Utilisation d'un script shell pour interpolation des variables d'environnement
 COPY start-ttyd.sh /app/start-ttyd.sh

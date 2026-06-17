@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../prefs/local_pref_timestamp.dart';
 
 // ── Theme ─────────────────────────────────────────────────────────────────────
 final themeModeProvider = StateNotifierProvider<ThemeModeNotifier, ThemeMode>(
@@ -23,6 +24,8 @@ class ThemeModeNotifier extends StateNotifier<ThemeMode> {
     state = mode;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('theme_mode', mode.name);
+    // Horodate l'édition locale pour le last-write-wins multi-appareils.
+    await LocalPrefTimestamp.markUpdated();
   }
 }
 
@@ -54,5 +57,7 @@ class TtsSpeedNotifier extends StateNotifier<double> {
     state = speed.clamp(0.5, 2.0);
     final prefs = await SharedPreferences.getInstance();
     await prefs.setDouble('tts_speed', state);
+    // Horodate l'édition locale pour le last-write-wins multi-appareils.
+    await LocalPrefTimestamp.markUpdated();
   }
 }

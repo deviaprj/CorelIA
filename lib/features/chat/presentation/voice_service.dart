@@ -66,6 +66,13 @@ class VoiceServiceNotifier extends Notifier<VoiceState> {
   final _speechFinalController = StreamController<SpeechFinalEvent>.broadcast();
   Stream<SpeechFinalEvent> get onSpeechFinal => _speechFinalController.stream;
 
+  /// Erreurs STT (native) — permet au VoiceConversationNotifier de compter
+  /// les échecs consécutifs et de basculer en état error après 3 (anti-boucle
+  /// infinie sur micro instable). Mid-conversation seulement ; l'échec du
+  /// démarrage initial reste géré par le check 500ms dans startConversation.
+  final _sttErrorController = StreamController<String>.broadcast();
+  Stream<String> get onSttError => _sttErrorController.stream;
+
   /// Quand active, le STT redemarre automatiquement apres un arret.
   bool _conversationMode = false;
 
@@ -74,6 +81,7 @@ class VoiceServiceNotifier extends Notifier<VoiceState> {
     _tts = TtsNaturalService();
     ref.onDispose(() {
       _speechFinalController.close();
+      _sttErrorController.close();
       _tts.dispose();
       _stt?.stop();
       _stt = null;
@@ -106,8 +114,12 @@ class VoiceServiceNotifier extends Notifier<VoiceState> {
     final newStt = stt.SpeechToText();
     try {
       final available = await newStt.initialize(
-        onError: (_) {
+        onError: (error) {
           state = state.copyWith(isListening: false);
+          debugPrint('[VoiceService] STT error: $error');
+          // Propager au VoiceConversationNotifier pour le comptage d'échecs
+          // (max 3 → état error, anti-boucle infinie sur micro instable).
+          _sttErrorController.add('stt_error');
         },
         onStatus: (status) {
           if (status == 'done' || status == 'notListening') {
@@ -225,6 +237,7 @@ class VoiceServiceNotifier extends Notifier<VoiceState> {
       _sttInitialized = false;
       _stt = null;
       state = state.copyWith(isListening: false);
+      _sttErrorController.add('listen_error');
     }
   }
 

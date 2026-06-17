@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 /// Service d'insertion de liaisons phonétiques pour le TTS.
 ///
 /// En français, les liaisons rendent la parole naturelle :
@@ -169,9 +167,12 @@ class PhoneticLiaisonService {
       (m) => 'vers z${m.group(1)}',
     );
 
-    // Liaisons avec "en" : "bien aimé", "rien à"
+    // Liaisons avec "en" : "bien aimé" → "bien naimé", "rien à" → "rien nà".
+    // NB : le motif doit matcher la forme orthographique réelle ("bien"), pas
+    // le stem phonétique "ben" — sinon la règle ne se déclenche jamais sur le
+    // texte en entrée (bug : `\bben\b` ne matchait jamais "bien aimé").
     result = result.replaceAllMapped(
-      RegExp(r'\bben\s+([aeiouyàâäéèêëîïôöùûüh])', caseSensitive: false),
+      RegExp(r'\bbien\s+([aeiouyàâäéèêëîïôöùûüh])', caseSensitive: false),
       (m) => 'bien n${m.group(1)}',
     );
     result = result.replaceAllMapped(

@@ -254,8 +254,12 @@ void main() {
         ),
       );
 
-      // Vérifier que l'avatar est présent
-      expect(find.byType(CircleAvatar), findsOneWidget);
+      // Vérifier que l'avatar assistant est présent.
+      // NB : l'avatar n'est pas un `CircleAvatar` Material générique mais un
+      // `Container` circulaire brandé (dégradé Cofely + lettre « C ») — voir
+      // chat_bubble.dart:lignes 41-63. On identifie donc l'avatar par sa lettre
+      // « C », seul Text('C') rendu pour un message assistant isolé.
+      expect(find.text('C'), findsOneWidget);
     });
   });
 }

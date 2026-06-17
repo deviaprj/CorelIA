@@ -8,6 +8,13 @@ enum Role { user, assistant, system }
 /// Limite totale par message : 5 MB (en octets).
 const int maxAttachmentsTotalBytes = 5 * 1024 * 1024;
 
+/// Limite totale par message en tier Pro : 50 MB (en octets).
+const int proMaxAttachmentsTotalBytes = 50 * 1024 * 1024;
+
+/// Limite d'upload agrégée selon le tier : 50 MB Pro, 5 MB gratuit.
+int attachmentLimitFor({required bool isPro}) =>
+    isPro ? proMaxAttachmentsTotalBytes : maxAttachmentsTotalBytes;
+
 class Message {
   final String id;
   final String conversationId;

@@ -84,7 +84,7 @@ void main() {
 
       final json = action.toJson();
       expect(json['action'], equals('SCREENSHOT'));
-      expect(json['params'], isA<Map>());
+      expect(json['params'], isA<Map<dynamic, dynamic>>());
       expect(json['params'], isEmpty);
     });
 
@@ -98,7 +98,7 @@ void main() {
       );
 
       final json = action.toJson();
-      expect(json['params']['urls'], isA<List>());
+      expect(json['params']['urls'], isA<List<dynamic>>());
       expect((json['params']['urls'] as List).length, equals(2));
     });
   });
@@ -204,8 +204,8 @@ void main() {
 
       final result = BrowserActionResult.fromJson(json);
       expect(result.success, isTrue);
-      expect(result.data?['downloaded'], isA<List>());
-      final downloaded = result.data?['downloaded'] as List;
+      expect(result.data?['downloaded'], isA<List<dynamic>>());
+      final downloaded = result.data?['downloaded'] as List<dynamic>;
       expect(downloaded.length, equals(2));
     });
 
@@ -250,7 +250,7 @@ void main() {
       // Should not emit any events
       final events = <BrowserActionResult>[];
       final sub = bridge.onActionResult.listen(events.add);
-      await Future.delayed(const Duration(milliseconds: 50));
+      await Future.delayed(const Duration(milliseconds: 50)); // ignore: inference_failure_on_instance_creation, Future.delayed n'est pas générique en Dart 3.41 (false-positive)
       await sub.cancel();
       expect(events, isEmpty);
       bridge.dispose();
@@ -260,7 +260,7 @@ void main() {
       final bridge = ExtensionBridge();
       final events = <String>[];
       final sub = bridge.onSelectedText.listen(events.add);
-      await Future.delayed(const Duration(milliseconds: 50));
+      await Future.delayed(const Duration(milliseconds: 50)); // ignore: inference_failure_on_instance_creation, Future.delayed n'est pas générique en Dart 3.41 (false-positive)
       await sub.cancel();
       expect(events, isEmpty);
       bridge.dispose();

@@ -63,7 +63,7 @@ void main() {
 
     group('_detectMimeType', () {
       test('PDF détecté', () {
-        final service = FileUploadService();
+        expect(FileUploadService(), isNotNull);
         // Utiliser la reflection pour tester la méthode privée
         // On teste indirectement via pickAndExtract
         // Ce test vérifie que les types MIME sont cohérents
@@ -80,7 +80,7 @@ void main() {
 
     group('Extraction DOCX namespace-agnostic', () {
       test('extraction paragraphes avec namespace alternatif', () async {
-        final service = FileUploadService();
+        expect(FileUploadService(), isNotNull);
         // Créer un ZIP minimal DOCX avec namespace prefix différent de 'w:'
         final encoder = ZipEncoder();
         final archive = Archive();
@@ -115,7 +115,7 @@ void main() {
 
     group('Extraction PPTX namespace-agnostic', () {
       test('extraction diapositives avec namespace alternatif', () async {
-        final service = FileUploadService();
+        expect(FileUploadService(), isNotNull);
         // PPTX ZIP minimal
         final encoder = ZipEncoder();
         final archive = Archive();

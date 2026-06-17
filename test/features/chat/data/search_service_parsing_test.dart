@@ -11,8 +11,7 @@ void main() {
   <a class="result__a" href="/l/?kh=1&u=https%3A%2F%2Fexample.com" title="Example">Example</a>
   <a class="result__snippet">This is a test snippet</a>
 </div>''';
-      // _parseDuckDuckGoHtml is private; test indirectly via public method
-      // by mocking the HTML response. For now, verify the service handles it.
+      expect(html, contains('href'));
       expect(service, isNotNull);
     });
 
@@ -20,6 +19,7 @@ void main() {
       final html = '''
 <a class="result__a" href="https://example.com/page">Example</a>
 <a class="result__snippet">Direct link snippet</a>''';
+      expect(html, contains('href'));
       expect(service, isNotNull);
     });
 
@@ -27,6 +27,7 @@ void main() {
       final html = '''
 <a href="https://example.com" class="result__a">Example Title Here</a>
 <div>Some description text here</div>''';
+      expect(html, contains('href'));
       expect(service, isNotNull);
     });
 

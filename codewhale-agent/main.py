@@ -19,6 +19,7 @@ Endpoints:
 
 import asyncio
 import hashlib
+import hmac
 import json
 import os
 import subprocess
@@ -30,7 +31,7 @@ from pathlib import Path
 from typing import Any, AsyncGenerator
 
 import httpx
-from fastapi import FastAPI, HTTPException, Request, status
+from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from openai import AsyncOpenAI
@@ -47,11 +48,21 @@ class Settings(BaseSettings):
     deepseek_api_key: str = ""
     openrouter_api_key: str = ""
     api_secret_key: str = ""
+    # CORS — même sémantique que le backend : wildcard par défaut SANS
+    # credentials (cf. middleware ci-dessous). docker-compose surcharge via
+    # CORS_ORIGINS en production, ce qui ré-active les credentials.
+    cors_origins: str = "*"
     workspace_dir: str = "/workspace"
     ollama_host: str = "http://ollama:11434"
     max_concurrent_tasks: int = 5
     task_timeout_seconds: int = 600
     app_env: str = "production"
+
+    @property
+    def cors_origins_list(self) -> list[str]:
+        """Return CORS origins as a list."""
+        return [o.strip() for o in self.cors_origins.split(",")]
+
 
 settings = Settings()
 
@@ -61,13 +72,37 @@ settings = Settings()
 
 app = FastAPI(title="CodeWhale Agent Cloud", version="1.0.0")
 
+# CORS — wildcard + credentials is an invalid combo; disable credentials when
+# wildcard. docker-compose sets CORS_ORIGINS to explicit origins in production.
+_is_wildcard_origin = "*" in settings.cors_origins_list
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=settings.cors_origins_list,
+    allow_credentials=not _is_wildcard_origin,
+    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization", "X-API-Key", "X-Request-ID"],
 )
+
+# ─── Operator auth gate ──────────────────────────────────────────────────────
+# codewhale-agent runs arbitrary shell commands (run_command tool) inside a
+# workspace — every /agent/* endpoint is operator-only (API_SECRET_KEY),
+# fail-closed. The backend forwards the verified operator key on its internal
+# /agent/run calls (see config_agent.py, agent_router.py), so legitimate
+# internal calls pass; direct external calls without the key are rejected.
+async def require_operator_key(request: Request) -> str:
+    configured = settings.api_secret_key
+    api_key = request.headers.get("X-API-Key") or request.query_params.get("api_key")
+    if not configured:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Operator key not configured on the server",
+        )
+    if not api_key or not hmac.compare_digest(api_key, configured):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing or invalid operator key",
+        )
+    return api_key
 
 # ══════════════════════════════════════════════════════════════════════════════
 # MODELS
@@ -632,16 +667,16 @@ async def list_tools():
     return {"tools": [t["function"]["name"] for t in TOOLS], "count": len(TOOLS)}
 
 @app.post("/agent/run", response_model=TaskResponse)
-async def agent_run(req: TaskRequest):
-    """Soumettre une tâche à l'agent."""
+async def agent_run(req: TaskRequest, _auth: str = Depends(require_operator_key)):
+    """Soumettre une tâche à l'agent (opérateur uniquement)."""
     task_id = store.create(req.prompt, req.model)
     # Lancer en arrière-plan
     asyncio.create_task(run_agent(task_id, req.prompt, req.model, req.max_turns))
     return TaskResponse(task_id=task_id, status="queued", created_at=store._tasks[task_id]["created_at"])
 
 @app.get("/agent/status/{task_id}", response_model=TaskStatus)
-async def agent_status(task_id: str):
-    """Vérifier le statut d'une tâche."""
+async def agent_status(task_id: str, _auth: str = Depends(require_operator_key)):
+    """Vérifier le statut d'une tâche (opérateur uniquement)."""
     task = store.get(task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Tâche introuvable")
@@ -656,8 +691,8 @@ async def agent_status(task_id: str):
     )
 
 @app.get("/agent/result/{task_id}", response_model=TaskResult)
-async def agent_result(task_id: str):
-    """Récupérer le résultat final d'une tâche."""
+async def agent_result(task_id: str, _auth: str = Depends(require_operator_key)):
+    """Récupérer le résultat final d'une tâche (opérateur uniquement)."""
     task = store.get(task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Tâche introuvable")
@@ -684,8 +719,8 @@ async def agent_result(task_id: str):
     )
 
 @app.get("/agent/stream/{task_id}")
-async def agent_stream(task_id: str, request: Request):
-    """Stream SSE des événements d'une tâche."""
+async def agent_stream(task_id: str, request: Request, _auth: str = Depends(require_operator_key)):
+    """Stream SSE des événements d'une tâche (opérateur uniquement)."""
     if task_id not in store._tasks:
         raise HTTPException(status_code=404, detail="Tâche introuvable")
 

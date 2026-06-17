@@ -67,7 +67,8 @@
       "Bash(rtk pytest *)",
       "Bash(/home/geekai/flutter/bin/flutter --version)",
       "Bash(/home/geekai/flutter/bin/dart --version)",
-      "Bash(/home/geekai/flutter/bin/flutter doctor *)"
+      "Bash(/home/geekai/flutter/bin/flutter doctor *)",
+      "Bash(echo \"---exit: $?---\")"
     ],
     "additionalDirectories": []
   }

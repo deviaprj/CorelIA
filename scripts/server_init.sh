@@ -147,9 +147,17 @@ DEBUG=false
 DEEPSEEK_API_KEY=sk-your-deepseek-key-here
 OPENROUTER_API_KEY=sk-or-v1-your-openrouter-key-here
 
-# Backend
+# Backend — two-tier API auth (see DECISIONS.md ADR-027).
+# API_SECRET_KEY (operator, fail-closed) + CLIENT_API_KEY (soft, APK-embedded).
+# Placeholders below are injected with strong random secrets post-heredoc.
+# NEVER commit a real secret value here.
+# ⚠️ ROTATION REQUIRED: a prior version of this file committed a real
+#    API_SECRET_KEY (311788a14ea7…). If that value is still live in the VPS
+#    .env, rotate it NOW: edit /opt/corelia/.env (new API_SECRET_KEY), then
+#    `docker compose up -d --force-recreate backend codewhale-agent`.
 BACKEND_URL=https://api.zentic.fr
-API_SECRET_KEY=311788a14ea7b929c5280f074a8b33ecafe361de59e3ab673c5194d9516470ea
+API_SECRET_KEY=__GENERATE_API_SECRET_KEY__
+CLIENT_API_KEY=__GENERATE_CLIENT_API_KEY__
 REDIS_URL=redis://redis:6379/0
 RATE_LIMIT=100/minute
 CORS_ORIGINS=https://zentic.fr,https://api.zentic.fr,chrome-extension://*
@@ -163,7 +171,14 @@ HF_TOKEN=
 # WebUI
 WEBUI_SECRET_KEY=change-me-to-a-random-string
 ENVEOF
-    warn ".env créé avec des valeurs par défaut — VÉRIFIE les clés API !"
+    # Inject freshly-generated API keys (placeholders above → strong random).
+    # Done post-heredoc so the quoted 'ENVEOF' block stays literal-safe.
+    # openssl first, /dev/urandom fallback (always present on Linux).
+    _api_secret="$(openssl rand -hex 32 2>/dev/null || head -c 32 /dev/urandom | od -A n -t x1 | tr -d ' \n')"
+    _client_api_key="$(openssl rand -hex 32 2>/dev/null || head -c 32 /dev/urandom | od -A n -t x1 | tr -d ' \n')"
+    sed -i "s|__GENERATE_API_SECRET_KEY__|$_api_secret|" "$REPO_DIR/.env"
+    sed -i "s|__GENERATE_CLIENT_API_KEY__|$_client_api_key|" "$REPO_DIR/.env"
+    warn ".env créé avec clés API générées aléatoirement — VÉRIFIE le reste !"
 else
     log ".env existe déjà."
 fi

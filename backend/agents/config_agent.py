@@ -15,6 +15,7 @@ Accessible via :
 import asyncio
 import json
 import os
+import re
 import subprocess
 import time
 from datetime import datetime, timezone
@@ -22,9 +23,10 @@ from pathlib import Path
 from typing import Any
 
 import httpx
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
+from backend.core.auth import require_operator_key
 from backend.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -194,25 +196,63 @@ async def exec_check_docker_status() -> str:
     except Exception as e:
         return f"Erreur: {e}"
 
+# Strict domain validation — prevents shell injection. The previous code
+# interpolated the LLM-supplied ``domain`` into a ``bash -c`` f-string, which is
+# a classic command-injection sink (e.g. ``domain = "x; rm -rf /"``). Now the
+# domain must match an RFC-1035 hostname regex and is passed as an argv arg —
+# no shell, no f-string into a command.
+_DOMAIN_RE = re.compile(
+    r"^(?=.{1,253}$)"
+    r"([A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+"
+    r"[A-Za-z]{2,}$"
+)
+
+
+def _validate_domain(domain: str) -> str:
+    """Return the domain if it matches the strict hostname regex, else raise."""
+    if not _DOMAIN_RE.match(domain or ""):
+        raise ValueError(f"Invalid domain: {domain!r}")
+    return domain
+
+
 async def exec_check_ssl_certs(domain: str) -> str:
+    domain = _validate_domain(domain)
     try:
-        # Vérifier via OpenSSL
-        proc = await asyncio.create_subprocess_exec(
-            "bash", "-c", f"echo | openssl s_client -servername {domain} -connect {domain}:443 2>/dev/null | openssl x509 -noout -dates -issuer 2>/dev/null || echo 'Pas de certificat HTTPS trouvé'",
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+        # Step 1 — fetch the raw cert via openssl s_client. Empty stdin mimics
+        # ``echo | s_client`` so the handshake completes and the process exits.
+        s_proc = await asyncio.create_subprocess_exec(
+            "openssl", "s_client", "-servername", domain, "-connect", f"{domain}:443",
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
         )
-        stdout, stderr = await proc.communicate()
-        result = stdout.decode()
-        
-        # Vérifier aussi via DNS
-        proc2 = await asyncio.create_subprocess_exec(
-            "bash", "-c", f"dig +short {domain} A",
-            stdout=asyncio.subprocess.PIPE
+        raw, _ = await s_proc.communicate(input=b"")
+
+        # Step 2 — parse the cert with x509, feeding s_client's stdout as stdin.
+        # x509 ignores non-PEM lines, so the handshake noise is filtered out.
+        x_proc = await asyncio.create_subprocess_exec(
+            "openssl", "x509", "-noout", "-dates", "-issuer",
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
         )
-        stdout2, _ = await proc2.communicate()
-        ip = stdout2.decode().strip()
-        
+        x_stdout, _ = await x_proc.communicate(input=raw)
+        result = x_stdout.decode("utf-8", errors="replace").strip()
+        if not result:
+            result = "Pas de certificat HTTPS trouvé"
+
+        # Step 3 — DNS resolution via dig (argv form, no shell).
+        d_proc = await asyncio.create_subprocess_exec(
+            "dig", "+short", domain, "A",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        d_stdout, _ = await d_proc.communicate()
+        ip = d_stdout.decode("utf-8", errors="replace").strip()
+
         return f"DNS: {domain} → {ip}\n\nTLS:\n{result}"
+    except ValueError:
+        raise
     except Exception as e:
         return f"Erreur: {e}"
 
@@ -350,12 +390,14 @@ async def config_agent_health():
     }
 
 @router.post("/diagnose")
-async def config_diagnose(request: Request):
-    """Diagnostic complet du système."""
+async def config_diagnose(request: Request, _auth: str = Depends(require_operator_key)):
+    """Diagnostic complet du système (opérateur uniquement)."""
     body = await request.json()
     prompt = body.get("prompt", "Fais un diagnostic complet du système")
-    
-    # Appeler l'agent principal avec les outils de config
+
+    # Appeler l'agent principal avec les outils de config. Forward the verified
+    # operator key so codewhale-agent's own operator gate accepts the internal call
+    # (codewhale never trusts the network on its own).
     async with httpx.AsyncClient(timeout=300.0) as client:
         resp = await client.post(
             "http://codewhale-agent:8001/agent/run",
@@ -364,15 +406,16 @@ async def config_diagnose(request: Request):
                 "model": body.get("model", "deepseek-v4-pro"),
                 "max_turns": body.get("max_turns", 15),
             },
+            headers={"Content-Type": "application/json", "X-API-Key": _auth},
         )
         return resp.json()
 
 @router.post("/migrate")
-async def config_migrate(request: Request):
-    """Migrer Docker vers un nouveau volume."""
+async def config_migrate(request: Request, _auth: str = Depends(require_operator_key)):
+    """Migrer Docker vers un nouveau volume (opérateur uniquement)."""
     body = await request.json()
     target = body.get("target", "/opt/docker")
-    
+
     async with httpx.AsyncClient(timeout=300.0) as client:
         resp = await client.post(
             "http://codewhale-agent:8001/agent/run",
@@ -381,5 +424,6 @@ async def config_migrate(request: Request):
                 "model": "deepseek-v4-pro",
                 "max_turns": 10,
             },
+            headers={"Content-Type": "application/json", "X-API-Key": _auth},
         )
         return resp.json()

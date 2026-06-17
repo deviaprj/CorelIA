@@ -13,6 +13,7 @@ from bs4 import BeautifulSoup
 
 from backend.core.config import settings
 from backend.core.logging import get_logger
+from backend.core.net_guard import safe_get
 
 logger = get_logger(__name__)
 
@@ -278,15 +279,34 @@ async def _scrape_page(
         "Cache-Control": "max-age=0",
     }
 
-    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+    # SSRF guard: per-hop redirect re-validation via safe_get.
+    async with httpx.AsyncClient(timeout=timeout) as client:
         try:
-            response = await client.get(url, headers=headers)
+            response = await safe_get(client, url, headers=headers)
             response.raise_for_status()
             html = response.text
         except Exception as exc:
             logger.warning(f"Scraping failed for {url}", extra={"error": str(exc)})
             return {"url": url, "title": "", "data": [], "error": str(exc)}
 
+    # The BeautifulSoup parse below is CPU-bound (pure Python, no I/O) and can
+    # take 50-200ms on heavy pages. Offload it to a worker thread via
+    # ``asyncio.to_thread`` so it never blocks the event loop while the page is
+    # parsed — concurrent requests keep being served. The HTTP fetch above is
+    # already async; this only moves the synchronous parse off the loop thread.
+    return await asyncio.to_thread(_parse_scraped_page, html, url, domain_key)
+
+
+def _parse_scraped_page(
+    html: str, url: str, domain_key: str | None = None
+) -> dict[str, Any]:
+    """Synchronous HTML → structured-data extraction for ``_scrape_page``.
+
+    Pure function (no I/O) — runs inside a worker thread off the event loop.
+    Reads ``_LEARNED_SELECTORS`` (module global) for domain-specific selectors.
+    Kept module-level (not a closure) so it is reusable and testable in
+    isolation without an HTTP fetch.
+    """
     soup = BeautifulSoup(html, "html.parser")
     for tag in soup(["script", "style", "nav", "footer", "header", "aside"]):
         tag.decompose()
@@ -311,7 +331,7 @@ async def _scrape_page(
             r"\d{1,3}(?:[\s \xa0]?\d{3})*[\.,]\d{2}\s?[€$£]",
             r"\d{1,3}(?:[\s \xa0]?\d{3})*\s?[€$£]",
         ]
-        for elem in soup.find_all(text=re.compile(price_patterns[0])):
+        for elem in soup.find_all(string=re.compile(price_patterns[0])):
             text = str(elem).strip()
             if 3 < len(text) < 30:
                 matches = re.findall(price_patterns[0], text)

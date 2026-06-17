@@ -2,7 +2,7 @@ import 'package:flutter/foundation.dart';
 
 /// DeepLinkService — stub web (pas de deep links sur web/extension).
 class DeepLinkService {
-  void listen({required Function(String code) onReferralCode}) {
+  void listen({required void Function(String code) onReferralCode}) {
     debugPrint('[DeepLinkService] Web stub: deep links non disponibles');
   }
 

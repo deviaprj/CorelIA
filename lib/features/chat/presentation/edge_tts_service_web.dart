@@ -8,14 +8,15 @@ class EdgeTtsService {
   static const frVoices = <String>[];
 
   String _voice = defaultVoice;
-  double _rate = 1.0;
-  double _pitch = 1.0;
 
   String get voice => _voice;
 
   void setVoice(String voice) => _voice = voice;
-  void setRate(double rate) => _rate = rate;
-  void setPitch(double pitch) => _pitch = pitch;
+  // setRate/setPitch : stubs no-op sur web — Edge TTS n'est pas disponible
+  // (cf. setEmotion). On garde les signatures pour la compat d'interface
+  // avec edge_tts_service_io.dart (conditional export).
+  void setRate(double rate) {}
+  void setPitch(double pitch) {}
 
   void setEmotion(dynamic emotion) {
     // Stub : pas d'effet sur web

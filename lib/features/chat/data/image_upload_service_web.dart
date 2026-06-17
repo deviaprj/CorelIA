@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:typed_data';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import '../domain/attachment.dart';
@@ -9,7 +8,7 @@ class ImageUploadException implements Exception {
   final String message;
   const ImageUploadException(this.message);
   @override
-  String toString() => 'ImageUploadException: \$message';
+  String toString() => 'ImageUploadException: $message';
 }
 
 /// Service d'upload d'images — implementation web via FilePicker.
@@ -30,7 +29,7 @@ class ImageUploadService {
       if (result == null || result.files.isEmpty) return [];
       return _processFiles(result.files);
     } catch (e) {
-      debugPrint('[ImageUploadService] Web error: \$e');
+      debugPrint('[ImageUploadService] Web error: $e');
       return [];
     }
   }
@@ -50,7 +49,7 @@ class ImageUploadService {
       if (bytes == null) continue;
 
       if (bytes.length > maxSingleBytes) {
-        debugPrint('[ImageUploadService] Image \${file.name} ignoree (\${bytes.length > maxSingleBytes ? ">" : "<"} \${maxSingleBytes ~/ 1024}KB)');
+        debugPrint('[ImageUploadService] Image ${file.name} ignorée (${bytes.length > maxSingleBytes ? ">" : "<"} ${maxSingleBytes ~/ 1024}KB)');
         continue;
       }
 

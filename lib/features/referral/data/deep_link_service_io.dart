@@ -4,7 +4,6 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'referral_service.dart';
 
 /// Service de deep links pour le parrainage.
 ///
@@ -12,13 +11,12 @@ import 'referral_service.dart';
 /// et `url_launcher` + `share_plus` pour générer et partager les liens.
 class DeepLinkService {
   static const _baseReferralUrl = 'https://zentic.fr/referral';
-  static const _referralScheme = 'corelia://referral';
 
   final AppLinks _appLinks = AppLinks();
-  StreamSubscription? _linkSubscription;
+  StreamSubscription<Uri>? _linkSubscription;
 
   /// Initialise l'écoute des deep links entrants.
-  void listen({required Function(String code) onReferralCode}) {
+  void listen({required void Function(String code) onReferralCode}) {
     // Écoute les liens entrants (cold start + warm start)
     _linkSubscription = _appLinks.uriLinkStream.listen((uri) {
       _handleUri(uri, onReferralCode);
@@ -34,7 +32,7 @@ class DeepLinkService {
     _linkSubscription?.cancel();
   }
 
-  void _handleUri(Uri uri, Function(String code) onReferralCode) {
+  void _handleUri(Uri uri, void Function(String code) onReferralCode) {
     debugPrint('[DeepLink] Lien reçu : $uri');
     final code = _extractCode(uri);
     if (code != null && code.isNotEmpty) {

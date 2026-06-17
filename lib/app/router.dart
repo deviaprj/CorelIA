@@ -10,6 +10,7 @@ import '../features/auth/data/mock_auth_repository.dart';
 import '../features/chat/presentation/chat_screen.dart';
 import '../features/chat/presentation/conversations_screen.dart';
 import '../features/projects/presentation/projects_screen.dart';
+import '../features/projects/presentation/project_detail_screen.dart';
 import '../features/settings/presentation/settings_screen.dart';
 import '../features/monetization/subscription/paywall_screen.dart';
 import '../../main.dart' show isDemoMode;
@@ -58,6 +59,12 @@ final routerProvider = Provider<GoRouter>((ref) {
         builder: (_, state) => ChatScreen(conversationId: state.pathParameters['id']!),
       ),
       GoRoute(path: '/projects', builder: (_, __) => const ProjectsScreen()),
+      GoRoute(
+        path: '/projects/:id',
+        builder: (_, state) => ProjectDetailScreen(
+          projectId: state.pathParameters['id']!,
+        ),
+      ),
       GoRoute(path: '/settings', builder: (_, __) => const SettingsScreen()),
       GoRoute(path: '/paywall', builder: (_, __) => const PaywallScreen()),
       // Raccourci racine

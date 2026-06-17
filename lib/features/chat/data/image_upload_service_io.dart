@@ -10,7 +10,7 @@ class ImageUploadException implements Exception {
   final String message;
   const ImageUploadException(this.message);
   @override
-  String toString() => 'ImageUploadException: \$message';
+  String toString() => 'ImageUploadException: $message';
 }
 
 /// Service d'upload et compression d'images — 100% autonome cote client.
@@ -55,14 +55,14 @@ class ImageUploadService {
 
         // Verification limite agrégée
         if (totalSize + att.sizeBytes > maxTotalBytes) {
-          debugPrint('[ImageUploadService] Limite 5MB atteinte, \${files.length - results.length} image(s) ignoree(s)');
+          debugPrint('[ImageUploadService] Limite 5MB atteinte, ${files.length - results.length} image(s) ignorée(s)');
           break;
         }
 
         results.add(att);
         totalSize += att.sizeBytes;
       } catch (e) {
-        debugPrint('[ImageUploadService] Erreur traitement image : \$e');
+        debugPrint('[ImageUploadService] Erreur traitement image : $e');
       }
     }
 
@@ -79,7 +79,7 @@ class ImageUploadService {
     try {
       final bytes = await file.readAsBytes();
       final originalSize = bytes.length;
-      debugPrint('[ImageUploadService] Original size: \${(originalSize / 1024).toStringAsFixed(1)}KB');
+      debugPrint('[ImageUploadService] Original size: ${(originalSize / 1024).toStringAsFixed(1)}KB');
 
       var compressedBytes = bytes;
       if (originalSize > 5 * 1024 * 1024) {
@@ -124,7 +124,7 @@ class ImageUploadService {
           compressedBytes = lastTry;
         } else {
           throw ImageUploadException(
-            'Image trop volumineuse apres compression (max \${maxSingleBytes ~/ 1024}KB)',
+            'Image trop volumineuse après compression (max ${maxSingleBytes ~/ 1024}KB)',
           );
         }
       }
@@ -135,7 +135,7 @@ class ImageUploadService {
       }
 
       final mimeType = _detectMimeType(file.path);
-      debugPrint('[ImageUploadService] Final size: \${(compressedBytes.length / 1024).toStringAsFixed(1)}KB');
+      debugPrint('[ImageUploadService] Final size: ${(compressedBytes.length / 1024).toStringAsFixed(1)}KB');
 
       return Attachment(
         type: AttachmentType.image,
@@ -145,7 +145,7 @@ class ImageUploadService {
         imageBase64: base64,
       );
     } catch (e) {
-      debugPrint('[ImageUploadService] Erreur traitement image : \$e');
+      debugPrint('[ImageUploadService] Erreur traitement image : $e');
       return null;
     }
   }

@@ -14,9 +14,10 @@ Endpoints:
 import os
 
 import httpx
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
+from backend.core.auth import require_operator_key
 from backend.core.config import settings
 from backend.core.logging import get_logger
 
@@ -27,12 +28,19 @@ router = APIRouter(prefix="/agent", tags=["agent"])
 AGENT_URL = os.environ.get("AGENT_URL", "http://codewhale-agent:8001")
 
 
-def _agent_headers() -> dict[str, str]:
-    """Headers pour les appels internes au CodeWhale Agent."""
-    return {
+def _agent_headers(operator_key: str | None = None) -> dict[str, str]:
+    """Headers pour les appels internes au CodeWhale Agent.
+
+    Forward the verified operator key so codewhale-agent's own operator gate
+    accepts the internal call (codewhale never trusts the network on its own).
+    """
+    headers = {
         "Content-Type": "application/json",
         "X-Service": "corelia-backend",
     }
+    if operator_key:
+        headers["X-API-Key"] = operator_key
+    return headers
 
 
 @router.get("/tools")
@@ -61,8 +69,8 @@ async def agent_health():
 
 
 @router.post("/execute")
-async def agent_execute(request: Request):
-    """Soumettre une tâche à l'agent. Supporte le streaming SSE.
+async def agent_execute(request: Request, _auth: str = Depends(require_operator_key)):
+    """Soumettre une tâche à l'agent. Supporte le streaming SSE (opérateur uniquement).
 
     Body: {"prompt": "...", "model": "deepseek-v4-pro", "max_turns": 20, "stream": false}
 
@@ -79,18 +87,20 @@ async def agent_execute(request: Request):
                     "model": body.get("model", "deepseek-v4-pro"),
                     "max_turns": body.get("max_turns", 20),
                 },
-                headers=_agent_headers(),
+                headers=_agent_headers(_auth),
             )
             resp.raise_for_status()
             task_data = resp.json()
             task_id = task_data["task_id"]
 
-            # Si le client veut du streaming, on proxy le flux SSE
+            # Si le client veut du streaming, on proxy le flux SSE (forward the
+            # operator key so codewhale-agent's gate on /agent/stream accepts it).
             if body.get("stream"):
                 async def sse_proxy():
                     async with httpx.AsyncClient(timeout=600.0) as stream_client:
                         async with stream_client.stream(
-                            "GET", f"{AGENT_URL}/agent/stream/{task_id}"
+                            "GET", f"{AGENT_URL}/agent/stream/{task_id}",
+                            headers={"X-API-Key": _auth},
                         ) as sse_resp:
                             async for line in sse_resp.aiter_lines():
                                 if await request.is_disconnected():
@@ -119,11 +129,14 @@ async def agent_execute(request: Request):
 
 
 @router.get("/status/{task_id}")
-async def agent_status(task_id: str):
-    """Statut d'une tâche agent."""
+async def agent_status(task_id: str, _auth: str = Depends(require_operator_key)):
+    """Statut d'une tâche agent (opérateur uniquement)."""
     async with httpx.AsyncClient(timeout=10.0) as client:
         try:
-            resp = await client.get(f"{AGENT_URL}/agent/status/{task_id}")
+            resp = await client.get(
+                f"{AGENT_URL}/agent/status/{task_id}",
+                headers={"X-API-Key": _auth},
+            )
             resp.raise_for_status()
             return resp.json()
         except httpx.HTTPError as e:
@@ -134,11 +147,14 @@ async def agent_status(task_id: str):
 
 
 @router.get("/result/{task_id}")
-async def agent_result(task_id: str):
-    """Résultat final d'une tâche agent."""
+async def agent_result(task_id: str, _auth: str = Depends(require_operator_key)):
+    """Résultat final d'une tâche agent (opérateur uniquement)."""
     async with httpx.AsyncClient(timeout=10.0) as client:
         try:
-            resp = await client.get(f"{AGENT_URL}/agent/result/{task_id}")
+            resp = await client.get(
+                f"{AGENT_URL}/agent/result/{task_id}",
+                headers={"X-API-Key": _auth},
+            )
             resp.raise_for_status()
             return resp.json()
         except httpx.HTTPError as e:

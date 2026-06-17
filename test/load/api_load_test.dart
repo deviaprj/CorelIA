@@ -196,13 +196,14 @@ class Message {
 
 enum Role { user, assistant, system }
 
-// Utilitaire pour les informations de processus
+// Utilitaire pour les informations de processus.
+// `pid` ci-dessous est le getter top-level de dart:io — on ne le redéfinit PAS
+// (l'ancien `static int get pid => pid;` causait une récursion infinie → stack overflow).
 class ProcessInfo {
   static int get currentRss {
-    // Sur les plateformes supportées
     if (Platform.isLinux || Platform.isMacOS) {
       try {
-        final result = Process.runSync('ps', ['-o', 'rss=', '-p', '${pid}']);
+        final result = Process.runSync('ps', ['-o', 'rss=', '-p', '$pid']);
         return int.parse((result.stdout as String).trim()) * 1024;
       } catch (_) {
         return 0;
@@ -210,6 +211,4 @@ class ProcessInfo {
     }
     return 0;
   }
-
-  static int get pid => pid;
 }

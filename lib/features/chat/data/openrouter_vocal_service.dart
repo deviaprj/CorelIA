@@ -178,11 +178,13 @@ class OpenRouterVocalService {
     String text, {
     TtsVoice voice = TtsVoice.nova,
     double speed = _vocalTtsSpeed,
+    bool isPro = false,
   }) async {
     return OpenRouterTtsService.synthesize(
       text,
       voice: voice,
       speed: speed,
+      isPro: isPro,
     );
   }
 

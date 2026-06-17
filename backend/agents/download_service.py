@@ -2,51 +2,135 @@
 
 Supports 1000+ video sites via yt-dlp and generic page scraping for
 videos, images, and galleries on any website.
+
+Async I/O (ADR-031 follow-up): yt-dlp extraction runs in a subprocess sandbox
+(``asyncio.create_subprocess_exec`` + ``wait_for`` timeout + kill/reap on
+timeout) so it can never freeze the event loop; page scraping uses
+``httpx.AsyncClient`` + ``safe_get`` (async SSRF-guarded fetch). The route
+handlers no longer need an ``asyncio.to_thread`` stopgap.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
+import sys
+import textwrap
 from typing import Any
 from urllib.parse import urljoin
 
 import httpx
 from bs4 import BeautifulSoup
 
-# yt-dlp is optional — if not installed, we fall back to page scraping
+from backend.core.net_guard import UnsafeUrlError, assert_safe_url, safe_get
+
+# yt-dlp is optional — if not installed, we fall back to page scraping. The
+# library itself is only imported to probe availability; extraction runs in a
+# subprocess (see ``_YTDLP_HELPER``) so the parent never calls yt-dlp directly.
 try:
-    import yt_dlp
+    import yt_dlp  # noqa: F401
     _YTDLP_AVAILABLE = True
 except ImportError:  # pragma: no cover
     yt_dlp = None  # type: ignore[assignment]
     _YTDLP_AVAILABLE = False
 
 
-class MediaFormat:
-    """A single downloadable media format."""
+# Subprocess helper that performs the yt-dlp extraction. Takes the URL as
+# ``sys.argv[1]`` and the mode ("flat" for channels/playlists, "normal" for a
+# single video) as ``sys.argv[2]``. Prints a JSON result on stdout matching the
+# shapes the parent used to build in-process. On an internal yt-dlp failure it
+# prints ``{"_error": "<message>"}`` and exits 0 so the parent can surface the
+# error as an exception (preserving the pre-async success=False behaviour).
+#
+# Spawned via ``asyncio.create_subprocess_exec`` (no shell) with a hard timeout
+# — see ``DownloadService._extract_via_ytdlp``. Reaped on timeout so no zombie
+# outlives the request (pattern proven in script_executor.execute_script).
+_YTDLP_HELPER = textwrap.dedent("""\
+    import json, sys
+    import yt_dlp
 
-    def __init__(self, data: dict[str, Any]) -> None:
-        self.format_id = data.get("format_id", "")
-        self.ext = data.get("ext", "")
-        self.quality = data.get("quality_label") or data.get("format_note", "")
-        self.filesize = data.get("filesize")
-        self.url = data.get("url", "")
-        self.has_audio = data.get("acodec") != "none"
-        self.has_video = data.get("vcodec") != "none"
-        self.resolution = data.get("resolution", "")
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "format_id": self.format_id,
-            "ext": self.ext,
-            "quality": self.quality,
-            "filesize": self.filesize,
-            "url": self.url,
-            "has_audio": self.has_audio,
-            "has_video": self.has_video,
-            "resolution": self.resolution,
+    def main():
+        url = sys.argv[1]
+        mode = sys.argv[2] if len(sys.argv) > 2 else "normal"
+        opts = {
+            "quiet": True,
+            "no_warnings": True,
+            "skip_download": True,
+            "simulate": True,
         }
+        if mode == "flat":
+            opts["extract_flat"] = True
+            opts["playlistend"] = 50
+        try:
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                info = ydl.extract_info(url, download=False)
+        except Exception as exc:  # noqa: BLE001 — surface any yt-dlp failure
+            print(json.dumps({"_error": str(exc)}))
+            return
+
+        if mode == "flat":
+            entries = []
+            for e in (info.get("entries") or []):
+                if not e:
+                    continue
+                entry_url = e.get("webpage_url") or e.get("url") or ""
+                if not entry_url and e.get("id"):
+                    entry_url = f"https://www.youtube.com/watch?v={e['id']}"
+                entries.append({
+                    "title": e.get("title", ""),
+                    "url": entry_url,
+                    "duration": e.get("duration"),
+                })
+            print(json.dumps({
+                "type": "playlist",
+                "title": info.get("title", ""),
+                "uploader": info.get("uploader", ""),
+                "webpage_url": info.get("webpage_url", url),
+                "entries": entries,
+            }))
+            return
+
+        formats = []
+        for f in info.get("formats", []):
+            if not f.get("url"):
+                continue
+            has_audio = f.get("acodec") != "none"
+            has_video = f.get("vcodec") != "none"
+            if not has_audio and not has_video:
+                continue
+            formats.append({
+                "format_id": f.get("format_id", ""),
+                "ext": f.get("ext", ""),
+                "quality": f.get("quality_label") or f.get("format_note", ""),
+                "filesize": f.get("filesize"),
+                "url": f.get("url", ""),
+                "has_audio": has_audio,
+                "has_video": has_video,
+                "resolution": f.get("resolution", ""),
+            })
+
+        direct_url = info.get("url") or ""
+        if not direct_url and formats:
+            merged = next(
+                (x for x in formats if x["has_audio"] and x["has_video"]),
+                None,
+            )
+            direct_url = merged["url"] if merged else formats[0]["url"]
+
+        print(json.dumps({
+            "type": "video",
+            "title": info.get("title", ""),
+            "thumbnail": info.get("thumbnail", ""),
+            "duration": info.get("duration"),
+            "uploader": info.get("uploader", ""),
+            "webpage_url": info.get("webpage_url", url),
+            "direct_url": direct_url,
+            "formats": formats,
+        }))
+
+    main()
+    """)
 
 
 class DownloadService:
@@ -69,27 +153,36 @@ class DownloadService:
         re.IGNORECASE,
     )
 
+    # Hard cap on a single yt-dlp extraction (seconds). Video-site extraction
+    # can take 10-30s; bounding it prevents a hung subprocess from pinning a
+    # worker indefinitely. On timeout the child is killed + reaped.
+    _YTDLP_TIMEOUT = 30
+
     def __init__(self) -> None:
-        self._ydl_opts: dict[str, Any] = {
-            "quiet": True,
-            "no_warnings": True,
-            "skip_download": True,
-            "simulate": True,
-        }
+        # Opts are baked into the subprocess helper now — nothing to hold here.
+        pass
 
     # ── Public API ────────────────────────────────────────────────────────────
 
-    def extract_media(self, url: str) -> dict[str, Any]:
+    async def extract_media(self, url: str) -> dict[str, Any]:
         """Main entry point — returns video info or page media depending on URL."""
+        try:
+            assert_safe_url(url)
+        except UnsafeUrlError as exc:
+            return {"type": "error", "url": url, "error": f"URL not allowed: {exc}"}
         if _YTDLP_AVAILABLE and self._is_ytdlp_site(url):
-            return self._extract_via_ytdlp(url)
-        return self._extract_page_media(url)
+            return await self._extract_via_ytdlp(url)
+        return await self._extract_page_media(url)
 
-    def extract_gallery(self, url: str) -> dict[str, Any]:
+    async def extract_gallery(self, url: str) -> dict[str, Any]:
         """Focus on images — returns every image found on the page."""
-        return self._extract_page_media(url, video_focus=False)
+        try:
+            assert_safe_url(url)
+        except UnsafeUrlError as exc:
+            return {"type": "error", "url": url, "error": f"URL not allowed: {exc}"}
+        return await self._extract_page_media(url, video_focus=False)
 
-    # ── yt-dlp extraction (1000+ sites) ─────────────────────────────────────────
+    # ── yt-dlp extraction (1000+ sites, subprocess sandbox) ────────────────────
 
     def _is_ytdlp_site(self, url: str) -> bool:
         return bool(self._YTDLP_HOSTS.search(url))
@@ -97,81 +190,80 @@ class DownloadService:
     def _is_youtube_channel_or_playlist(self, url: str) -> bool:
         return bool(self._YOUTUBE_CHANNEL_PATTERNS.search(url))
 
-    def _extract_via_ytdlp(self, url: str) -> dict[str, Any]:
-        if not _YTDLP_AVAILABLE or yt_dlp is None:
+    async def _extract_via_ytdlp(self, url: str) -> dict[str, Any]:
+        """Run yt-dlp in an isolated subprocess with a hard timeout.
+
+        The SSRF guard on ``url`` was already performed by the caller
+        (``extract_media``). yt-dlp does its own fetching downstream, so — as in
+        the sync version — we rely on that single up-front ``assert_safe_url``.
+        """
+        if not _YTDLP_AVAILABLE:
             raise RuntimeError("yt-dlp not installed")
 
-        # YouTube channels/playlists: use flat extraction to avoid timeout
-        if self._is_youtube_channel_or_playlist(url):
-            flat_opts = {
-                **self._ydl_opts,
-                "extract_flat": True,
-                "playlistend": 50,
-            }
-            with yt_dlp.YoutubeDL(flat_opts) as ydl:
-                info = ydl.extract_info(url, download=False)
+        mode = "flat" if self._is_youtube_channel_or_playlist(url) else "normal"
 
-            entries: list[dict[str, Any]] = []
-            for e in (info.get("entries") or []):
-                if not e:
-                    continue
-                entry_url = e.get("webpage_url") or e.get("url") or ""
-                if not entry_url and e.get("id"):
-                    entry_url = f"https://www.youtube.com/watch?v={e['id']}"
-                entries.append({
-                    "title": e.get("title", ""),
-                    "url": entry_url,
-                    "duration": e.get("duration"),
-                })
-
-            return {
-                "type": "playlist",
-                "title": info.get("title", ""),
-                "uploader": info.get("uploader", ""),
-                "webpage_url": info.get("webpage_url", url),
-                "entries": entries,
-            }
-
-        with yt_dlp.YoutubeDL(self._ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
-
-        formats: list[dict[str, Any]] = []
-        for f in info.get("formats", []):
-            if not f.get("url"):
-                continue
-            mf = MediaFormat(f)
-            # Skip audio-only or video-only fragments unless they have a sensible size
-            if not mf.has_audio and not mf.has_video:
-                continue
-            formats.append(mf.to_dict())
-
-        # Also include the "best" pre-merged format if available
-        direct_url = info.get("url") or ""
-        if not direct_url and formats:
-            # Prefer format that has both audio and video
-            merged = next(
-                (f for f in formats if f["has_audio"] and f["has_video"]),
-                None,
+        # Spawn the extraction subprocess WITHOUT a shell (argv form) so the
+        # event loop keeps serving concurrent requests while yt-dlp runs. This
+        # mirrors the proven pattern in ``script_executor.execute_script``.
+        # ``sys.executable`` (not bare ``"python3"``) is required: yt-dlp is
+        # installed in the backend's venv, so the subprocess must run under the
+        # same interpreter to have access to it.
+        proc = await asyncio.create_subprocess_exec(
+            sys.executable,
+            "-c",
+            _YTDLP_HELPER,
+            url,
+            mode,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            stdout_b, stderr_b = await asyncio.wait_for(
+                proc.communicate(), timeout=self._YTDLP_TIMEOUT
             )
-            if merged:
-                direct_url = merged["url"]
-            else:
-                direct_url = formats[0]["url"]
+        except asyncio.TimeoutError:
+            # ``wait_for`` raises ``asyncio.TimeoutError`` (the builtin
+            # ``TimeoutError`` alias) — NOT ``subprocess.TimeoutExpired``. It
+            # cancels ``communicate()`` but does NOT kill the child, so reap it
+            # explicitly to avoid a zombie pinning CPU past the deadline. Guard
+            # ``proc.kill()`` for the race where the child exited on its own in
+            # the window between the timeout firing and the kill.
+            try:
+                proc.kill()
+            except ProcessLookupError:
+                pass  # already exited — nothing to signal
+            await proc.wait()
+            raise RuntimeError(
+                f"yt-dlp extraction timed out after {self._YTDLP_TIMEOUT}s"
+            )
 
-        return {
-            "type": "video",
-            "title": info.get("title", ""),
-            "thumbnail": info.get("thumbnail", ""),
-            "duration": info.get("duration"),
-            "uploader": info.get("uploader", ""),
-            "webpage_url": info.get("webpage_url", url),
-            "direct_url": direct_url,
-            "formats": formats,
-        }
+        stdout = (stdout_b or b"").decode("utf-8", errors="replace").strip()
+        stderr = (stderr_b or b"").decode("utf-8", errors="replace").strip()
+
+        if proc.returncode != 0 or not stdout:
+            # Nonzero exit (e.g. yt-dlp crashed) or no output → surface as an
+            # exception so the route handler returns success=False, matching
+            # the pre-async behaviour where a yt-dlp exception propagated.
+            raise RuntimeError(
+                stderr or "yt-dlp extraction produced no output"
+            )
+
+        try:
+            data = json.loads(stdout)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(f"yt-dlp returned non-JSON output: {exc}") from exc
+
+        # The helper signals an internal yt-dlp failure via ``_error``. Surface
+        # it as an exception (→ success=False), matching the sync version where
+        # yt-dlp raised ``DownloadError`` and the route handler caught it.
+        if isinstance(data, dict) and "_error" in data:
+            raise RuntimeError(str(data["_error"]))
+
+        return data
 
     # ── Universal page scraper ─────────────────────────────────────────────────
 
-    def _extract_page_media(
+    async def _extract_page_media(
         self,
         url: str,
         video_focus: bool = True,
@@ -189,8 +281,11 @@ class DownloadService:
             "Accept-Language": "en-US,en;q=0.5",
         }
 
-        with httpx.Client(timeout=30, follow_redirects=True, headers=headers) as client:
-            resp = client.get(url)
+        # SSRF guard: ``safe_get`` (async) re-validates each redirect hop.
+        # ``httpx.AsyncClient`` lets the event loop keep serving other requests
+        # while this fetch awaits network I/O.
+        async with httpx.AsyncClient(timeout=30, headers=headers) as client:
+            resp = await safe_get(client, url)
             resp.raise_for_status()
             soup = BeautifulSoup(resp.text, "html.parser")
 

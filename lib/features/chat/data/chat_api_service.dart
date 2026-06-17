@@ -49,7 +49,7 @@ class ChatApiService {
     );
 
     try {
-      final response = await _dio.post(
+      final response = await _dio.post<dynamic>(
         '/chat/stream',
         data: request.toJson(),
         options: Options(

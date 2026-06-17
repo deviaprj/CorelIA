@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from typing import Any, AsyncGenerator
 
 import redis.asyncio as redis
-from fastapi import FastAPI, Request, status
+from fastapi import Depends, FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -16,6 +16,7 @@ from backend.agents.chat_router import router as chat_router
 from backend.agents.config_agent import router as config_router
 from backend.agents.data_insights import router as insights_router
 from backend.agents.search_engine import search
+from backend.core.auth import require_client_api_key, require_operator_key
 from backend.core.config import settings
 from backend.core.logging import get_logger, set_request_id
 from backend.core.skills_discovery import discover_skills, load_skill
@@ -60,13 +61,18 @@ app = FastAPI(
 app.state.limiter = _limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
-# CORS
+# CORS — wildcard origins + credentials is an invalid combo (browsers reject it
+# and it widens the attack surface). Disable credentials only when the origin
+# list is the wildcard "*"; tighten methods/headers to what clients actually use.
+# In production docker-compose sets CORS_ORIGINS to explicit origins (non-wildcard),
+# which re-enables credentials.
+_is_wildcard_origin = "*" in settings.cors_origins_list
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins_list,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_credentials=not _is_wildcard_origin,
+    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization", "X-API-Key", "X-Request-ID"],
 )
 
 
@@ -101,6 +107,7 @@ async def scrape_endpoint(
     request: Request,
     url: str,
     selectors: str | None = None,
+    _auth: str = Depends(require_client_api_key),
 ) -> dict[str, Any]:
     """Scrape a URL and return structured data.
 
@@ -122,7 +129,11 @@ async def scrape_endpoint(
 
 @app.get("/search_smart")
 @_limiter.limit(settings.rate_limit)
-async def search_smart_endpoint(request: Request, q: str) -> dict[str, Any]:
+async def search_smart_endpoint(
+    request: Request,
+    q: str,
+    _auth: str = Depends(require_client_api_key),
+) -> dict[str, Any]:
     """Unified smart search endpoint.
 
     Analyzes the natural-language query, classifies intent, scrapes
@@ -137,6 +148,7 @@ async def search_smart_endpoint(request: Request, q: str) -> dict[str, Any]:
 async def download_media_endpoint(
     request: Request,
     body: DownloadMediaRequest,
+    _auth: str = Depends(require_client_api_key),
 ) -> DownloadMediaResponse:
     """Extract direct media URLs from a webpage or video site.
 
@@ -149,7 +161,10 @@ async def download_media_endpoint(
 
     service = DownloadService()
     try:
-        result = service.extract_media(body.url)
+        # ``extract_media`` is now async (yt-dlp runs in a subprocess sandbox,
+        # page scraping uses httpx.AsyncClient) — awaited directly, no thread
+        # pool. See ADR-031.
+        result = await service.extract_media(body.url)
         return DownloadMediaResponse(success=True, **result)
     except Exception as exc:
         logger.error("download_media failed", extra={"url": body.url, "error": str(exc)})
@@ -164,6 +179,7 @@ async def download_media_endpoint(
 async def crawl_endpoint(
     request: Request,
     body: CrawlRequest,
+    _auth: str = Depends(require_client_api_key),
 ) -> CrawlResponse:
     """Recursively crawl a website and extract media links.
 
@@ -178,7 +194,9 @@ async def crawl_endpoint(
         same_domain=body.same_domain,
     )
     try:
-        result = service.crawl(body.url)
+        # ``CrawlService.crawl`` is now async (parallel BFS via httpx.AsyncClient
+        # + asyncio.gather) — awaited directly, no thread pool. See ADR-031.
+        result = await service.crawl(body.url)
         return CrawlResponse(success=True, **result)
     except Exception as exc:
         logger.error("crawl failed", extra={"url": body.url, "error": str(exc)})
@@ -193,6 +211,7 @@ async def crawl_endpoint(
 async def script_scrape_endpoint(
     request: Request,
     body: ScriptExecutionRequest,
+    _auth: str = Depends(require_client_api_key),
 ) -> ScriptExecutionResponse:
     """Generate and execute a Python scraping script from natural language.
 
@@ -213,8 +232,14 @@ async def script_scrape_endpoint(
 async def script_exec_endpoint(
     request: Request,
     body: ScriptExecRequest,
+    _auth: str = Depends(require_operator_key),
 ) -> ScriptExecutionResponse:
-    """Generate and execute a Python script from natural-language instructions."""
+    """Generate and execute a Python script from natural-language instructions.
+
+    Operator-only: arbitrary code execution on the server — gated by
+    ``API_SECRET_KEY`` (never embedded in the APK/extension). The APK uses
+    ``/script/scrape`` and ``/script/api-fetch`` (constrained to a URL), not this.
+    """
     from backend.agents.script_executor import exec_with_instruction
 
     result = await exec_with_instruction(body.instruction)
@@ -226,6 +251,7 @@ async def script_exec_endpoint(
 async def script_api_fetch_endpoint(
     request: Request,
     body: ApiFetchRequest,
+    _auth: str = Depends(require_client_api_key),
 ) -> ScriptExecutionResponse:
     """Fetch an API URL and transform JSON per natural-language instructions."""
     from backend.agents.script_executor import api_fetch_with_script

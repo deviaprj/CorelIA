@@ -92,6 +92,16 @@ services:
       REDIS_URL: redis://redis:6379/0
       RATE_LIMIT: ${RATE_LIMIT:-100/minute}
       CORS_ORIGINS: ${CORS_ORIGINS:-https://zentic.fr,https://api.zentic.fr}
+      # Two-tier API auth (see DECISIONS.md ADR-027).
+      # CLIENT_API_KEY — soft gate, embedded in the APK via --dart-define, gates
+      #   APK-facing routes (/scrape, /search_smart, /download_media, /crawl,
+      #   /script/scrape, /script/api-fetch, /insights/ingest|trends|demographics).
+      #   Empty = transition-open (routes stay open during rollout).
+      # API_SECRET_KEY — operator-only, fail-closed, NEVER in the APK. Gates
+      #   /script/exec, /config/diagnose|migrate, /agent/*, /insights/audit.
+      #   Empty = 403 (safe default).
+      CLIENT_API_KEY: ${CLIENT_API_KEY:-}
+      API_SECRET_KEY: ${API_SECRET_KEY:-}
       DEBUG: "false"
       AGENT_URL: http://codewhale-agent:8001
     volumes:
@@ -118,6 +128,10 @@ services:
     environment:
       <<: *common-env
       API_SECRET_KEY: ${API_SECRET_KEY:-}
+      # CORS — codewhale-agent is internal (reached via the backend /agent/* proxy)
+      # but also serves /agent/* directly. Tighten to prod origins instead of the
+      # code-level wildcard default.
+      CORS_ORIGINS: ${CORS_ORIGINS:-https://zentic.fr,https://api.zentic.fr}
       WORKSPACE_DIR: /workspace
       OLLAMA_HOST: http://ollama:11434
       MAX_CONCURRENT_TASKS: 5
@@ -126,7 +140,12 @@ services:
       - codewhale-workspace:/workspace
       - ./:/workspace/corelia:ro
       - ./.env:/app/.env:ro
-      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # docker.sock REMOVED (audit P0, see DECISIONS.md ADR-027): mounting the
+      # Docker socket grants root-equivalent host access — any process in the
+      # container can spawn a privileged sibling and get root on the host.
+      # codewhale's run_command tool no longer manages sibling containers. If a
+      # future task needs container orchestration, expose it through a
+      # narrowly-scoped proxy, never the raw socket.
     networks:
       - corelia-net
     # Ollama est optionnel — l'agent utilise principalement DeepSeek/OpenRouter
@@ -142,8 +161,11 @@ services:
     volumes:
       - ollama-data:/root/.ollama
       - ollama-tmp:/tmp
-    ports:
-      - "11434:11434"
+    # No host port published — Ollama is internal-only. Backend & codewhale
+    # reach it via http://ollama:11434 on the corelia-net bridge network, and
+    # Open WebUI via OLLAMA_BASE_URL=http://ollama:11434. Publishing 11434 to
+    # the host previously exposed an unauthenticated LLM endpoint to the
+    # internet (audit P0) — anyone could run models at the operator's cost.
     networks:
       - corelia-net
     # ── GPU support (décommente si VPS a un GPU) ──
@@ -185,6 +207,12 @@ services:
     environment:
       - TZ=Europe/Paris
       - HOME=/home/corelia
+      # Mot de passe ttyd — OBLIGATOIRE (fail-closed). Si TTYD_PASS est vide ou
+      # absent de .env, docker-compose refuse de démarrer le service terminal.
+      # start-ttyd.sh refuse en plus la valeur "changeme". Historiquement ce
+      # service tournait avec le défaut Dockerfile "changeme" en production.
+      - TTYD_PASS=${TTYD_PASS:?TTYD_PASS doit être défini dans .env (ne pas utiliser changeme)}
+      - TTYD_USER=corelia
     volumes:
       # Projet
       - /opt/corelia:/opt/corelia:ro

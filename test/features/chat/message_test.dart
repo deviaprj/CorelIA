@@ -77,7 +77,7 @@ void main() {
       );
       final apiMap = msg.toApiMap();
       expect(apiMap['role'], equals('user'));
-      expect(apiMap['content'], isA<List>());
+      expect(apiMap['content'], isA<List<dynamic>>());
       final parts = apiMap['content'] as List;
       expect(parts.length, 2);
       expect(parts[0]['type'], 'text');
@@ -174,6 +174,11 @@ void main() {
         ],
       );
       expect(msg.exceedsAttachmentLimit, isTrue);
+    });
+
+    test('attachmentLimitFor is tier-aware (50MB Pro / 5MB free)', () {
+      expect(attachmentLimitFor(isPro: false), equals(5 * 1024 * 1024));
+      expect(attachmentLimitFor(isPro: true), equals(50 * 1024 * 1024));
     });
 
     test('buildFileContext truncates documents', () {

@@ -2,9 +2,20 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:corel_ia/features/auth/presentation/login_screen.dart';
+import '../../helpers/widget_test_shaders.dart';
 
 void main() {
   group('LoginScreen Widget Tests', () {
+    // Warm-up : le binding de test (Flutter 3.41.9) ne bundle pas le shader
+    // framework shaders/ink_sparkle.frag → le premier tap sur un bouton Material
+    // (InkWell/InkResponse : ElevatedButton/FilledButton/IconButton/OutlinedButton)
+    // lève une erreur async non gérée qui fait échouer le test. On déclenche ce
+    // chargement une fois dans une zone guarded qui avale l'erreur pour que
+    // `_initCalled` passe à true (voir helpers/widget_test_shaders.dart).
+    testWidgets('warm up ink sparkle shader (env artifact)', (tester) async {
+      await warmUpInkSparkleShader(tester);
+    });
+
     testWidgets('should display login form with email and password fields',
         (WidgetTester tester) async {
       await tester.pumpWidget(
@@ -30,8 +41,10 @@ void main() {
         ),
       );
 
-      // Vérifier qu'il y a un ElevatedButton
-      expect(find.byType(ElevatedButton), findsOneWidget);
+      // Vérifier qu'il y a un FilledButton (bouton principal Material 3 —
+      // login_screen.dart:ligne 242 utilise FilledButton, successeur M3 de
+      // ElevatedButton).
+      expect(find.byType(FilledButton), findsOneWidget);
     });
 
     testWidgets('should display Google sign-in button', (WidgetTester tester) async {
@@ -105,7 +118,7 @@ void main() {
       await tester.pump();
 
       // Tenter de se connecter
-      await tester.tap(find.byType(ElevatedButton));
+      await tester.tap(find.byType(FilledButton));
       await tester.pump();
 
       // Vérifier que le message d'erreur apparaît
@@ -138,7 +151,7 @@ void main() {
       await tester.pump();
 
       // Tenter de s'inscrire
-      await tester.tap(find.byType(ElevatedButton));
+      await tester.tap(find.byType(FilledButton));
       await tester.pump();
 
       // Vérifier que le message d'erreur apparaît
@@ -185,8 +198,8 @@ void main() {
         ),
       );
 
-      // Vérifier que le bouton ElevatedButton est présent
-      expect(find.byType(ElevatedButton), findsOneWidget);
+      // Vérifier que le bouton FilledButton est présent (Material 3)
+      expect(find.byType(FilledButton), findsOneWidget);
     });
   });
 }

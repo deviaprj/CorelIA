@@ -90,6 +90,13 @@ class ScriptExecutionService {
   static final Dio _dio = Dio(BaseOptions(
     connectTimeout: const Duration(seconds: 10),
     receiveTimeout: const Duration(seconds: 45),
+    // /script/scrape + /script/api-fetch are client-key gated. /script/exec is
+    // operator-only and returns 401/403 from the APK by design (the APK holds
+    // only the soft CLIENT_API_KEY, never the operator API_SECRET_KEY) — see
+    // DECISIONS.md ADR-027.
+    headers: AppConstants.backendApiKey.isNotEmpty
+        ? <String, dynamic>{'X-API-Key': AppConstants.backendApiKey}
+        : <String, dynamic>{},
   ));
 
   static Future<ScriptExecutionResult> _post(
@@ -120,6 +127,16 @@ class ScriptExecutionService {
       return ScriptExecutionResult.fromJson(resp.data!);
     } on DioException catch (e) {
       debugPrint('[ScriptExecution] Dio error: $e');
+      // 401/403 from /script/exec = operator-only route, intentionally not
+      // reachable from the APK. Surface a clear message instead of a raw 401.
+      final code = e.response?.statusCode;
+      if (code == 401 || code == 403) {
+        return const ScriptExecutionResult(
+          success: false,
+          error: "Cette commande est réservée à l'opérateur (serveur) et "
+              "n'est pas accessible depuis l'app.",
+        );
+      }
       return ScriptExecutionResult(
         success: false,
         error: 'Erreur réseau: ${e.message}',

@@ -8,7 +8,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'app/router.dart';
 import 'app/theme.dart';
 import 'core/platform/platform_service.dart';
-import 'core/platform/extension_bridge.dart';
 import 'core/platform/extension_providers.dart';
 import 'core/providers/app_providers.dart';
 import 'features/monetization/ads/ad_service.dart';
@@ -46,7 +45,11 @@ Future<void> main() async {
     await dotenv.load(fileName: '.env');
     debugPrint('[dotenv] .env charge avec succes');
   } catch (e) {
-    debugPrint('[dotenv] .env introuvable ou illisible : $e');
+    // Expected in release: .env is intentionally not bundled as an asset
+    // (would ship operator/paid secrets inside the APK). All client keys
+    // arrive via --dart-define; _env() falls back to those when dotenv is
+    // uninitialized. Safe to ignore.
+    debugPrint('[dotenv] .env non embarqué (normal en release) : $e');
   }
 
   // ── Extension Chrome : mode DEMO obligatoire ──────────────────────────────
@@ -192,8 +195,19 @@ class CorelyApp extends ConsumerWidget {
     // Ce watch déclenche l'initialisation du stream Firestore et met à jour
     // les SharedPreferences locales quand les préférences changent à distance.
     if (!isDemoMode) {
-      ref.listen(syncedPreferencesProvider, (_, next) {
-        // Les mises à jour sont gérées dans PreferencesSyncService.mergeWithLocal()
+      // Sync multi-appareils : à chaque changement distant, fusion LWW vers les
+      // SharedPreferences locales. Les providers en mémoire rechargeront les
+      // valeurs fusionnées à leur prochaine init (re-propagation local→remote
+      // et reload en live : post-beta, voir DECISIONS.md).
+      ref.listen<AsyncValue<SyncedPreferences?>>(syncedPreferencesProvider, (_, next) async {
+        final sync = ref.read(preferencesSyncProvider);
+        final remote = next.valueOrNull;
+        if (sync == null || remote == null) return;
+        try {
+          await sync.mergeWithLocal(remote);
+        } catch (e) {
+          debugPrint('[PrefsSync] merge error: $e');
+        }
       });
       // Écouter le profil utilisateur pour synchroniser le statut Pro
       ref.listen(userProfileProvider, (_, next) {});

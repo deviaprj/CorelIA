@@ -76,7 +76,7 @@ class StreakService {
       final remaining = streakThreshold - data.streak;
       return '$remaining jour${remaining > 1 ? 's' : ''} avant le bonus +$bonusMessages messages !';
     }
-    return 'Serie de $data.streak jours 🔥';
+    return 'Série de ${data.streak} jours 🔥';
   }
 
   Future<void> _saveStreak(

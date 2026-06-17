@@ -1,0 +1,16 @@
+# Keystore de signature Android (release) — NE JAMAIS committer ce fichier.
+# Copiez-le en android/key.properties et renseignez vos valeurs.
+# (key.properties est gitignored — cf. .gitignore.)
+#
+# Générer un keystore de release :
+#   keytool -genkey -v -keystore android/corely-release.keystore \
+#     -alias corely -keyalg RSA -keysize 2048 -validity 10000
+#
+# Puis flutter build apk --release lira automatiquement android/key.properties.
+# Sans ce fichier, le build release échoue (garde-fou dans android/app/build.gradle)
+# plutôt que de signer silencieusement avec la clé debug (rejet Play Store).
+
+storePassword=YOUR_STORE_PASSWORD
+keyPassword=YOUR_KEY_PASSWORD
+keyAlias=corely
+storeFile=corely-release.keystore

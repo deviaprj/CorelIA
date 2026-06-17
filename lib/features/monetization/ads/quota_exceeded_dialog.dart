@@ -3,10 +3,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'ad_service.dart';
 import 'ad_reward_tracker.dart';
-import '../../chat/data/search_quota_service.dart';
-import '../../chat/data/voice_quota_service.dart';
-import '../../chat/data/file_quota_service.dart';
-import '../../monetization/credits/credit_service.dart';
 
 /// Provider global pour AdRewardTracker.
 final adRewardTrackerProvider = Provider<AdRewardTracker>((ref) => AdRewardTracker());

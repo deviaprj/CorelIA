@@ -93,9 +93,29 @@ void main() {
         expect(entry?.modelId, equals('neversleep/ring-2.6-1t'));
       });
 
-      test('vision task resolves to gemini-flash', () {
+      test('vision task resolves to deepseek-chat (free vision model en priorite)', () {
+        // La chaine vision met deepseek-chat (isFree + supportsVision) en tete :
+        // priorite au modele gratuit. gemini-flash-1.5 / gpt-4o-mini (OpenRouter
+        // payants) ne sont atteints que si deepseek-chat est en cooldown.
+        // ADR (vision-aware null fallback + tier-aware) : avant, gemini-flash-1.5
+        // etait le premier de la chaine ; desormais deepseek-chat vient en tete.
         final entry = ModelRouter.resolveModel(TaskType.vision);
-        expect(entry?.modelId, equals('google/gemini-flash-1.5'));
+        expect(entry?.modelId, equals('deepseek-chat'));
+      });
+
+      test('vision task returns null si deepseek-chat en cooldown et lastResort non-vision', () {
+        // Verrouille le vision-aware null fallback (ADR 19:38) : pour un utilisateur
+        // gratuit (isPro=false), gemini-flash-1.5 et gpt-4o-mini (payants) sont
+        // filtres ; si deepseek-chat (seul modele vision gratuit) est en cooldown,
+        // la chaine est epuisee et le lastResort (deepseek-v4-pro, non-vision) ne
+        // peut pas servir la vision → on retourne null pour que _getVisionStream
+        // affiche le message propre "Analyse d'image indisponible".
+        // NB : markRateLimited mute le rateLimiter statique ; ce test est le dernier
+        // resolveModel du fichier (tests RateLimitTracker ulterieurs utilisent des
+        // instances fraiches) → pas de pollution.
+        ModelRouter.markRateLimited('deepseek-chat');
+        final entry = ModelRouter.resolveModel(TaskType.vision, isPro: false);
+        expect(entry, isNull);
       });
     });
 

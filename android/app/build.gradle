@@ -19,6 +19,13 @@ if (flutterVersionCode == null) flutterVersionCode = '1'
 def flutterVersionName = localProperties.getProperty('flutter.versionName')
 if (flutterVersionName == null) flutterVersionName = '1.0.0'
 
+// Keystore de release (gitignored). Voir android/key.properties.example + DEPLOY.md.
+def keystoreProperties = new Properties()
+def keystorePropertiesFile = rootProject.file('key.properties')
+if (keystorePropertiesFile.exists()) {
+    keystorePropertiesFile.withReader('UTF-8') { reader -> keystoreProperties.load(reader) }
+}
+
 android {
     namespace 'com.corelia.corely'
     compileSdk 36
@@ -43,15 +50,38 @@ android {
         multiDexEnabled true
     }
 
+    signingConfigs {
+        release {
+            keyAlias keystoreProperties['keyAlias']
+            keyPassword keystoreProperties['keyPassword']
+            storeFile keystoreProperties['storeFile'] ? file(keystoreProperties['storeFile']) : null
+            storePassword keystoreProperties['storePassword']
+        }
+    }
+
     buildTypes {
         release {
-            signingConfig signingConfigs.debug
+            // JAMAIS signer un release avec la clé debug (rejet Play Store + clé extractable).
+            signingConfig signingConfigs.release
             minifyEnabled true
             shrinkResources true
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
         debug {
             debuggable true
+        }
+    }
+}
+
+// Garde-fou : un build release DOIT posséder un keystore de production (android/key.properties).
+// Échec rapide plutôt que signature silencieuse avec la clé debug.
+tasks.matching { it.name ==~ /assemble.*Release|bundle.*Release/ }.configureEach {
+    if (!keystorePropertiesFile.exists()) {
+        doFirst {
+            throw new GradleException(
+                "Build release requiert un keystore de signature. Créez android/key.properties " +
+                "(voir android/key.properties.example et DEPLOY.md). Ne JAMAIS signer un release avec la clé debug."
+            )
         }
     }
 }

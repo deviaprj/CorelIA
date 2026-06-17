@@ -51,7 +51,6 @@ class _SearchCacheService {
   static const _defaultTtlMinutes = 15;
   static const _maxEntries = 100;
   static const _prefsKey = 'search_cache_entries';
-  static const _prefsDatesKey = 'search_cache_dates';
 
   final Map<String, _CacheEntry> _memoryCache = {};
   bool _prefsLoaded = false;

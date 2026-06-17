@@ -39,8 +39,7 @@
     "scripting",
     "activeTab",
     "tabs",
-    "downloads",
-    "offscreen"
+    "downloads"
   ],
 
   "host_permissions": [
@@ -63,7 +62,7 @@
 
   "web_accessible_resources": [
     {
-      "resources": ["*.js", "*.dart.js", "*.wasm", "assets/**", "canvaskit/**", "dom_actions.js", "offscreen.html", "offscreen.js"],
+      "resources": ["*.js", "*.dart.js", "*.wasm", "assets/**", "canvaskit/**", "dom_actions.js"],
       "matches": ["<all_urls>"]
     }
   ]

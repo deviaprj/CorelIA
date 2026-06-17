@@ -1,7 +1,7 @@
 name: corel_ia
 description: CorelIA - AI Chat Assistant with DeepSeek-V3 and Chrome Extension sync
 publish_to: 'none'
-version: 1.0.0+1
+version: 1.1.0+1
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
@@ -116,4 +116,7 @@ flutter:
 
   assets:
     - assets/icons/
-    - .env
+    # .env is intentionally NOT bundled (ADR-027): bundling it ships operator
+    # API_SECRET_KEY + paid OPENROUTER_API_KEY + Stripe webhook secret inside
+    # the APK, where they're trivially extractable. Client keys come via
+    # --dart-define; main.dart guards dotenv.load() so a missing asset is fine.

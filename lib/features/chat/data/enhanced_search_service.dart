@@ -250,7 +250,7 @@ class EnhancedSearchService {
     final key = _serpApiKey;
     if (key != null && key.isNotEmpty) {
       try {
-        final resp = await _dio.get('https://serpapi.com/search',
+        final resp = await _dio.get<Map<String, dynamic>>('https://serpapi.com/search',
             queryParameters: {
               'engine': 'google_shopping',
               'q': query,
@@ -345,7 +345,6 @@ class EnhancedSearchService {
     final retour = returnDate; // yyyy-MM-dd or null
 
     // ── Tier 1.5: Scrape Google search results for real flight prices ──
-    final key = _serpApiKey;
     if (results.isEmpty || results.every((r) => r.price == 'Comparer')) {
       try {
         final searchQuery =
@@ -450,7 +449,7 @@ class EnhancedSearchService {
     final key = _serpApiKey;
     if (key != null && key.isNotEmpty) {
       try {
-        final resp = await _dio.get('https://serpapi.com/search',
+        final resp = await _dio.get<Map<String, dynamic>>('https://serpapi.com/search',
             queryParameters: {
               'engine': 'google_hotels',
               'q': '$city hotel',
@@ -625,7 +624,7 @@ class EnhancedSearchService {
     final key = _serpApiKey;
     if (key != null && key.isNotEmpty) {
       try {
-        final resp = await _dio.get('https://serpapi.com/search',
+        final resp = await _dio.get<Map<String, dynamic>>('https://serpapi.com/search',
             queryParameters: {
               'engine': 'google_events',
               'q': fullQuery,
@@ -676,7 +675,7 @@ class EnhancedSearchService {
     final key = _serpApiKey;
     if (key != null && key.isNotEmpty) {
       try {
-        final resp = await _dio.get('https://serpapi.com/search',
+        final resp = await _dio.get<Map<String, dynamic>>('https://serpapi.com/search',
             queryParameters: {
               'engine': 'google_local',
               'q': fullQuery,
@@ -734,7 +733,7 @@ class EnhancedSearchService {
           if (checkIn != null) checkIn,
           if (checkOut != null) 'au $checkOut',
         ].join(' ');
-        final resp = await _dio.get('https://serpapi.com/search',
+        final resp = await _dio.get<Map<String, dynamic>>('https://serpapi.com/search',
             queryParameters: {
               'engine': 'google',
               'q': 'location vacances $query $dateInfo',
@@ -794,7 +793,7 @@ class EnhancedSearchService {
     final key = _serpApiKey;
     if (key != null && key.isNotEmpty) {
       try {
-        final resp = await _dio.get('https://serpapi.com/search',
+        final resp = await _dio.get<Map<String, dynamic>>('https://serpapi.com/search',
             queryParameters: {
               'engine': 'google',
               'q': fullQuery,
@@ -867,11 +866,11 @@ class EnhancedSearchService {
     if (key != null && key.isNotEmpty) {
       try {
         final results2 = await Future.wait([
-          _dio.get('https://serpapi.com/search', queryParameters: {
+          _dio.get<Map<String, dynamic>>('https://serpapi.com/search', queryParameters: {
             'engine': 'google_shopping', 'q': query,
             'api_key': key, 'gl': gl, 'hl': hl, 'num': 10,
           }),
-          _dio.get('https://serpapi.com/search', queryParameters: {
+          _dio.get<Map<String, dynamic>>('https://serpapi.com/search', queryParameters: {
             'engine': 'google', 'q': '$query meilleur prix promo comparer',
             'api_key': key, 'gl': gl, 'hl': hl, 'num': 10,
           }),
@@ -935,7 +934,7 @@ class EnhancedSearchService {
     if (key == null || key.isEmpty) return [];
 
     try {
-      final resp = await _dio.get('https://serpapi.com/search',
+      final resp = await _dio.get<Map<String, dynamic>>('https://serpapi.com/search',
           queryParameters: {
             'engine': 'google',
             'q': query,

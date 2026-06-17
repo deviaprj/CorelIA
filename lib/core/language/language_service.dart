@@ -232,6 +232,22 @@ const _productPatterns = <AppLanguage, List<String>>{
 };
 
 // ── Multilingual month name -> number ──────────────────────────────────────
+//
+// Map {orthographe minuscule → numéro de mois}. **Source de vérité** pour la
+// traduction des noms de mois capturés par `TravelParamsParser.monthPattern`
+// (ADR-029) : toute orthographe que ce regex peut capturer DOIT avoir une
+// entry ici, sinon `parseMonth` retourne 1 (janvier) par défaut — bug latent.
+//
+// Contrat regex ↔ map : chaque variante du motif 6 langues est couverte, soit
+// par une entry directe, soit par un homonyme d'une autre langue (même
+// orthographe ⇒ même numéro). Les mois à orthographe unique (ex. PT « setembro »)
+// nécessitent une entry explicite — c'est le piège qui causait le bug ADR-029
+// (regex capturait `[Ss]etembro` mais la map n'avait pas `setembro` → 1).
+//
+// Homonymes exploités (une seule entry suffit, valeur identique) :
+//   FR mai = DE mai · EN august = DE august · ES abril = PT abril ·
+//   ES marzo = IT marzo · ES agosto = IT/PT agosto · FR novembre = IT novembre ·
+//   EN april = DE april · EN september = DE september · EN november = DE november.
 
 int parseMonth(String name) {
   const months = {
@@ -248,16 +264,18 @@ int parseMonth(String name) {
     'enero': 1, 'febrero': 2, 'marzo': 3, 'abril': 4, 'mayo': 5,
     'junio': 6, 'julio': 7, 'agosto': 8, 'septiembre': 9,
     'octubre': 10, 'noviembre': 11, 'diciembre': 12,
-    // German
+    // German — avril/mai/august/september/november couverts par les homonymes
+    // FR/EN ci-dessus (même orthographe, même numéro) ; pas de doublon.
     'januar': 1, 'februar': 2, 'märz': 3, 'marz': 3,
     'juni': 6, 'juli': 7, 'oktober': 10, 'dezember': 12,
-    // Italian
+    // Italian — marzo/agosto/novembre couverts par les homonymes ES/FR.
     'gennaio': 1, 'febbraio': 2, 'aprile': 4,
     'maggio': 5, 'giugno': 6, 'luglio': 7,
     'settembre': 9, 'ottobre': 10, 'dicembre': 12,
-    // Portuguese
+    // Portuguese — abril/agosto couverts par les homonymes ES ; setembro est
+    // unique à PT (aucune collision) → entry explicite (fix ADR-029).
     'janeiro': 1, 'fevereiro': 2, 'março': 3, 'marco': 3,
-    'maio': 5, 'junho': 6, 'julho': 7,
+    'maio': 5, 'junho': 6, 'julho': 7, 'setembro': 9,
     'outubro': 10, 'novembro': 11, 'dezembro': 12,
   };
   return months[name.toLowerCase()] ?? 1;

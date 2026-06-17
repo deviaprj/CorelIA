@@ -29,9 +29,12 @@ String? _dartDefineValue(String key) => switch (key) {
   'REVENUECAT_API_KEY_ANDROID' => const String.fromEnvironment('REVENUECAT_API_KEY_ANDROID', defaultValue: ''),
   'REVENUECAT_API_KEY_IOS' => const String.fromEnvironment('REVENUECAT_API_KEY_IOS', defaultValue: ''),
   'STRIPE_PUBLIC_KEY' => const String.fromEnvironment('STRIPE_PUBLIC_KEY', defaultValue: ''),
+  'STRIPE_CHECKOUT_MONTHLY_URL' => const String.fromEnvironment('STRIPE_CHECKOUT_MONTHLY_URL', defaultValue: ''),
+  'STRIPE_CHECKOUT_YEARLY_URL' => const String.fromEnvironment('STRIPE_CHECKOUT_YEARLY_URL', defaultValue: ''),
   'SERPAPI_API_KEY' => const String.fromEnvironment('SERPAPI_API_KEY', defaultValue: ''),
   'OPENWEATHERMAP_API_KEY' => const String.fromEnvironment('OPENWEATHERMAP_API_KEY', defaultValue: ''),
   'API_SECRET_KEY' => const String.fromEnvironment('API_SECRET_KEY', defaultValue: ''),
+  'CLIENT_API_KEY' => const String.fromEnvironment('CLIENT_API_KEY', defaultValue: ''),
   _ => null,
 };
 
@@ -133,6 +136,12 @@ abstract class AppConstants {
   static String get stripePublicKey => _env('STRIPE_PUBLIC_KEY') ??
       (kDebugMode ? 'pk_test_fallback' : '');
   static const stripeCheckoutBaseUrl = 'https://zentic.fr/checkout';
+  // URLs de checkout Stripe (publiques, embarquées côté client).
+  // En dev : URLs de test ; en prod : URLs live via --dart-define / .env.
+  static String get stripeCheckoutMonthlyUrl => _env('STRIPE_CHECKOUT_MONTHLY_URL') ??
+      (kDebugMode ? 'https://buy.stripe.com/test_corely_monthly' : '');
+  static String get stripeCheckoutYearlyUrl => _env('STRIPE_CHECKOUT_YEARLY_URL') ??
+      (kDebugMode ? 'https://buy.stripe.com/test_corely_yearly' : '');
 
   // ── Search APIs ───────────────────────────────────────────────────────────────
   static String? get serpApiKey => _env('SERPAPI_API_KEY');
@@ -153,7 +162,18 @@ abstract class AppConstants {
       ? '$backendBaseUrl/chat'
       : '';
 
-  // Clé secrète partagée pour authentifier le client Flutter auprès du Worker
+  // CLIENT_API_KEY — soft gate. Embedded in the APK/extension via --dart-define
+  // (extractable by design — same threat class as DEEPSEEK_API_KEY). Gates the
+  // APK-facing backend routes (/scrape, /search_smart, /download_media, /crawl,
+  // /script/scrape, /script/api-fetch). The backend stays transition-open while
+  // this is empty, so builds without the key keep working during rollout.
+  static String get backendApiKey => _env('CLIENT_API_KEY') ?? '';
+
+  // API_SECRET_KEY — OPERATOR key. Server-side only, fail-closed. Gates RCE and
+  // admin routes (/script/exec, /config/*, /agent/*, /insights/audit). MUST
+  // NEVER be embedded in the APK/extension. Kept for legacy compatibility only
+  // — do NOT use this for client-side auth (chat uses Firebase JWT; APK routes
+  // use backendApiKey above).
   static String get apiSecretKey => _env('API_SECRET_KEY') ?? '';
 
   // Vérifie si le Worker Cloudflare est configuré et accessible

@@ -244,6 +244,10 @@ const _iataByCity = <String, String>{
 String? resolveIataCode(String cityName) {
   // Direct lookup (lowercased and trimmed)
   final key = cityName.toLowerCase().trim();
+  // Entrée vide / whitespace → pas de résolution. Sans cette garde, le fuzzy
+  // `contains("")` matche TOUTES les villes (toute chaîne contient "") et
+  // retourne la première entrée de la map ('paris' → 'PAR').
+  if (key.isEmpty) return null;
   final direct = _iataByCity[key];
   if (direct != null) return direct;
 
@@ -260,10 +264,17 @@ String? resolveIataCode(String cityName) {
     if (unaccentedResult != null) return unaccentedResult;
   }
 
-  // Fuzzy: check partial match (city name contains the lookup key or vice versa)
-  for (final entry in _iataByCity.entries) {
-    if (entry.key.contains(key) || key.contains(entry.key)) {
-      return entry.value;
+  // Fuzzy: check partial match (city name contains the lookup key or vice versa).
+  // Garde anti-bruit : on ne fuzzy-match qu'à partir de 3 chars. Une clé trop
+  // courte (ex. 'ab') matche la première ville contenant ce substring (ex.
+  // 'istanbul sabiha' contient 'ab' → 'SAW'), ce qui est du bruit, pas une
+  // résolution légitime. Les codes IATA (3 lettres) et saisies partielles
+  // (>= 3 chars) restent couverts.
+  if (key.length >= 3) {
+    for (final entry in _iataByCity.entries) {
+      if (entry.key.contains(key) || key.contains(entry.key)) {
+        return entry.value;
+      }
     }
   }
 

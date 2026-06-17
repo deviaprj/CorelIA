@@ -13,7 +13,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 
-from backend.core.auth import require_api_key
+from backend.core.auth import require_api_key, require_operator_key
 from backend.core.config import settings
 from backend.core.logging import get_logger
 
@@ -160,7 +160,7 @@ def get_demographics(
 def get_audit_log(
     request: Request,
     limit: int = Query(100, ge=1, le=1000),
-    _: str = Depends(require_api_key),
+    _: str = Depends(require_operator_key),
 ):
-    """Audit log des acces (admin uniquement)."""
+    """Audit log des acces (admin uniquement — clé opérateur)."""
     return {"audit": _audit_log[-limit:]}

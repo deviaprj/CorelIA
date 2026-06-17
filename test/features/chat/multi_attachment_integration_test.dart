@@ -142,7 +142,7 @@ void main() {
           ],
         );
         final apiMap = msg.toApiMap();
-        expect(apiMap['content'], isA<List>());
+        expect(apiMap['content'], isA<List<dynamic>>());
         final parts = apiMap['content'] as List;
         expect(parts.length, 3); // text + 2 images
         expect(parts[0]['type'], 'text');
@@ -171,7 +171,7 @@ void main() {
         );
         final apiMap = msg.toApiMap();
         expect(apiMap['content'], 'Hello');
-        expect(apiMap['content'], isNot(isA<List>()));
+        expect(apiMap['content'], isNot(isA<List<dynamic>>()));
       });
     });
 

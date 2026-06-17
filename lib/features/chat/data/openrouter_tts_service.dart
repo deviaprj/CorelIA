@@ -28,7 +28,16 @@ class OpenRouterTtsService {
     String text, {
     TtsVoice voice = TtsVoice.nova,
     double speed = 1.0,
+    bool isPro = false,
   }) async {
+    // Defense-in-depth : ne JAMAIS facturer l'opérateur pour un utilisateur
+    // gratuit. L'appelant (speakNaturally) gâte déjà via isPro, mais ce garde-
+    // fou empêche tout futur appel direct de synthesize sans isPro explicite
+    // de déclencher un appel payant à l'API OpenRouter TTS.
+    if (!isPro) {
+      debugPrint('[OpenRouterTTS] Skipping paid TTS for free user');
+      return null;
+    }
     final apiKey = AppConstants.openRouterApiKey;
     if (apiKey.isEmpty) return null;
 

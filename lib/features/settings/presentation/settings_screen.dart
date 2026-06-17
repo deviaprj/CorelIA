@@ -5,11 +5,11 @@ import 'package:go_router/go_router.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../../../core/prefs/local_pref_timestamp.dart';
 import '../../../app/cofely_theme.dart';
 import '../../../core/language/language_service.dart';
 import '../../../core/providers/app_providers.dart';
 import '../../../core/providers/firebase_providers.dart';
-import '../../../core/secure_storage.dart';
 import '../../auth/presentation/auth_notifier.dart';
 import '../../monetization/subscription/subscription_service.dart';
 import '../../referral/data/referral_service.dart';
@@ -42,12 +42,14 @@ class SystemPromptNotifier extends StateNotifier<String> {
     state = prompt;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_systemPromptKey, prompt);
+    await LocalPrefTimestamp.markUpdated();
   }
 
   Future<void> reset() async {
     state = _defaultSystemPrompt;
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_systemPromptKey);
+    await LocalPrefTimestamp.markUpdated();
   }
 }
 
@@ -862,7 +864,7 @@ class _DataExportTileState extends State<_DataExportTile> {
   }
 
   Future<void> _openDialog() async {
-    await showDialog(
+    await showDialog<void>(
       context: context,
       builder: (ctx) {
         return AlertDialog(

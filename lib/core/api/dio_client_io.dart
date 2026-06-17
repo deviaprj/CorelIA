@@ -99,10 +99,10 @@ class _RetryInterceptor extends Interceptor {
     final attempt = (extra['retry_attempt'] as int?) ?? 0;
 
     if (attempt < maxRetries && _shouldRetry(err)) {
-      await Future.delayed(Duration(milliseconds: 500 * (attempt + 1)));
+      await Future.delayed(Duration(milliseconds: 500 * (attempt + 1))); // ignore: inference_failure_on_instance_creation, Future.delayed n'est pas générique en Dart 3.41 (false-positive)
       extra['retry_attempt'] = attempt + 1;
       try {
-        final response = await dio.fetch(err.requestOptions..extra = extra);
+        final response = await dio.fetch<dynamic>(err.requestOptions..extra = extra);
         handler.resolve(response);
         return;
       } on DioException catch (e) {

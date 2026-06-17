@@ -12,23 +12,29 @@ import 'ai_client.dart';
 /// - La chaîne de fallback (Workers AI → DeepSeek → OpenRouter)
 /// - Le rate limiting (100 req/min/IP)
 /// - La sanitization des entrées (prompt injection, XSS)
-/// - L'authentification par clé secrète partagée
+/// - L'authentification par clé API douce (X-API-Key, AppConstants.backendApiKey)
 ///
 /// Les clés API DeepSeek/OpenRouter sont stockées uniquement dans les
 /// secrets du Worker, jamais dans l'APK client.
 class WorkerChatClient {
-  final String _apiSecretKey;
+  // Legacy Worker-chat client. The active chat path is direct DeepSeek/OpenRouter
+  // API calls from the APK; the backend /chat/completions route is Firebase-JWT
+  // gated (verify_firebase_token), which this client does NOT send — so it
+  // cannot reach the current backend as-is. Kept for the historical Cloudflare
+  // Worker form. Auth switched from the operator API_SECRET_KEY (which must
+  // never be client-side) to the soft CLIENT_API_KEY.
+  final String _apiKey;
   final String _chatUrl;
 
   WorkerChatClient({
     String? chatUrl,
-    String? apiSecretKey,
+    String? apiKey,
   })  : _chatUrl = chatUrl ?? AppConstants.workerChatUrl,
-        _apiSecretKey = apiSecretKey ?? AppConstants.apiSecretKey;
+        _apiKey = apiKey ?? AppConstants.backendApiKey;
 
   /// Vérifie si le Worker est configuré et joignable.
   bool get isConfigured =>
-      _chatUrl.isNotEmpty && _apiSecretKey.isNotEmpty;
+      _chatUrl.isNotEmpty && _apiKey.isNotEmpty;
 
   /// Stream une réponse du Worker Cloudflare via SSE.
   ///
@@ -45,7 +51,7 @@ class WorkerChatClient {
   }) async* {
     if (!isConfigured) {
       throw const AiException(
-        'Worker Cloudflare non configuré. Vérifiez BACKEND_URL et API_SECRET_KEY.',
+        'Worker Cloudflare non configuré. Vérifiez BACKEND_URL et CLIENT_API_KEY.',
       );
     }
 
@@ -64,7 +70,7 @@ class WorkerChatClient {
 
     final request = http.Request('POST', Uri.parse(_chatUrl))
       ..headers.addAll({
-        'Authorization': 'Bearer $_apiSecretKey',
+        'X-API-Key': _apiKey,
         'Content-Type': 'application/json',
         'Accept': 'text/event-stream',
       })
@@ -79,7 +85,7 @@ class WorkerChatClient {
 
     if (response.statusCode == 401) {
       throw const AiException(
-        'Authentification Worker échouée. Vérifiez API_SECRET_KEY.',
+        'Authentification Worker échouée. Vérifiez CLIENT_API_KEY.',
         statusCode: 401,
       );
     }
@@ -102,6 +108,7 @@ class WorkerChatClient {
     }
     if (response.statusCode != 200) {
       final errBody = await response.stream.bytesToString();
+      debugPrint('[WorkerChat] ${response.statusCode}: $errBody');
       throw AiException(
         'Erreur Worker ${response.statusCode}',
         statusCode: response.statusCode,
@@ -173,7 +180,7 @@ class WorkerChatClient {
     final response = await http.post(
       Uri.parse(_chatUrl),
       headers: {
-        'Authorization': 'Bearer $_apiSecretKey',
+        'X-API-Key': _apiKey,
         'Content-Type': 'application/json',
       },
       body: body,

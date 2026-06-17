@@ -33,7 +33,7 @@ void main() {
         'actionId': '123',
         'action': 'EXTRACT_LINKS',
         'success': true,
-        'data': {'links': [], 'count': 0, 'filter': 'all'},
+        'data': {'links': <String>[], 'count': 0, 'filter': 'all'},
       });
       expect(result.actionId, equals('123'));
       expect(result.action, equals(BrowserActionType.extractLinks));
@@ -135,7 +135,13 @@ void main() {
       };
 
       final missingCommands = <String>[];
+      // Commandes universelles/backend (ADR-027 / sessions V14-V17) qui ne sont
+      // PAS des actions navigateur : elles appellent le backend (/script/exec,
+      // /script/scrape, /script/api-fetch, /crawl) ou fonctionnent cross-plateforme
+      // sans DOM. Aucun mapping BrowserActionType n'est attendu pour elles.
+      const nonBrowserCommands = {'scrape-script', 'exec', 'api-fetch', 'crawl'};
       for (final cmd in SlashCommands.all) {
+        if (nonBrowserCommands.contains(cmd.name)) continue;
         if (!commandActions.containsKey(cmd.name)) {
           missingCommands.add(cmd.name);
         }

@@ -200,7 +200,6 @@ class DocumentGenerationService {
   // ── PDF ─────────────────────────────────────────────────────────────────────
 
   static final _primaryColor = PdfColor.fromHex('#6C63FF');
-  static final _lightBgColor = PdfColor.fromHex('#F3F0FF');
 
   Future<Uint8List> _toPdf(String title, String body, List<String> sources) async {
     final doc = pw.Document();

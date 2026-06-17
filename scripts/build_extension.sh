@@ -33,14 +33,45 @@ BUILD_WEB="$PROJECT_ROOT/build/web"
 BUILD_EXT="$PROJECT_ROOT/build/extension"
 WEB_SRC="$PROJECT_ROOT/web"
 
-# ── 1. Charger le fichier .env si présent ─────────────────────────────────────
+# ── 1. Charger les clés client-safe depuis .env (whitelist) ────────────────────
+# IMPORTANT : ne JAMAIS embarquer les secrets serveur dans le bundle extension.
+# Le ZIP est public (Chrome Web Store) — toute clé présente est extractable.
+# Historiquement ce script dumpait TOUT .env via --dart-define, y compris
+# OPENROUTER_API_KEY (clé opérateur payante), API_SECRET_KEY, SERPAPI_API_KEY,
+# STRIPE_WEBHOOK_SECRET — fuite grave. On n'embarque désormais QUE les clés
+# réellement consommées côté client.
+#
+# Note : sur l'extension (mode DEMO), isProProvider retourne toujours false,
+# donc OpenRouter (payant) n'est jamais appelé — OPENROUTER_API_KEY est inutile
+# côté extension et n'est PAS embarquée.
+#
+# BACKEND_URL + CLIENT_API_KEY sont aussi exclus : l'extension est 100% autonome
+# (CLAUDE.md) et n'appelle jamais le backend cloud — les commandes universelles
+# (scrape/crawl/summarize/...) y retombent sur le DOM local. Garder le backend
+# hors de l'extension préserve l'autonomie et évite d'embarquer une clé douce
+# inutilisée (qui serait en plus sans BACKEND_URL pour l'utiliser).
 ENV_FILE="$PROJECT_ROOT/.env"
 DART_DEFINES=""
+# Clés sûres à embarquer côté client :
+CLIENT_SAFE_KEYS=(
+  DEEPSEEK_API_KEY
+  ADMOB_APP_ID ADMOB_BANNER_ID ADMOB_INTERSTITIAL_ID ADMOB_REWARDED_ID
+  REVENUECAT_API_KEY_IOS REVENUECAT_API_KEY_ANDROID
+  APP_ENV
+)
 if [[ -f "$ENV_FILE" ]]; then
-  echo "📄 Chargement de .env..."
+  echo "📄 Chargement de .env (whitelist client-safe)..."
   while IFS='=' read -r key value; do
     [[ "$key" =~ ^#.*$ || -z "$key" ]] && continue
-    DART_DEFINES="$DART_DEFINES --dart-define=$key=$value"
+    key_safe=false
+    for safe in "${CLIENT_SAFE_KEYS[@]}"; do
+      if [[ "$key" == "$safe" ]]; then key_safe=true; break; fi
+    done
+    if $key_safe; then
+      DART_DEFINES="$DART_DEFINES --dart-define=$key=$value"
+    else
+      echo "   ⏭️  $key ignoré (secret serveur, non embarqué)"
+    fi
   done < "$ENV_FILE"
 fi
 

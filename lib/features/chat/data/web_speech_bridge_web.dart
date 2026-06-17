@@ -124,7 +124,7 @@ class WebSpeechBridge {
     try {
       js.context.callMethod('addEventListener', [
         type,
-        js.allowInterop((event) {
+        js.allowInterop((dynamic event) {
           callback(event as js.JsObject);
         }),
       ]);

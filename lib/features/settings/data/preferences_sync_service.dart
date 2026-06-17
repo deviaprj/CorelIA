@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../core/constants.dart';
+import '../../../core/prefs/local_pref_timestamp.dart';
 import '../../../core/providers/firebase_providers.dart';
 import '../../../main.dart' show isDemoMode;
 
@@ -100,33 +101,56 @@ class PreferencesSyncService {
     });
   }
 
-  /// Fusionne les préférences locales et distantes.
-  /// La valeur la plus récente (updatedAt) l'emporte.
+  /// Fusionne les préférences distantes avec les locales — last-write-wins.
+  ///
+  /// Stratégie document-level : on compare `remote.updatedAt` au timestamp de
+  /// dernière édition locale ([LocalPrefTimestamp], posé à chaque modification
+  /// locale par les Notifiers de préférences). Le plus récent l'emporte en bloc.
+  /// - remote sans `updatedAt` (première sync, pas de doc distant) → on garde local.
+  /// - remote plus récent (ou local jamais horodaté) → remote l'emporte, on
+  ///   l'écrit dans SharedPreferences et on aligne le repère local sur remote.
+  /// - local plus récent ou égal (édition en cours non encore propagée) → on
+  ///   garde le local inchangé.
+  ///
+  /// NB : la re-propagation local→remote (push auto) et le rechargement en live
+  /// des providers en mémoire sont des perfectionnements post-beta (voir
+  /// DECISIONS.md). À l'ouverture de l'app, les providers rechargeront les
+  /// valeurs fusionnées depuis SharedPreferences.
   Future<SyncedPreferences> mergeWithLocal(SyncedPreferences remote) async {
     final prefs = await SharedPreferences.getInstance();
 
     final localSystemPrompt = prefs.getString('corely_system_prompt') ?? '';
     final localThemeMode = prefs.getString('theme_mode') ?? 'system';
     final localTtsSpeed = prefs.getDouble('tts_speed') ?? 0.65;
+    final localUpdatedAt = LocalPrefTimestamp.read(prefs);
 
-    // Si le remote est plus récent ou si la locale est vide, prendre le remote
-    final merged = SyncedPreferences(
-      systemPrompt: remote.systemPrompt.isNotEmpty ? remote.systemPrompt : localSystemPrompt,
-      themeMode: remote.themeMode.isNotEmpty ? remote.themeMode : localThemeMode,
-      ttsSpeed: remote.ttsSpeed > 0 ? remote.ttsSpeed : localTtsSpeed,
-      updatedAt: remote.updatedAt,
-    );
-
-    // Écrire les valeurs fusionnées dans SharedPreferences
-    if (merged.systemPrompt.isNotEmpty) {
-      await prefs.setString('corely_system_prompt', merged.systemPrompt);
+    // Pas de doc distant → rien à fusionner, on conserve le local.
+    if (remote.updatedAt == null) {
+      return SyncedPreferences(
+        systemPrompt: localSystemPrompt,
+        themeMode: localThemeMode,
+        ttsSpeed: localTtsSpeed,
+        updatedAt: localUpdatedAt,
+      );
     }
-    if (merged.themeMode.isNotEmpty) {
-      await prefs.setString('theme_mode', merged.themeMode);
-    }
-    await prefs.setDouble('tts_speed', merged.ttsSpeed);
 
-    return merged;
+    // Local plus récent ou égal → local l'emporte (édition non encore poussée).
+    if (localUpdatedAt != null && !remote.updatedAt!.isAfter(localUpdatedAt)) {
+      return SyncedPreferences(
+        systemPrompt: localSystemPrompt,
+        themeMode: localThemeMode,
+        ttsSpeed: localTtsSpeed,
+        updatedAt: localUpdatedAt,
+      );
+    }
+
+    // Remote plus récent (ou local jamais horodaté) → remote l'emporte en bloc.
+    await prefs.setString('corely_system_prompt', remote.systemPrompt);
+    await prefs.setString('theme_mode', remote.themeMode);
+    await prefs.setDouble('tts_speed', remote.ttsSpeed);
+    await LocalPrefTimestamp.write(prefs, remote.updatedAt!);
+
+    return remote;
   }
 }
 

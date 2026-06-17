@@ -1,5 +1,7 @@
 """Search engine with DuckDuckGo primary and SerpAPI fallback."""
 
+import asyncio
+import re
 from datetime import datetime, timezone
 from typing import Any
 
@@ -8,6 +10,7 @@ from bs4 import BeautifulSoup, Tag
 
 from backend.core.config import settings
 from backend.core.logging import get_logger
+from backend.core.net_guard import safe_get
 from backend.schemas.chat import SearchResponse, SearchResult
 
 logger = get_logger(__name__)
@@ -93,7 +96,10 @@ async def scrape_url(url: str, selectors: dict[str, str] | None = None) -> dict[
     If no selectors are provided, attempts auto-extraction of common patterns
     (prices, titles, links) from the page.
     """
-    async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+    # SSRF guard: safe_get disables auto-redirect on the client and re-validates
+    # each Location hop with assert_safe_url, so a public URL that redirects into
+    # loopback/private space (incl. cloud-metadata 169.254.169.254) is rejected.
+    async with httpx.AsyncClient(timeout=30.0) as client:
         headers = {
             "User-Agent": (
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -102,10 +108,28 @@ async def scrape_url(url: str, selectors: dict[str, str] | None = None) -> dict[
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
             "Accept-Language": "fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7",
         }
-        response = await client.get(url, headers=headers)
+        response = await safe_get(client, url, headers=headers)
         response.raise_for_status()
         html = response.text
 
+    # The BeautifulSoup parse + scraping below is CPU-bound (pure Python, no
+    # I/O) and can take 50-200ms on heavy pages. Offload it to a worker thread
+    # via ``asyncio.to_thread`` so it never blocks the event loop — concurrent
+    # requests (chat streaming, /search_smart, …) keep being served while the
+    # page is parsed. The HTTP fetch above is already async; this only moves
+    # the synchronous parse off the loop's thread.
+    return await asyncio.to_thread(_extract_scrape_data, html, url, selectors)
+
+
+def _extract_scrape_data(
+    html: str, url: str, selectors: dict[str, str] | None = None
+) -> dict[str, Any]:
+    """Synchronous HTML → structured-data extraction for ``scrape_url``.
+
+    Pure function (no I/O) — runs inside a worker thread off the event loop.
+    Kept module-level (not a closure) so it is reusable and testable in
+    isolation without spinning up an HTTP fetch.
+    """
     soup = BeautifulSoup(html, "html.parser")
 
     # Remove script/style tags
@@ -146,9 +170,8 @@ async def scrape_url(url: str, selectors: dict[str, str] | None = None) -> dict[
             r"\d{1,3}(?:[\s \xa0]?\d{3})*[\.,]\d{2}\s?[€$£]",
             r"\d{1,3}(?:[\s \xa0]?\d{3})*\s?[€$£]",
         ]
-        import re
         found_prices: list[str] = []
-        for elem in soup.find_all(text=re.compile(price_patterns[0])):
+        for elem in soup.find_all(string=re.compile(price_patterns[0])):
             text = str(elem).strip()
             if len(text) < 200:  # Avoid huge text blocks
                 matches = re.findall(price_patterns[0], text)

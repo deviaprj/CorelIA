@@ -2,17 +2,27 @@
 
 HTTrack-style crawling that discovers pages, extracts media links,
 and reconstructs direct video URLs from embeds and players.
+
+Async I/O (ADR-031 follow-up): BFS now fetches pages in parallel batches via
+``httpx.AsyncClient`` + ``asyncio.gather`` (was a sequential sync ``httpx.Client``
+loop that pinned a thread-pool worker for the whole multi-page crawl). The SSRF
+guard (``safe_get``, async) is preserved on every fetch with per-redirect
+re-validation; every discovered link is re-checked with ``assert_safe_url`` and
+the optional same-domain filter before enqueueing.
 """
 
 from __future__ import annotations
 
+import asyncio
+import json
 import re
-from collections import deque
 from typing import Any
 from urllib.parse import urljoin, urlparse
 
 import httpx
 from bs4 import BeautifulSoup
+
+from backend.core.net_guard import UnsafeUrlError, assert_safe_url, safe_get
 
 
 class CrawlResult:
@@ -52,6 +62,11 @@ class CrawlService:
         re.IGNORECASE,
     )
 
+    # Max pages fetched in parallel per BFS batch. Bounds concurrent
+    # connections so a 20-page crawl issues ~5 requests at a time rather than
+    # 20 (gentler on the target host and on our connection pool).
+    _MAX_CONCURRENT = 5
+
     def __init__(self, max_depth: int = 2, max_pages: int = 20, same_domain: bool = True) -> None:
         self.max_depth = max_depth
         self.max_pages = max_pages
@@ -70,26 +85,75 @@ class CrawlService:
             ),
         }
 
-    def crawl(self, start_url: str) -> dict[str, Any]:
-        """Crawl starting from a URL and return aggregated media."""
+    async def crawl(self, start_url: str) -> dict[str, Any]:
+        """Crawl starting from a URL and return aggregated media.
+
+        BFS with parallel page fetching: each batch of up to
+        ``_MAX_CONCURRENT`` unvisited URLs is fetched concurrently via
+        ``asyncio.gather``, then discovered links are enqueued for the next
+        batch. The ``max_pages`` budget is enforced when forming a batch
+        (visited URLs are marked up-front), so the crawl never overshoots.
+        """
+        # SSRF guard on the seed URL (also covers yt-dlp paths downstream).
+        try:
+            assert_safe_url(start_url)
+        except UnsafeUrlError as exc:
+            return {
+                "pages_crawled": 0,
+                "total_links_found": 0,
+                "videos": [],
+                "images": [],
+                "errors": [f"URL not allowed: {exc}"],
+                "pages": [],
+            }
         self._visited.clear()
         self._results.clear()
-        queue: deque[tuple[str, int]] = deque([(start_url, 0)])
+        queue: list[tuple[str, int]] = [(start_url, 0)]
         domain = urlparse(start_url).netloc
 
-        with httpx.Client(timeout=15, follow_redirects=True, headers=self._headers) as client:
+        async with httpx.AsyncClient(timeout=15, headers=self._headers) as client:
             while queue and len(self._visited) < self.max_pages:
-                url, depth = queue.popleft()
-                normalized = self._normalize(url)
-                if normalized in self._visited:
-                    continue
-                self._visited.add(normalized)
+                # Collect the next batch of unvisited URLs (up to the
+                # concurrency cap and the remaining page budget). Marking them
+                # visited here (rather than after the fetch) both deduplicates
+                # queue entries and prevents the batch from exceeding the
+                # ``max_pages`` budget.
+                batch: list[tuple[str, int]] = []
+                while (
+                    queue
+                    and len(self._visited) < self.max_pages
+                    and len(batch) < self._MAX_CONCURRENT
+                ):
+                    url, depth = queue.pop(0)
+                    normalized = self._normalize(url)
+                    if normalized in self._visited:
+                        continue
+                    self._visited.add(normalized)
+                    batch.append((url, depth))
 
-                result = self._fetch_and_parse(client, url, depth)
-                if result:
+                if not batch:
+                    continue
+
+                # Fetch + parse the batch in parallel. ``_fetch_and_parse``
+                # returns a CrawlResult (or None for non-HTML) and never
+                # mutates shared state, so the gather is race-free.
+                results = await asyncio.gather(
+                    *(self._fetch_and_parse(client, url, depth) for url, depth in batch)
+                )
+
+                for result, (url, depth) in zip(results, batch):
+                    if result is None:
+                        continue
                     self._results.append(result)
                     if depth < self.max_depth:
                         for link in result.links:
+                            # Re-validate every discovered link before
+                            # enqueueing — a same-domain page can still link to
+                            # internal hosts (SSRF / redirect traps).
+                            try:
+                                assert_safe_url(link)
+                            except UnsafeUrlError:
+                                continue
                             parsed = urlparse(link)
                             if self.same_domain and parsed.netloc and parsed.netloc != domain:
                                 continue
@@ -97,10 +161,12 @@ class CrawlService:
 
         return self._aggregate()
 
-    def _fetch_and_parse(self, client: httpx.Client, url: str, depth: int) -> CrawlResult | None:
+    async def _fetch_and_parse(
+        self, client: httpx.AsyncClient, url: str, depth: int
+    ) -> CrawlResult | None:
         result = CrawlResult(url)
         try:
-            resp = client.get(url)
+            resp = await safe_get(client, url)
             resp.raise_for_status()
             # Skip non-HTML
             content_type = resp.headers.get("content-type", "").lower()
@@ -203,7 +269,6 @@ class CrawlService:
 
     def _find_jsonld_videos(self, soup: BeautifulSoup, base_url: str) -> list[dict[str, Any]]:
         results: list[dict[str, Any]] = []
-        import json
         for script in soup.find_all("script", type="application/ld+json"):
             try:
                 data = json.loads(script.string or "")

@@ -155,7 +155,7 @@ class TtsNaturalService {
   }
 
   /// Parle le texte complet d'un bloc (pas de streaming par phrases).
-  Future<void> speakNaturally(String text, {bool isPro = true}) async {
+  Future<void> speakNaturally(String text, {bool isPro = false}) async {
     if (_isSpeaking) await stop();
 
     final parseResult = EmotionParser.parse(text);
@@ -166,7 +166,7 @@ class TtsNaturalService {
     // blocs de raisonnement imbriqués, et nouveaux patterns markdown.
     // Le LLM (DeepSeek Flash) comprend le contexte et sait exactement ce qui
     // doit être dit à l'oral. Coût : ~$0.00003, latence : ~0.5-1s.
-    var cleanText = await OralizeService.oralize(parseResult.cleanText);
+    var cleanText = await OralizeService.oralize(parseResult.cleanText, isPro: isPro);
 
     // Light post-processing : cleanMarkdown comme filet de sécurité pour
     // les artefacts résiduels que le LLM aurait pu manquer.
@@ -189,7 +189,7 @@ class TtsNaturalService {
     if (isPro && PlatformService.isMobile && OpenRouterTtsService.isAvailable) {
       try {
         _activeEngine = TtsEngine.openRouter;
-        await _speakWithOpenRouterTts(cleanText, emotion);
+        await _speakWithOpenRouterTts(cleanText, emotion, isPro: isPro);
         return;
       } catch (e) {
         debugPrint('[TtsNaturalService] OpenRouter TTS failed, falling back: $e');
@@ -201,7 +201,8 @@ class TtsNaturalService {
     await _speakWithFlutterTts(cleanText);
   }
 
-  Future<void> _speakWithOpenRouterTts(String text, TtsEmotion emotion) async {
+  Future<void> _speakWithOpenRouterTts(String text, TtsEmotion emotion,
+      {required bool isPro}) async {
     if (_audioPlayer == null) {
       _audioPlayer = AudioPlayerFactory.create();
     }
@@ -225,6 +226,7 @@ class TtsNaturalService {
         text,
         voice: voice,
         speed: _openRouterTtsSpeed,
+        isPro: isPro,
       );
       if (bytes == null) {
         throw StateError('OpenRouter TTS returned no audio');

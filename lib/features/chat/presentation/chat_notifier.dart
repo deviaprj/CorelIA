@@ -15,6 +15,9 @@ import '../data/search_service.dart';
 import '../data/enhanced_search_service.dart';
 import '../data/search_service_global.dart';
 import '../data/search_intent_extractor.dart';
+import '../data/travel_params_parser.dart';
+import '../data/web_search_trigger.dart';
+import '../data/chat_text_helpers.dart';
 import '../data/script_execution_service.dart';
 import '../data/weather_service.dart';
 import '../data/location_service.dart';
@@ -40,11 +43,7 @@ import '../../../main.dart' show isDemoMode;
 import '../../../core/language/language_service.dart' as lang;
 import 'slash_commands.dart';
 import '../../retention/data/retention_providers.dart';
-import '../../retention/data/user_profile_service.dart';
-import '../../retention/data/usage_stats_service.dart';
-import '../data/learning_repository.dart';
 import '../data/knowledge_base_service.dart';
-import 'feedback_collector.dart';
 import '../../monetization/data/consent_data_service.dart';
 import '../../monetization/data/anonymized_insight_service.dart';
 
@@ -165,9 +164,7 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
   String _lastLinksFilter = 'all';
   String? _lastUsedModelId;
 
-  // ── Apprentissage et feedback ───────────────────────────────────────────────
-  late final LearningRepository _learningRepo;
-  late final FeedbackCollector _feedback;
+  // ── Apprentissage et insights ────────────────────────────────────────────────
   late final KnowledgeBaseService _knowledgeBase;
   late final ConsentDataService _consentData;
   late final AnonymizedInsightService _insights;
@@ -175,10 +172,6 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
   @override
   ChatState build(String conversationId) {
     // Initialiser les services d'apprentissage
-    final db = isDemoMode ? null : ref.read(firestoreProvider);
-    final userId = isDemoMode ? null : ref.read(currentUserProvider)?.uid;
-    _learningRepo = LearningRepository(db: db, userId: userId);
-    _feedback = FeedbackCollector(_learningRepo);
     _knowledgeBase = KnowledgeBaseService();
     _consentData = ConsentDataService();
     _insights = AnonymizedInsightService(_consentData);
@@ -245,7 +238,7 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
         await _persistAssistantMessage(
           '❌ Backend non configuré\n\n'
           'La commande `/${parsed.command.name}` nécessite le backend Cloudflare Worker.\n\n'
-          '💡 Configurez `BACKEND_URL` et `API_SECRET_KEY` dans `.env` puis redéployez.\n'
+          '💡 Configurez `BACKEND_URL` et `CLIENT_API_KEY` (via --dart-define) puis redéployez.\n'
           'Ou utilisez `/docgen` qui fonctionne sans backend.',
         );
         state = state.copyWith(isStreaming: false);
@@ -410,7 +403,6 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
             if (mediaType == 'video') {
               // Video from yt-dlp — pick best merged format
               final title = mediaResult['title'] as String? ?? 'Vidéo';
-              final thumbnail = mediaResult['thumbnail'] as String? ?? '';
               final duration = mediaResult['duration'] as int?;
               final directUrl = mediaResult['direct_url'] as String? ?? '';
               final formats = (mediaResult['formats'] as List<dynamic>? ?? []).cast<Map<String, dynamic>>();
@@ -751,7 +743,7 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
           final data = await globalService.scrape(url);
           final allLinks = (data['data'] as List? ?? [])
               .where((d) => d['field'] == 'links')
-              .expand((d) => (d['values'] as List? ?? []).cast<Map>());
+              .expand((d) => (d['values'] as List? ?? []).cast<Map<dynamic, dynamic>>());
           final filtered = allLinks.where((m) {
             final href = (m['url'] ?? '').toString();
             switch (rawFilter.toLowerCase()) {
@@ -1044,7 +1036,7 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
       final appliedFilter = result.data!['filter'] as String? ?? 'all';
       _lastLinksFilter = appliedFilter;
       _lastLinksForDownload = links
-          .whereType<Map>()
+          .whereType<Map<dynamic, dynamic>>()
           .map((m) => m['href'])
           .whereType<String>()
           .where((u) => u.trim().isNotEmpty)
@@ -1432,7 +1424,7 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
           }
 
           final f = forms[requestedIndex] as Map;
-          final inputs = (f['inputs'] as List? ?? []).cast<Map>();
+          final inputs = (f['inputs'] as List? ?? []).cast<Map<dynamic, dynamic>>();
           buffer.writeln('**Formulaire ${requestedIndex + 1}/$count**');
           buffer.writeln('- Action: ${f['action'] ?? 'N/A'}');
           buffer.writeln('- Méthode: ${f['method'] ?? 'GET'}');
@@ -1536,9 +1528,9 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
     final action = BrowserAction(action: BrowserActionType.extractMedia, params: {});
     final result = await bridge.executeAction(action);
     if (result.success && result.data != null) {
-      final images = (result.data!['images'] as List? ?? []).cast<Map>();
-      final videos = (result.data!['videos'] as List? ?? []).cast<Map>();
-      final audios = (result.data!['audios'] as List? ?? []).cast<Map>();
+      final images = (result.data!['images'] as List? ?? []).cast<Map<dynamic, dynamic>>();
+      final videos = (result.data!['videos'] as List? ?? []).cast<Map<dynamic, dynamic>>();
+      final audios = (result.data!['audios'] as List? ?? []).cast<Map<dynamic, dynamic>>();
       final buffer = StringBuffer();
 
       void showImages() {
@@ -1610,7 +1602,7 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
         buffer.writeln('| URL | $url |');
         final metaItems = (data['data'] as List? ?? [])
             .where((d) => d['field'] == 'metadata')
-            .expand((d) => (d['values'] as List? ?? []).cast<Map>())
+            .expand((d) => (d['values'] as List? ?? []).cast<Map<dynamic, dynamic>>())
             .map((m) => '| ${m['name'] ?? ''} | ${(m['content'] ?? '').toString().replaceAll('\n', ' ').substring(0, (m['content'] ?? '').toString().length < 100 ? (m['content'] ?? '').toString().length : 100)}${(m['content'] ?? '').toString().length > 100 ? '...' : ''} |');
         buffer.writeln(metaItems.join('\n'));
         await _persistAssistantMessage(buffer.toString());
@@ -1667,7 +1659,7 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
     row('OpenGraph Title', d['ogTitle']);
     row('OpenGraph Image', d['ogImage']);
     buffer.writeln('\n**Titres principaux :**');
-    final headings = (d['headings'] as List? ?? []).cast<Map>();
+    final headings = (d['headings'] as List? ?? []).cast<Map<dynamic, dynamic>>();
     for (final h in headings.take(15)) {
       buffer.writeln('- ${h['level']} : ${h['text']}');
     }
@@ -1705,7 +1697,7 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
     final structureBuffer = StringBuffer();
     for (var fi = 0; fi < forms.length; fi++) {
       final f = forms[fi] as Map;
-      final inputs = (f['inputs'] as List? ?? []).cast<Map>();
+      final inputs = (f['inputs'] as List? ?? []).cast<Map<dynamic, dynamic>>();
       structureBuffer.writeln('\nFormulaire $fi:');
       for (final input in inputs.take(30)) {
         final name = (input['name'] ?? '').toString();
@@ -1826,7 +1818,7 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
       }
       buffer.writeln('- Contenu texte : "${d['text'] ?? ''}"');
       buffer.writeln('\n**Attributs :**');
-      final attrs = (d['attributes'] as List? ?? []).cast<Map>();
+      final attrs = (d['attributes'] as List? ?? []).cast<Map<dynamic, dynamic>>();
       for (final a in attrs.take(20)) {
         buffer.writeln('- ${a['name']}="${a['value']}"');
       }
@@ -1975,12 +1967,11 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
       return true;
     }
 
-    final safeTitle = title.replaceAll(RegExp(r'[^a-zA-Z0-9À-ɏ\s-]'), '_').trim();
 
     switch (format) {
       case 'json':
-        final json = '{\n  "title": ${_jsonStr(title)},\n  "url": ${_jsonStr(pageUrl)},\n'
-            '  "content": ${_jsonStr(content.substring(0, content.length > 10000 ? 10000 : content.length))}\n}';
+        final json = '{\n  "title": ${escapeForJson(title)},\n  "url": ${escapeForJson(pageUrl)},\n'
+            '  "content": ${escapeForJson(content.substring(0, content.length > 10000 ? 10000 : content.length))}\n}';
         await _persistAssistantMessage('**Export JSON :**\n```json\n$json\n```\n\n'
             '💡 Copiez ce contenu ou utilisez `/download <url>` pour des fichiers distants.');
         break;
@@ -1999,9 +1990,9 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
           if (tableResult.success && tableResult.data != null) {
             final tables = tableResult.data!['tables'] as List? ?? [];
             final csvBuffer = StringBuffer();
-            for (final t in tables.cast<Map>()) {
+            for (final t in tables.cast<Map<dynamic, dynamic>>()) {
               final rows = t['rows'] as List? ?? [];
-              for (final row in rows.cast<List>()) {
+              for (final row in rows.cast<List<dynamic>>()) {
                 csvBuffer.writeln(row.map((c) => '"${c.toString().replaceAll('"', '""')}"').join(','));
               }
               csvBuffer.writeln();
@@ -2193,7 +2184,7 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
       return true;
     }
 
-    final normalizedFormat = _normalizeDocFormat(cmd.args[0]);
+    final normalizedFormat = normalizeDocFormat(cmd.args[0]);
     final allowed = {'pdf', 'word', 'powerpoint', 'excel', 'markdown', 'text', 'jpg', 'png'};
     if (!allowed.contains(normalizedFormat)) {
       state = state.copyWith(
@@ -2239,7 +2230,7 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
         // generic LLM-generated titles like "Voici un document complet..."
         title = normalizedFormat == 'powerpoint'
             ? topic
-            : _extractDocumentTitle(draft, fallbackTopic: topic);
+            : extractDocumentTitle(draft, fallbackTopic: topic);
       }
 
       final sources = searchResults
@@ -2317,7 +2308,7 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
     } on AiException catch (e) {
       await _persistAssistantMessage(
         '❌ Échec génération document\n\n'
-        '${_formatAiError(e)}\n\n'
+        '${formatAiError(e)}\n\n'
         '💡 Réessayez avec un sujet plus court ou vérifiez votre connexion.',
       );
       state = state.copyWith(isStreaming: false, isSearching: false);
@@ -2513,19 +2504,6 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
     return true;
   }
 
-  String _normalizeDocFormat(String raw) {
-    final lower = raw.toLowerCase();
-    if (lower == 'txt' || lower == 'text') return 'text';
-    if (lower == 'md' || lower == 'markdown') return 'markdown';
-    if (lower == 'doc' || lower == 'docx' || lower == 'word') return 'word';
-    if (lower == 'ppt' || lower == 'pptx' || lower == 'powerpoint') return 'powerpoint';
-    if (lower == 'xls' || lower == 'xlsx' || lower == 'excel') return 'excel';
-    if (lower == 'jpg' || lower == 'jpeg') return 'jpg';
-    if (lower == 'png') return 'png';
-    if (lower == 'pdf') return 'pdf';
-    return lower;
-  }
-
   Future<String> _generateDocumentDraft({
     required String topic,
     required String format,
@@ -2589,24 +2567,6 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
     return generated;
   }
 
-  String _extractDocumentTitle(String draft, {required String fallbackTopic}) {
-    final h1 = RegExp(r'^#\s+(.+)$', multiLine: true).firstMatch(draft)?.group(1);
-    if (h1 != null && h1.trim().isNotEmpty) {
-      return h1.trim();
-    }
-
-    final firstLine = draft
-        .split('\n')
-        .map((l) => l.trim())
-        .firstWhere((l) => l.isNotEmpty, orElse: () => fallbackTopic)
-        .replaceAll(RegExp(r'^[\-\d.\s]+'), '');
-
-    final safe = firstLine.isEmpty ? fallbackTopic : firstLine;
-    return safe.length > 80 ? safe.substring(0, 80) : safe;
-  }
-
-  String _jsonStr(String s) => '"${s.replaceAll('\\', '\\\\').replaceAll('"', '\\"').replaceAll('\n', '\\n')}"';
-
   /// Ajoute un message assistant au state ET le persiste dans le repo.
   Future<void> _persistAssistantMessage(String text) async {
     // Retention : extraire les sujets favoris de la reponse IA
@@ -2668,12 +2628,14 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
     if (trimmed.isEmpty && !hasAttachment) return;
     if (trimmed.length > 10000 || (state.isStreaming && !bypassSlashCheck)) return;
 
-    // Vérification limite 5MB agrégée
+    // Vérification limite agrégée (50MB Pro / 5MB gratuit)
+    final isPro = await ref.read(isProProvider.future).catchError((_) => false);
+    final limit = attachmentLimitFor(isPro: isPro);
     final attachmentList = attachments ?? [];
     final totalSize = attachmentList.fold<int>(0, (s, a) => s + a.sizeBytes);
-    if (totalSize > maxAttachmentsTotalBytes) {
+    if (totalSize > limit) {
       state = state.copyWith(
-        error: 'Taille limite dépassée (5MB par message). Vous pouvez ajouter plusieurs fichiers, mais la taille totale ne doit pas dépasser 5MB.',
+        error: 'Taille limite dépassée (${limit ~/ (1024 * 1024)}MB par message). Vous pouvez ajouter plusieurs fichiers, mais la taille totale ne doit pas dépasser ${limit ~/ (1024 * 1024)}MB.',
         isStreaming: false,
       );
       return;
@@ -2702,7 +2664,8 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
     final user = ref.read(currentUserProvider);
     if (user == null) return;
 
-    final isPro = await ref.read(isProProvider.future).catchError((_) => false);
+    // isPro déjà lu en tête de sendMessage (limite agrégée tier-aware) —
+    // FutureProvider mis en cache, même valeur que la lecture précédente.
     if (!isPro) {
       try {
         final remaining =
@@ -2960,7 +2923,7 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
         } else {
           // Fallback sur l'ancien système
           enhancedResultMarkdown = await _performEnhancedSearch(
-              userMsg.content, intent, _extractSearchQuery(userMsg.content), appLang, searchParams);
+              userMsg.content, intent, WebSearchTrigger.extractSearchQuery(userMsg.content), appLang, searchParams);
         }
         // Record successful extraction for learning
         extractor.memory.recordSuccess(intent, userMsg.content, searchParams);
@@ -2972,12 +2935,12 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
     }
 
     // Recherche web classique — uniquement si l'utilisateur l'a activée OU si l'intent le nécessite
-    final shouldSearch = state.useSearch || _needsWebSearch(userMsg.content);
+    final shouldSearch = state.useSearch || WebSearchTrigger.needsWebSearch(userMsg.content);
     if (shouldSearch) {
       try {
         state = state.copyWith(isSearching: true);
         final searchService = ref.read(searchServiceProvider);
-        final searchQuery = _extractSearchQuery(userMsg.content);
+        final searchQuery = WebSearchTrigger.extractSearchQuery(userMsg.content);
 
         // Lancer la recherche principale et l'Instant Answer en parallèle
         final results = await searchService.searchWithFallback(searchQuery);
@@ -3115,7 +3078,7 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
         debugPrint('[ChatNotifier] Learning hook error: $e');
       }
     } on AiException catch (e) {
-      final msg = _formatAiError(e);
+      final msg = formatAiError(e);
       state = state.copyWith(error: msg, isStreaming: false, isSearching: false);
     } on ChatApiException catch (e) {
       state = state.copyWith(error: e.message, isStreaming: false, isSearching: false);
@@ -3574,20 +3537,6 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
     }
   }
 
-  /// Formate les erreurs IA pour l'utilisateur.
-  String _formatAiError(AiException e) {
-    final msg = e.message;
-    if (msg.contains('image') || msg.contains('image_url')) {
-      return 'Analyse d\'image indisponible avec le fournisseur actuel. '
-          'Verifiez d\'abord la cle DeepSeek, puis OpenRouter si besoin.';
-    }
-    if (msg.contains('Clé API')) return msg;
-    if (msg.contains('429') || msg.contains('Trop de requêtes')) {
-      return 'Limite de requetes atteinte. Reessayez dans un moment.';
-    }
-    return 'Erreur IA. Reessayez.';
-  }
-
   void toggleSearch() {
     state = state.copyWith(useSearch: !state.useSearch);
   }
@@ -3619,110 +3568,10 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
 
   void clearError() => state = state.copyWith(error: null);
 
-  // ── Intent classification ────────────────────────────────────────────────
-  // Détermine si le message nécessite une recherche web.
-  // Les questions factuelles, temporelles ou sur l'actualité en ont besoin.
-  // Les conversations générales, la créativité et le code n'en ont pas besoin.
-  static bool _needsWebSearch(String message) {
-    final lower = message.toLowerCase();
-    // Mots-clés déclencheurs : informations factuelles/temporelles (multilingue)
-    final triggerWords = [
-      'actualité', 'actualites', 'news', 'aujourd\'hui', 'en ce moment',
-      'quelle est la', 'quel est le', 'combien de', 'combien coûte',
-      'où est', 'ou est', 'où trouver', 'ou trouver',
-      'qui est', 'qui a', 'quand est', 'quelle année', 'quel année',
-      'dernier', 'dernière', 'latest', 'newest', 'current',
-      'prix de', 'cours de', 'taux de', 'météo', 'meteo',
-      'score de', 'résultat de', 'classement de',
-      'est-ce que', 'est-il vrai', 'vrai ou faux',
-      'comment aller', 'itinéraire', 'distance entre',
-      'le moins cher', 'meilleur prix', 'pas cher', 'acheter', 'comparer',
-      'billet d\'avion', 'vol direct', 'vols pas', 'vol pour',
-      'hotel', 'hôtel', 'logement', 'airbnb', 'réservation',
-      'pleuvoir', 'température', 'quel temps', 'pluie',
-      'site pour', 'où acheter', 'trouve le', 'trouve moi',
-      'cherche le', 'cherche moi', 'recherche le',
-      'xiaomi', 'iphone', 'samsung', 'téléphone', 'smartphone',
-      // EN
-      'what is', 'who is', 'where is', 'when is', 'why is', 'how is',
-      'how much', 'how many', 'price of', 'cost of',
-      'weather', 'forecast', 'rain', 'stock', 'score of',
-      'cheapest', 'best price', 'buy', 'where to buy',
-      'flight', 'flights', 'plane ticket',
-      // ES
-      'qué es', 'quién es', 'dónde está', 'cuándo es', 'cuánto',
-      'clima', 'lluvia', 'pronóstico', 'precio de',
-      'más barato', 'comprar', 'vuelo', 'vuelos',
-      // DE
-      'was ist', 'wer ist', 'wo ist', 'wann ist', 'wie viel',
-      'wetter', 'regen', 'vorhersage', 'preis von',
-      'günstigste', 'kaufen', 'flug', 'flüge',
-      // IT
-      'cosa è', 'chi è', 'dov\'è', 'quando è', 'quanto',
-      'meteo', 'pioggia', 'previsioni', 'prezzo di',
-      'più economico', 'comprare', 'volo', 'voli',
-      // PT
-      'o que é', 'quem é', 'onde está', 'quando é', 'quanto',
-      'clima', 'chuva', 'previsão', 'preço de',
-      'mais barato', 'comprar', 'voo', 'voos',
-    ];
-    // Mots-clés exclus : créativité, code, opinion, conversation (multilingue)
-    final excludeWords = [
-      'écris', 'ecris', 'rédige', 'redige', 'raconte', 'invente',
-      'imagine', 'crée', 'cree', 'dessine', 'compose',
-      'code', 'programme', 'fonction', 'script', 'algorithme',
-      'explique-moi', 'explique comment', 'pourquoi le',
-      'qu\'en penses-tu', 'ton avis', 'selon toi',
-      'story', 'poème', 'poeme', 'chanson', 'blague',
-      // EN
-      'write a', 'compose a', 'imagine', 'create a', 'draw',
-      'code a', 'program', 'function', 'what do you think',
-      'your opinion', 'story', 'poem', 'song', 'joke',
-      // ES
-      'escribe', 'redacta', 'imagina', 'crea', 'dibuja',
-      'programa', 'función', 'qué opinas', 'poema', 'canción',
-      // DE
-      'schreibe', 'erfinde', 'erstelle', 'zeichne',
-      'programmiere', 'funktion', 'was denkst du', 'gedicht',
-      // IT
-      'scrivi', 'inventa', 'immagina', 'crea', 'disegna',
-      'programma', 'funzione', 'cosa pensi', 'poesia',
-      // PT
-      'escreve', 'inventa', 'imagina', 'cria', 'desenha',
-      'programa', 'função', 'o que achas', 'poema',
-    ];
-    // Si le message contient un mot-clé exclusif, pas de recherche
-    if (excludeWords.any((w) => lower.contains(w))) return false;
-    // Si le message contient un mot-clé déclencheur, recherche
-    if (triggerWords.any((w) => lower.contains(w))) return true;
-    // Questions explicites avec "?" — heuristique
-    if (lower.contains('?')) {
-      // Les questions longues et détaillées sont souvent conversationnelles
-      if (lower.length > 100) return false;
-      return true;
-    }
-    // Par défaut, pas de recherche (conversation normale)
-    return false;
-  }
-
-  /// Extrait une requête de recherche optimisée à partir du message utilisateur.
-  /// Supprime les salutations et le contexte conversationnel superflu.
-  static String _extractSearchQuery(String message) {
-    var query = message.trim();
-    // Retirer les salutations courantes
-    const salutations = ['bonjour', 'salut', 'hello', 'hi', 'hey', 'coucou'];
-    for (final s in salutations) {
-      if (query.toLowerCase().startsWith(s)) {
-        query = query.substring(s.length).trim();
-        break;
-      }
-    }
-    // Limiter la longueur de la requête
-    if (query.length > 200) {
-      query = '${query.substring(0, 200)}...';
-    }
-    return query;
-  }
+  // ── Web search trigger (ADR-029, Bloc 3 cluster 2) ──────────────────────────
+  // `needsWebSearch` + `extractSearchQuery` déplacés vers `WebSearchTrigger`
+  // (data/web_search_trigger.dart) — fonctions pures multilingues, testables
+  // isolément. Les sites d'appel ci-dessus utilisent `WebSearchTrigger.*` directement.
 
   // ── Enhanced search ────────────────────────────────────────────────────────
 
@@ -3740,7 +3589,7 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
     final service = ref.read(enhancedSearchServiceProvider);
     switch (intent) {
       case 'products':
-        final productQuery = _buildProductSearchQuery(searchQuery, params);
+        final productQuery = buildProductSearchQuery(searchQuery, params);
         var products = await service.searchProducts(productQuery,
             hl: language.serpApiHl, gl: language.serpApiGl);
         if (products.isEmpty) {
@@ -3753,7 +3602,7 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
         return null;
 
       case 'bestdeal':
-        final dealQuery = _buildProductSearchQuery(searchQuery, params);
+        final dealQuery = buildProductSearchQuery(searchQuery, params);
         final dealProducts = await service.searchBestDeal(dealQuery,
             hl: language.serpApiHl, gl: language.serpApiGl);
         if (dealProducts.isNotEmpty) {
@@ -3763,7 +3612,7 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
 
       case 'secondhand':
         final condition = params?.condition ?? 'used';
-        final usedQuery = _buildProductSearchQuery(searchQuery, params);
+        final usedQuery = buildProductSearchQuery(searchQuery, params);
         final usedProducts = await service.searchSecondHand(usedQuery,
             hl: language.serpApiHl, gl: language.serpApiGl, condition: condition);
         if (usedProducts.isNotEmpty) {
@@ -3783,11 +3632,12 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
 
         // Validate: if extracted params look like garbage (too many words,
         // contain flight-related terms), fall back to the reliable parser
-        if (parsed != null && !_isValidCityPair(parsed['from']!, parsed['to']!)) {
-          parsed = parseFlightParams(message);
+        if (parsed != null &&
+            !TravelParamsParser.isValidCityPair(parsed['from']!, parsed['to']!)) {
+          parsed = TravelParamsParser.parseFlightParams(message);
         }
 
-        parsed ??= parseFlightParams(message);
+        parsed ??= TravelParamsParser.parseFlightParams(message);
         if (parsed == null) return null;
         final flights = await service.searchFlights(
           from: parsed['from']!,
@@ -3851,8 +3701,8 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
       case 'weather':
         final weatherService = ref.read(weatherServiceProvider);
         WeatherData? weather;
-        final city = extractCity(message);
-        final zip = extractZipCode(message);
+        final city = TravelParamsParser.extractCity(message);
+        final zip = TravelParamsParser.extractZipCode(message);
 
         if (city != null) {
           weather = await weatherService.getCurrentWeather(city: city, lang: language.owmLang);
@@ -3880,273 +3730,24 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
     }
   }
 
-  static String _buildProductSearchQuery(String searchQuery, SearchParams? params) {
-    final tokens = <String>[searchQuery.trim()];
-    void add(String? value) {
-      if (value == null || value.trim().isEmpty) return;
-      final v = value.trim();
-      if (!tokens.any((t) => t.toLowerCase().contains(v.toLowerCase()))) {
-        tokens.add(v);
-      }
-    }
-
-    add(params?.category);
-    add(params?.color);
-    if (params?.condition == 'refurbished') add('reconditionné');
-    if (params?.condition == 'used') add('occasion');
-    if (params?.priceRange == 'cheapest') add('meilleur prix');
-
-    return tokens.join(' ').replaceAll(RegExp(r'\s+'), ' ').trim();
-  }
-
   // ── Flight/Weather parameter parsers ──────────────────────────────────────
+  // Implémentation déplacée vers TravelParamsParser (data/travel_params_parser.dart),
+  // source unique (ADR-029) partagée avec SearchIntentExtractor — unifie les deux
+  // parsers parallèles qui existaient ici (FR/EN) et dans SearchIntentExtractor
+  // (6 langues, mais _normalizeDate non sûr). Les shims statiques ci-dessous
+  // sont conservés pour la rétro-compatibilité des tests (ChatNotifier.*).
+  static Map<String, String>? parseFlightParams(String message) =>
+      TravelParamsParser.parseFlightParams(message);
 
-  /// Validate that extracted city names look like actual cities, not random
-  /// words from the query. City names should be 1-3 words and not contain
-  /// flight-related terms.
-  static bool _isValidCityPair(String from, String to) {
-    const garbageTerms = [
-      'trouve', 'trouver', 'cherche', 'chercher', 'billet', 'billets',
-      'vol', 'vols', 'avion', 'aller', 'retour', 'direct', 'recherche',
-      'reservation', 'reserver', 'partir', 'depart', 'arrivee',
-      'flight', 'flights', 'ticket', 'find', 'search', 'cheap',
-    ];
-    final fromWords = from.split(' ').length;
-    final toWords = to.split(' ').length;
-    // City names are 1-3 words (e.g., "New York", "Sao Paulo", "Buenos Aires")
-    if (fromWords > 3 || toWords > 3) return false;
-    final fromLower = from.toLowerCase();
-    final toLower = to.toLowerCase();
-    for (final term in garbageTerms) {
-      if (fromLower == term || toLower == term) return false;
-      if (fromLower.contains(' $term ') || toLower.contains(' $term ')) return false;
-      if (fromLower.startsWith('$term ') || toLower.startsWith('$term ')) return false;
-      if (fromLower.endsWith(' $term') || toLower.endsWith(' $term')) return false;
-    }
-    return true;
-  }
+  static String? extractCity(String message) =>
+      TravelParamsParser.extractCity(message);
 
-  /// Parse flight search parameters from natural language.
-  /// Handles: "Paris-Zagreb du 29 mai au 2 juin",
-  /// "vol Paris-Zagreb du 29/05 au 02/06",
-  /// "billet avion Paris Zagreb 15 juin", etc.
-  static Map<String, String>? parseFlightParams(String message) {
-    // Try original message first (handles properly capitalized input)
-    var result = _tryParseFlightParams(message);
-    if (result != null) return result;
+  static String? extractZipCode(String message) =>
+      TravelParamsParser.extractZipCode(message);
 
-    // Fallback: clean stop words + capitalize for lowercase queries
-    final cleaned = _sanitizeFlightQuery(message);
-    final capitalized = cleaned.replaceAllMapped(
-      RegExp(r'\b([a-zà-ÿ])'),
-      (m) => m.group(1)!.toUpperCase(),
-    );
-    if (capitalized != cleaned) {
-      return _tryParseFlightParams(capitalized);
-    }
-    return null;
-  }
+  static String normalizeDate(String raw) => TravelParamsParser.normalizeDate(raw);
 
-  /// Remove common flight-related stop words that interfere with city extraction.
-  static String _sanitizeFlightQuery(String msg) {
-    const stopWords = [
-      'vol', 'vols', 'billet', 'billets', 'avion', 'avions',
-      'aller', 'retour', 'direct', 'directs', 'cher', 'chers',
-      'moins', 'trouver', 'trouve', 'cherche', 'chercher',
-      'recherche', 'rechercher', 'depart', 'arrivee', 'reservation',
-      'reserver', 'partir', 'pour', 'via', 'avec', 'sur',
-      'flight', 'flights', 'ticket', 'tickets', 'cheap', 'find',
-      'search', 'one', 'way', 'round', 'trip', 'from', 'and',
-      'pas', 'les', 'des', 'une', 'mon', 'mes', 'ton', 'tes',
-      'son', 'ses', 'notre', 'nos', 'votre', 'vos', 'leur', 'leurs',
-      'quel', 'quels', 'quelle', 'quelles', 'est', 'sont',
-      'me', 'le', 'la', 'du', 'de', 'au', 'aux',
-    ];
-    var cleaned = msg;
-    for (final w in stopWords) {
-      cleaned = cleaned.replaceAll(RegExp('\\b$w\\b', caseSensitive: false), ' ');
-    }
-    // Collapse multiple spaces
-    return cleaned.replaceAll(RegExp(r'\s+'), ' ').trim();
-  }
-
-  static Map<String, String>? _tryParseFlightParams(String message) {
-    const cityName = r'[A-ZÀ-Ÿ][a-zà-ÿ]+(?:\s[A-ZÀ-Ÿ][a-zà-ÿ]+)?';
-    const numericDate = r'\d{1,2}[/.-]\d{1,2}(?:[/.-]\d{2,4})?';
-    const months =
-        r'[Jj]anvier|[Ff]évrier|[Ff]evrier|[Mm]ars|[Aa]vril|[Mm]ai|'
-        r'[Jj]uillet|[Jj]uin|[Aa]oût|[Aa]out|[Ss]eptembre|[Oo]ctobre|'
-        r'[Nn]ovembre|[Dd]écembre|[Dd]ecembre|'
-        r'[Jj]anuary|[Ff]ebruary|[Mm]arch|[Aa]pril|[Mm]ay|'
-        r'[Jj]uly|[Jj]une|[Aa]ugust|[Ss]eptember|[Oo]ctober|'
-        r'[Nn]ovember|[Dd]ecember';
-
-    // Pattern A: "City1-City2 du DD mois au DD mois" (hyphen, text dates)
-    // Matches: "Paris-Zagreb du 29 mai au 2 juin"
-    final hyphenTextDates = RegExp(
-      '($cityName)\\s*-\\s*($cityName)\\b'
-      r'.{0,30}?'
-      r'(?:d[ue]|le|départ\s+le)\s+(\d{1,2})\s+'
-      '($months)'
-      r'(?:\s*(?:au|retour(?:\s+le)?)\s+(\d{1,2})\s+(' + months + r'))?',
-    );
-    final matchA = hyphenTextDates.firstMatch(message);
-    if (matchA != null) {
-      final d1 = int.parse(matchA.group(3)!);
-      final m1 = lang.parseMonth(matchA.group(4)!);
-      final y = DateTime.now().year;
-      final departDate =
-          '$y-${m1.toString().padLeft(2, '0')}-${d1.toString().padLeft(2, '0')}';
-      String? returnDate;
-      if (matchA.group(5) != null) {
-        final d2 = int.parse(matchA.group(5)!);
-        final m2 = lang.parseMonth(matchA.group(6)!);
-        returnDate =
-            '$y-${m2.toString().padLeft(2, '0')}-${d2.toString().padLeft(2, '0')}';
-      }
-      return {
-        'from': matchA.group(1)!.trim(),
-        'to': matchA.group(2)!.trim(),
-        'departDate': departDate,
-        if (returnDate != null) 'returnDate': returnDate,
-      };
-    }
-
-    // Pattern B: "City1-City2 du date1 au date2" (hyphen, numeric dates)
-    // Matches: "Paris-Zagreb du 29/05/2026 au 02/06/2026"
-    final hyphenNumDates = RegExp(
-      '($cityName)\\s*-\\s*($cityName)\\b'
-      r'.{0,20}?'
-      '(?:d[ue]|le)\\s+(' + numericDate + r')'
-      r'(?:\s+(?:au|retour)\s+(' + numericDate + r'))?',
-    );
-    final matchB = hyphenNumDates.firstMatch(message);
-    if (matchB != null) {
-      return {
-        'from': matchB.group(1)!.trim(),
-        'to': matchB.group(2)!.trim(),
-        'departDate': normalizeDate(matchB.group(3)!),
-        if (matchB.group(4) != null)
-          'returnDate': normalizeDate(matchB.group(4)!),
-      };
-    }
-
-    // Pattern C: "City1 City2 du DD mois au DD mois" (space/separator, text dates)
-    // Matches: "vol Paris Zagreb du 29 mai au 2 juin", "vol direct Paris Zagreb 29 mai 2026"
-    final spaceTextDates = RegExp(
-      '($cityName)\\s+'
-      r'(?:à|vers|pour|-)?\s*'
-      '($cityName)\\b'
-      r'.{0,30}?'
-      r'(?:d[ue]|le\s+)?(\d{1,2})\s+'
-      '($months)'
-      r'(?:\s*(?:au|retour)\s+(\d{1,2})\s+(' + months + r'))?',
-    );
-    final matchC = spaceTextDates.firstMatch(message);
-    if (matchC != null) {
-      final d1 = int.parse(matchC.group(3)!);
-      final m1 = lang.parseMonth(matchC.group(4)!);
-      final y = DateTime.now().year;
-      final departDate =
-          '$y-${m1.toString().padLeft(2, '0')}-${d1.toString().padLeft(2, '0')}';
-      String? returnDate;
-      if (matchC.group(5) != null) {
-        final d2 = int.parse(matchC.group(5)!);
-        final m2 = lang.parseMonth(matchC.group(6)!);
-        returnDate =
-            '$y-${m2.toString().padLeft(2, '0')}-${d2.toString().padLeft(2, '0')}';
-      }
-      return {
-        'from': matchC.group(1)!.trim(),
-        'to': matchC.group(2)!.trim(),
-        'departDate': departDate,
-        if (returnDate != null) 'returnDate': returnDate,
-      };
-    }
-
-    // Pattern D: "City1-City2 date" or "City1 City2 date" — compact, no du/le required
-    final compactNumDates = RegExp(
-      '(?:de\\s+)?($cityName)\\s+'
-      r'(?:à|vers|pour|-)?\s*'
-      '($cityName)\\b'
-      r'.{0,20}?'
-      '(?:d[ue]|le)?\\s*(' + numericDate + r')',
-    );
-    final matchD = compactNumDates.firstMatch(message);
-    if (matchD != null) {
-      return {
-        'from': matchD.group(1)!.trim(),
-        'to': matchD.group(2)!.trim(),
-        'departDate': normalizeDate(matchD.group(3)!),
-      };
-    }
-
-    return null;
-  }
-
-  /// Extract city name from weather-related message.
-  static String? extractCity(String message) {
-    var result = _tryExtractCity(message);
-    if (result != null) return result;
-
-    // Fallback: capitalize first letter of each word for lowercase queries
-    final capitalized = message.replaceAllMapped(
-      RegExp(r'\b([a-zà-ÿ])'),
-      (m) => m.group(1)!.toUpperCase(),
-    );
-    if (capitalized != message) {
-      return _tryExtractCity(capitalized);
-    }
-    return null;
-  }
-
-  static String? _tryExtractCity(String message) {
-    // Pattern: "météo Paris", "temps à Lyon", "weather in London", etc.
-    const city = r'([A-ZÀ-Ÿ][a-zà-ÿ]+(?:\s[A-ZÀ-Ÿ][a-zà-ÿ]+)?)';
-    final patterns = [
-      RegExp(r'(?:météo|meteo|temps|pleuvoir|température|temperature|weather|clima|tempo|wetter)\s+(?:à|de|pour|sur|in|en|a|em|bei)\s+' + city),
-      RegExp(r'(?:météo|meteo|temps|pleuvoir|température|temperature|weather|clima|tempo|wetter)\s+' + city),
-      RegExp(r'(?:fait-il|fera-t-il|how is the weather|como está el clima|wie ist das wetter)\s+(?:à|de|pour|sur|in|en|a|em|bei)\s+' + city),
-      RegExp(r"(?:est-ce qu'il|va-t-il)\s+\w+\s+(?:à|de|pour|sur|in|en|a|em|bei)\s+" + city),
-    ];
-
-    for (final pattern in patterns) {
-      final match = pattern.firstMatch(message);
-      if (match != null) return match.group(1)!.trim();
-    }
-    return null;
-  }
-
-  /// Extract postal code from weather-related message.
-  static String? extractZipCode(String message) {
-    final match = RegExp(r'\b(\d{5})\b').firstMatch(message);
-    if (match != null) return match.group(1);
-    return null;
-  }
-
-  static String normalizeDate(String raw) {
-    // Accept dd/mm[/yyyy], dd-mm[-yyyy], dd.mm[.yyyy] → yyyy-mm-dd
-    final parts = raw.trim().split(RegExp(r'[/.-]'));
-    if (parts.length >= 2) {
-      try {
-        final d = int.parse(parts[0]);
-        final m = int.parse(parts[1]);
-        var y = DateTime.now().year;
-        if (parts.length >= 3) {
-          y = int.parse(parts[2]);
-          if (y < 100) y += 2000;
-        }
-        return '$y-${m.toString().padLeft(2, '0')}-${d.toString().padLeft(2, '0')}';
-      } catch (_) {
-        return raw;
-      }
-    }
-    return raw;
-  }
-
-  static int parseMonth(String name) {
-    return lang.parseMonth(name);
-  }
+  static int parseMonth(String name) => TravelParamsParser.parseMonth(name);
 
   /// Charge plus de messages dans l'historique (UI pagination).
   void loadMoreHistory() {
@@ -4194,7 +3795,7 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
   Future<String> _processBrowserActions(String content) async {
     if (!PlatformService.isExtension) return content;
 
-    final stripped = _stripActionCommands(content);
+    final stripped = stripActionCommands(content);
     await _parseAndExecuteBrowserActions(content);
     return stripped;
   }
@@ -4216,7 +3817,7 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
         if (jsonStr == null) continue;
 
         // Parse the JSON action
-        final decoded = _parseJsonLoose(jsonStr);
+        final decoded = parseJsonLoose(jsonStr);
         if (decoded == null) continue;
 
         final action = BrowserAction(
@@ -4244,24 +3845,6 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
     }
   }
 
-  /// Parse JSON de manière tolérante (accepte les sauts de ligne dans les strings).
-  static Map<String, dynamic>? _parseJsonLoose(String jsonStr) {
-    try {
-      return jsonDecode(jsonStr) as Map<String, dynamic>;
-    } catch (_) {
-      return null;
-    }
-  }
-
-  /// Supprime les balises [CORELY_ACTION]...[/CORELY_ACTION] du texte affiché.
-  static String _stripActionCommands(String text) {
-    return text
-        .replaceAll(
-          RegExp(r'\[CORELY_ACTION\][\s\S]*?\[/CORELY_ACTION\]', multiLine: true),
-          '',
-        )
-        .trim();
-  }
 }
 
 final chatNotifierProvider =

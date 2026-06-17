@@ -1,4 +1,5 @@
 import '../../../../core/language/language_service.dart';
+import 'travel_params_parser.dart';
 
 /// Structured parameters extracted from a user search query.
 class SearchParams {
@@ -276,20 +277,9 @@ class SearchIntentExtractor {
   // ── Parameter Extractors ───────────────────────────────────────────────────
 
   SearchParams _extractFlightParams(String message, AppLanguage lang, String? priceRange, String? sortBy) {
-    final lower = message.toLowerCase();
-
-    // Try known patterns from ChatNotifier's parseFlightParams logic
-    var parsed = _tryParseFlightParamsGeneric(message, lang);
-
-    // If lowercase input didn't match, try sanitized + capitalized
-    if (parsed == null) {
-      final cleaned = _sanitizeFlightQuery(message);
-      final capitalized = cleaned.replaceAllMapped(
-        RegExp(r'\b([a-zà-ÿ])'),
-        (m) => m.group(1)!.toUpperCase(),
-      );
-      parsed = _tryParseFlightParamsGeneric(capitalized, lang);
-    }
+    // Source unique (ADR-029) : parsing structuré (4 patterns regex + repli
+    // sanitize+capitalize) délégué à TravelParamsParser.parseFlightParams.
+    final parsed = TravelParamsParser.parseFlightParams(message);
 
     if (parsed != null) {
       return SearchParams(
@@ -486,7 +476,6 @@ class SearchIntentExtractor {
   }
 
   List<String> _extractCities(String message, AppLanguage lang) {
-    final lower = message.toLowerCase();
     final cities = <String>[];
 
     // Common city name patterns in travel context
@@ -740,156 +729,10 @@ class SearchIntentExtractor {
     return null;
   }
 
-  // ── Helper: Flight Param Parsing (delegates to ChatNotifier logic) ─────────
-  // This is a simplified version that works in pure Dart
-
-  static Map<String, String>? _tryParseFlightParamsGeneric(String message, AppLanguage lang) {
-    const cityName = r'[A-ZÀ-Ÿ][a-zà-ÿ]+(?:\s[A-ZÀ-Ÿ][a-zà-ÿ]+)?';
-    const numericDate = r'\d{1,2}[/.-]\d{1,2}(?:[/.-]\d{2,4})?';
-    const months =
-        r'[Jj]anvier|[Ff]évrier|[Ff]evrier|[Mm]ars|[Aa]vril|[Mm]ai|'
-        r'[Jj]uillet|[Jj]uin|[Aa]oût|[Aa]out|[Ss]eptembre|[Oo]ctobre|'
-        r'[Nn]ovembre|[Dd]écembre|[Dd]ecembre|'
-        r'[Jj]anuary|[Ff]ebruary|[Mm]arch|[Aa]pril|[Mm]ay|'
-        r'[Jj]uly|[Jj]une|[Aa]ugust|[Ss]eptember|[Oo]ctober|'
-        r'[Nn]ovember|[Dd]ecember|'
-        r'[Ee]nero|[Ff]ebrero|[Mm]arzo|[Aa]bril|[Mm]ayo|[Jj]unio|[Jj]ulio|'
-        r'[Ss]eptiembre|[Oo]ctubre|[Nn]oviembre|[Dd]iciembre|'
-        r'[Jj]anuar|[Ff]ebruar|[Mm]arz|[Jj]uni|[Jj]uli|[Oo]ktober|[Dd]ezember|'
-        r'[Gg]ennaio|[Ff]ebbraio|[Mm]aggio|[Gg]iugno|[Ll]uglio|'
-        r'[Ss]ettembre|[Oo]ttobre|[Dd]icembre|'
-        r'[Jj]aneiro|[Ff]evereiro|[Mm]arco|[Mm]aio|[Jj]unho|[Jj]ulho|'
-        r'[Oo]utubro|[Nn]ovembro|[Dd]ezembro';
-
-    // Pattern A: "City1-City2 du DD mois au DD mois"
-    final hyphenTextDates = RegExp(
-      '($cityName)\\s*-\\s*($cityName)\\b'
-      r'.{0,30}?'
-      r'(?:d[ue]|le|départ\s+le)\s+(\d{1,2})\s+'
-      '($months)'
-      r'(?:\s*(?:au|retour(?:\s+le)?)\s+(\d{1,2})\s+(' + months + r'))?',
-    );
-    final matchA = hyphenTextDates.firstMatch(message);
-    if (matchA != null) {
-      final d1 = int.parse(matchA.group(3)!);
-      final m1 = parseMonth(matchA.group(4)!);
-      final y = DateTime.now().year;
-      final departDate = '$y-${m1.toString().padLeft(2, '0')}-${d1.toString().padLeft(2, '0')}';
-      String? returnDate;
-      if (matchA.group(5) != null) {
-        final d2 = int.parse(matchA.group(5)!);
-        final m2 = parseMonth(matchA.group(6)!);
-        returnDate = '$y-${m2.toString().padLeft(2, '0')}-${d2.toString().padLeft(2, '0')}';
-      }
-      return {'from': matchA.group(1)!.trim(), 'to': matchA.group(2)!.trim(), 'departDate': departDate, if (returnDate != null) 'returnDate': returnDate};
-    }
-
-    // Pattern B: "City1-City2 du date1 au date2" (numeric dates)
-    final hyphenNumDates = RegExp(
-      '($cityName)\\s*-\\s*($cityName)\\b'
-      r'.{0,20}?'
-      '(?:d[ue]|le)\\s+(' + numericDate + r')'
-      r'(?:\s+(?:au|retour)\s+(' + numericDate + r'))?',
-    );
-    final matchB = hyphenNumDates.firstMatch(message);
-    if (matchB != null) {
-      return {
-        'from': matchB.group(1)!.trim(),
-        'to': matchB.group(2)!.trim(),
-        'departDate': _normalizeDate(matchB.group(3)!),
-        if (matchB.group(4) != null) 'returnDate': _normalizeDate(matchB.group(4)!),
-      };
-    }
-
-    // Pattern C: "City1 City2 du DD mois au DD mois"
-    final spaceTextDates = RegExp(
-      '($cityName)\\s+'
-      r'(?:à|vers|pour|-)?\s*'
-      '($cityName)\\b'
-      r'.{0,30}?'
-      r'(?:d[ue]|le\s+)?(\d{1,2})\s+'
-      '($months)'
-      r'(?:\s*(?:au|retour)\s+(\d{1,2})\s+(' + months + r'))?',
-    );
-    final matchC = spaceTextDates.firstMatch(message);
-    if (matchC != null) {
-      final d1 = int.parse(matchC.group(3)!);
-      final m1 = parseMonth(matchC.group(4)!);
-      final y = DateTime.now().year;
-      final departDate = '$y-${m1.toString().padLeft(2, '0')}-${d1.toString().padLeft(2, '0')}';
-      String? returnDate;
-      if (matchC.group(5) != null) {
-        final d2 = int.parse(matchC.group(5)!);
-        final m2 = parseMonth(matchC.group(6)!);
-        returnDate = '$y-${m2.toString().padLeft(2, '0')}-${d2.toString().padLeft(2, '0')}';
-      }
-      return {'from': matchC.group(1)!.trim(), 'to': matchC.group(2)!.trim(), 'departDate': departDate, if (returnDate != null) 'returnDate': returnDate};
-    }
-
-    // Pattern D: "City1-City2 date" or "City1 City2 date" — compact, no du/le required
-    final compactNumDates = RegExp(
-      '(?:de\\s+)?($cityName)\\s+'
-      r'(?:à|vers|pour|-)?\s*'
-      '($cityName)\\b'
-      r'.{0,20}?'
-      '(?:d[ue]|le)?\\s*(' + numericDate + r')',
-    );
-    final matchD = compactNumDates.firstMatch(message);
-    if (matchD != null) {
-      return {
-        'from': matchD.group(1)!.trim(),
-        'to': matchD.group(2)!.trim(),
-        'departDate': _normalizeDate(matchD.group(3)!),
-      };
-    }
-
-    return null;
-  }
-
-  static String _normalizeDate(String raw) {
-    final parts = raw.replaceAll('-', '/').replaceAll('.', '/').split('/');
-    if (parts.length >= 2) {
-      var day = parts[0].padLeft(2, '0');
-      var month = parts[1].padLeft(2, '0');
-      String year;
-      if (parts.length >= 3) {
-        var y = parts[2];
-        if (y.length == 2) y = '20$y';
-        year = y;
-      } else {
-        year = DateTime.now().year.toString();
-      }
-      return '$year-$month-$day';
-    }
-    return raw;
-  }
-
   // ── Misc Helpers ───────────────────────────────────────────────────────────
 
   String _cleanQuery(String message) {
     return message.replaceAll(RegExp(r'[^\w\sà-üÀ-Ü-]'), ' ').replaceAll(RegExp(r'\s+'), ' ').trim();
-  }
-
-  /// Remove flight-related stop words that interfere with city extraction.
-  static String _sanitizeFlightQuery(String msg) {
-    const stopWords = [
-      'vol', 'vols', 'billet', 'billets', 'avion', 'avions',
-      'aller', 'retour', 'direct', 'directs', 'cher', 'chers',
-      'moins', 'trouver', 'trouve', 'cherche', 'chercher',
-      'recherche', 'rechercher', 'depart', 'arrivee', 'reservation',
-      'reserver', 'partir', 'pour', 'via', 'avec', 'sur',
-      'flight', 'flights', 'ticket', 'tickets', 'cheap', 'find',
-      'search', 'one', 'way', 'round', 'trip', 'from', 'and',
-      'pas', 'les', 'des', 'un', 'une', 'mon', 'mes', 'ton', 'tes',
-      'son', 'ses', 'notre', 'nos', 'votre', 'vos', 'leur', 'leurs',
-      'quel', 'quels', 'quelle', 'quelles', 'est', 'sont',
-      'me', 'le', 'la', 'du', 'de', 'au', 'aux',
-    ];
-    var cleaned = msg;
-    for (final w in stopWords) {
-      cleaned = cleaned.replaceAll(RegExp('\\b$w\\b', caseSensitive: false), ' ');
-    }
-    return cleaned.replaceAll(RegExp(r'\s+'), ' ').trim();
   }
 
   bool _isStopWord(String word) {
@@ -926,20 +769,12 @@ class SearchIntentExtractor {
   }
 
   String _getMonthPattern(AppLanguage lang) {
-    const all = r'[Jj]anvier|[Ff]évrier|[Ff]evrier|[Mm]ars|[Aa]vril|[Mm]ai|[Jj]uin|'
-        r'[Jj]uillet|[Aa]oût|[Aa]out|[Ss]eptembre|[Oo]ctobre|[Nn]ovembre|'
-        r'[Dd]écembre|[Dd]ecembre|'
-        r'[Jj]anuary|[Ff]ebruary|[Mm]arch|[Aa]pril|[Mm]ay|[Jj]une|[Jj]uly|'
-        r'[Aa]ugust|[Ss]eptember|[Oo]ctober|[Nn]ovember|[Dd]ecember|'
-        r'[Ee]nero|[Ff]ebrero|[Mm]arzo|[Aa]bril|[Mm]ayo|[Jj]unio|[Jj]ulio|'
-        r'[Aa]gosto|[Ss]eptiembre|[Oo]ctubre|[Nn]oviembre|[Dd]iciembre|'
-        r'[Jj]anuar|[Ff]ebruar|[Mm]arz|[Aa]pril|[Mm]ai|[Jj]uni|[Jj]uli|'
-        r'[Aa]ugust|[Ss]eptember|[Oo]ktober|[Nn]ovember|[Dd]ezember|'
-        r'[Gg]ennaio|[Ff]ebbraio|[Mm]arzo|[Aa]prile|[Mm]aggio|[Gg]iugno|'
-        r'[Ll]uglio|[Aa]gosto|[Ss]ettembre|[Oo]ttobre|[Nn]ovembre|[Dd]icembre|'
-        r'[Jj]aneiro|[Ff]evereiro|[Mm]arço|[Mm]arco|[Aa]bril|[Mm]aio|'
-        r'[Jj]unho|[Jj]ulho|[Aa]gosto|[Ss]etembro|[Oo]utubro|[Nn]ovembro|[Dd]ezembro';
-    return all;
+    // Source unique (ADR-029) : délègue vers `TravelParamsParser.monthPattern`
+    // pour éliminer la duplication des deux regex de mois parallèles (l'ancienne
+    // copie FR/EN de `chat_notifier` est désormais unifiée ici). Le paramètre
+    // `lang` est conservé pour compatibilité de signature mais inutilisé — le
+    // motif 6 langues (FR/EN/ES/DE/IT/PT) est identique quelle que soit la langue.
+    return TravelParamsParser.monthPattern;
   }
 
   // ── Multilingual Keyword Maps ──────────────────────────────────────────────

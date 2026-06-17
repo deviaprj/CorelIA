@@ -1,6 +1,7 @@
-"""Firebase JWT verification middleware."""
+"""Firebase JWT verification + API-key gating middleware."""
 
 import functools
+import hmac
 from typing import Any, Callable
 
 from fastapi import HTTPException, Request, status
@@ -85,16 +86,66 @@ def require_auth(endpoint: Callable[..., Any]) -> Callable[..., Any]:
     return wrapper
 
 
-async def require_api_key(request: Request) -> str:
-    """FastAPI dependency that validates an API key from the X-API-Key header."""
-    api_key = request.headers.get("X-API-Key") or request.query_params.get("api_key")
-    if not api_key:
+def _extract_api_key(request: Request) -> str | None:
+    """Read the API key from the X-API-Key header or ?api_key= query param."""
+    return request.headers.get("X-API-Key") or request.query_params.get("api_key")
+
+
+def _constant_time_eq(a: str | None, b: str | None) -> bool:
+    """Constant-time comparison (avoids timing side-channels on the secret)."""
+    return hmac.compare_digest(a or "", b or "")
+
+
+async def require_client_api_key(request: Request) -> str:
+    """Gate APK/extension-facing endpoints (/scrape, /search_smart,
+    /download_media, /crawl, /script/scrape, /script/api-fetch, /insights/*).
+
+    Compared against ``settings.client_api_key``. Transition-safe: if no
+    client key is configured (empty), the gate is OPEN so an already-deployed
+    APK keeps working until an APK embedding the matching key ships. Once
+    ``CLIENT_API_KEY`` is set, requests without a valid key get 401.
+    """
+    api_key = _extract_api_key(request)
+    configured = settings.client_api_key
+    if not configured:
+        # Transition mode — the gate stays open until the operator ships an
+        # APK with the key. Logged so the open state is visible (not silent).
+        logger.warning("CLIENT_API_KEY not set — client endpoints are OPEN (transition)")
+        return api_key or "transition"
+    if not api_key or not _constant_time_eq(api_key, configured):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing API key",
+            detail="Missing or invalid API key",
         )
-    # In development any non-empty key is accepted; production should check against DB/Redis
-    if settings.app_env == "production":
-        # TODO: validate against stored API keys in production
-        pass
     return api_key
+
+
+async def require_operator_key(request: Request) -> str:
+    """Gate dangerous operator endpoints (/script/exec, /agent/*, /config/*,
+    /insights/audit).
+
+    Compared against ``settings.api_secret_key`` (OPERATOR secret — never
+    embedded in the APK). Fail-closed: if no operator key is configured, every
+    request is rejected with 403 (endpoint effectively disabled until the
+    operator sets ``API_SECRET_KEY``).
+    """
+    configured = settings.api_secret_key
+    api_key = _extract_api_key(request)
+    if not configured:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Operator key not configured on the server",
+        )
+    if not api_key or not _constant_time_eq(api_key, configured):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing or invalid operator key",
+        )
+    return api_key
+
+
+# Back-compat alias — data_insights.py still uses ``Depends(require_api_key)``.
+# Repurposed from a no-op stub (any non-empty key accepted, even in production)
+# to the real client gate: transition-open until CLIENT_API_KEY is set, then
+# enforced. Strictly tighter than the previous behavior.
+require_api_key = require_client_api_key

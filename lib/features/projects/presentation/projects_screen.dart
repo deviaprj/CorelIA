@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../domain/project.dart';
+import '../../../core/constants.dart';
 import '../../../core/providers/firebase_providers.dart';
 import '../../monetization/subscription/subscription_service.dart';
 
@@ -10,27 +11,20 @@ final projectsStreamProvider =
     StreamProvider.family<List<Project>, String>(
   (ref, userId) => ref
       .watch(firestoreProvider)
-      .collection('users')
+      .collection(AppConstants.colUsers)
       .doc(userId)
-      .collection('projects')
+      .collection(AppConstants.colProjects)
       .orderBy('updatedAt', descending: true)
       .snapshots()
       .map((snap) =>
           snap.docs.map(Project.fromFirestore).toList()),
 );
 
-// Provider pour les conversations d'un projet
-final projectConversationsProvider =
-    StreamProvider.family<List<String>, String>(
-  (ref, projectId) => ref
-      .watch(firestoreProvider)
-      .collection('projects')
-      .doc(projectId)
-      .collection('conversations')
-      .orderBy('createdAt', descending: true)
-      .snapshots()
-      .map((snap) => snap.docs.map((d) => d.id).toList()),
-);
+// NOTE : l'ancien `projectConversationsProvider` interrogeait la collection
+// top-level `projects/{projectId}/conversations` qui n'existe JAMAIS (les projets
+// sont stockés sous `users/{uid}/projects/{projectId}`) → query toujours vide.
+// Supprimé. Les conversations d'un projet sont exposées via `project.conversationIds`
+// et affichées par `ProjectDetailScreen` (project_detail_screen.dart).
 
 // ── Screen ────────────────────────────────────────────────────────────────────
 class ProjectsScreen extends ConsumerWidget {
@@ -142,9 +136,9 @@ class ProjectsScreen extends ConsumerWidget {
       // Vérifier si un projet avec ce nom existe déjà
       final existing = await ref
           .read(firestoreProvider)
-          .collection('users')
+          .collection(AppConstants.colUsers)
           .doc(userId)
-          .collection('projects')
+          .collection(AppConstants.colProjects)
           .where('name', isEqualTo: name)
           .get();
 
@@ -165,9 +159,9 @@ class ProjectsScreen extends ConsumerWidget {
 
       await ref
           .read(firestoreProvider)
-          .collection('users')
+          .collection(AppConstants.colUsers)
           .doc(userId)
-          .collection('projects')
+          .collection(AppConstants.colProjects)
           .doc(project.id)
           .set(project.toFirestore());
     }
@@ -283,9 +277,9 @@ class _ProjectTile extends ConsumerWidget {
       );
       await ref
           .read(firestoreProvider)
-          .collection('users')
+          .collection(AppConstants.colUsers)
           .doc(userId)
-          .collection('projects')
+          .collection(AppConstants.colProjects)
           .doc(project.id)
           .set(updatedProject.toFirestore());
     }
@@ -321,9 +315,9 @@ class _ProjectTile extends ConsumerWidget {
     if (confirmed == true && context.mounted) {
       await ref
           .read(firestoreProvider)
-          .collection('users')
+          .collection(AppConstants.colUsers)
           .doc(userId)
-          .collection('projects')
+          .collection(AppConstants.colProjects)
           .doc(project.id)
           .delete();
     }

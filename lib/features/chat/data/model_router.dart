@@ -1,4 +1,3 @@
-import '../../../core/constants.dart';
 
 /// Types de tâches influençant le choix du modèle.
 enum TaskType {
@@ -245,11 +244,18 @@ class ModelRouter {
     }
 
     // Si l'utilisateur a forcé un type de tâche
+    // NOTE : task:vocal et task:vocalFast étaient auparavant silencieusement
+    // ignorés (mappings manquants) — la chaîne vocale (arcee/trinity, neversleep/
+    // ring-2.6-1t) était morte et le mode vocal routait via deepseek-v4-flash
+    // (chaîne générale). Restauration des mappings pour utiliser les modèles
+    // joviaux/rapides conçus pour la conversation vocale.
     TaskType effectiveTask = taskType;
     if (userOverride == 'task:code') effectiveTask = TaskType.code;
     if (userOverride == 'task:vision') effectiveTask = TaskType.vision;
     if (userOverride == 'task:reasoning') effectiveTask = TaskType.reasoning;
     if (userOverride == 'task:document') effectiveTask = TaskType.document;
+    if (userOverride == 'task:vocal') effectiveTask = TaskType.vocal;
+    if (userOverride == 'task:vocalFast') effectiveTask = TaskType.vocalFast;
 
     final chain = _routingTable[effectiveTask] ?? _routingTable[TaskType.general]!;
     for (final modelId in chain) {
@@ -264,8 +270,17 @@ class ModelRouter {
       return entry;
     }
 
-    // Dernier recours : deepseek-v4-pro (toujours accessible, même pour les gratuits)
-    return _registry['deepseek-v4-pro'];
+    // Dernier recours : deepseek-v4-pro (toujours accessible, même pour les gratuits).
+    // Exception : pour la vision, ne JAMAIS retourner un modèle non-vision —
+    // sinon l'image est envoyée à un modèle qui ne la comprend pas (réponse
+    // cassée). On retourne null pour que l'appelant (_getVisionStream) déclenche
+    // le message d'erreur propre "Analyse d'image indisponible, réessayez dans
+    // quelques minutes" plutôt qu'une erreur opaque ou un contenu garbage.
+    final lastResort = _registry['deepseek-v4-pro'];
+    if (effectiveTask == TaskType.vision && !(lastResort?.supportsVision ?? false)) {
+      return null;
+    }
+    return lastResort;
   }
 
   /// Marque un modèle comme rate-limited après un 429.

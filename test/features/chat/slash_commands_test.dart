@@ -2,7 +2,17 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:corel_ia/features/chat/presentation/slash_commands.dart';
 
+import '../../helpers/widget_test_shaders.dart';
+
 void main() {
+  // Warm-up : le binding de test (Flutter 3.41.9) ne bundle pas le shader
+  // framework shaders/ink_sparkle.frag → le premier tap InkWell lève une erreur
+  // async non gérée. On déclenche ce chargement une fois dans une zone guarded qui
+  // avale l'erreur pour que _initCalled passe à true (voir helpers/widget_test_shaders.dart).
+  testWidgets('warm up ink sparkle shader (env artifact)', (tester) async {
+    await warmUpInkSparkleShader(tester);
+  });
+
   // ── SlashCommand model ─────────────────────────────────────────────────────
 
   group('SlashCommand', () {
@@ -528,8 +538,12 @@ void main() {
   // ── SlashCommands.all completeness ─────────────────────────────────────────
 
   group('SlashCommands.all', () {
-    test('contains exactly 25 commands', () {
-      expect(SlashCommands.all.length, equals(26));
+    test('contains exactly 30 commands', () {
+      // Garde anti-régression : pinne le nombre exact de commandes. À mettre à
+      // jour (ici + la liste « required commands exist » ci-dessous) quand une
+      // commande est ajoutée/retirée. 30 = 24 historiques + docgen, scrape,
+      // scrape-script, exec, api-fetch, crawl (universelles + script IA).
+      expect(SlashCommands.all.length, equals(30));
     });
 
     test('all commands have non-empty names', () {
@@ -571,6 +585,8 @@ void main() {
         'forms', 'tables', 'media', 'metadata', 'autofill',
         'inspect', 'highlight', 'waitfor', 'export', 'monitor',
         'translate', 'searchpage',
+        // Commandes universelles + script IA (ADR-027 / sessions V14-V17)
+        'docgen', 'scrape', 'scrape-script', 'exec', 'api-fetch', 'crawl',
       ]));
     });
   });
@@ -714,7 +730,7 @@ void main() {
       final cmd2 = SlashCommands.parse('/translate en');
       expect(cmd2, isNotNull);
       expect(cmd2!.command.name, equals('translate'));
-      expect(cmd2!.args, equals(['en']));
+      expect(cmd2.args, equals(['en']));
     });
 
     test('Combo "forms + autofill + fill + click" parse correctement', () {
@@ -750,7 +766,7 @@ void main() {
       final cmd2 = SlashCommands.parse('/export csv');
       expect(cmd2, isNotNull);
       expect(cmd2!.command.name, equals('export'));
-      expect(cmd2!.args, equals(['csv']));
+      expect(cmd2.args, equals(['csv']));
     });
 
     test('Combo "media + download" parse correctement', () {
@@ -771,7 +787,7 @@ void main() {
       final cmd2 = SlashCommands.parse('/export json');
       expect(cmd2, isNotNull);
       expect(cmd2!.command.name, equals('export'));
-      expect(cmd2!.args, equals(['json']));
+      expect(cmd2.args, equals(['json']));
     });
 
     test('Combo "searchpage + extract" parse correctement', () {

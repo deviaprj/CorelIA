@@ -41,29 +41,44 @@ class OralizeService {
   /// le texte tel quel sans appel LLM. En cas d'échec (réseau, timeout, clé
   /// absente), retourne le texte original — l'appelant utilisera [cleanMarkdown]
   /// comme fallback.
-  static Future<String> oralize(String markdown) async {
+  static Future<String> oralize(String markdown, {bool isPro = false}) async {
     // 1. Texte court : probablement déjà oral
     if (markdown.length < 100) return markdown;
 
     // 2. Vérifier si le texte contient du markdown problématique
     if (!_needsOralization(markdown)) return markdown;
 
-    // 3. Cache
+    // 3. Tier-aware : l'oralisation LLM coûte ~$0.00003/appel via la clé DeepSeek
+    //    opérateur. Réservée aux utilisateurs Pro — les utilisateurs gratuits
+    //    utilisent cleanMarkdown (regex) appliqué par l'appelant (speakNaturally),
+    //    gratuit et suffisant. On retourne le markdown brut ici ; l'appelant
+    //    appliquera cleanMarkdown ensuite, donc l'utilisateur gratuit entend
+    //    quand même un texte nettoyé (comportement pré-Oralize-Pass).
+    if (!isPro) return markdown;
+
+    // 4. Cache (LRU)
     final cacheKey = _makeCacheKey(markdown);
     final cached = _cache[cacheKey];
     if (cached != null) {
+      // LRU touch : replacer l'entrée en fin d'ordre d'insertion pour ne pas
+      // être évincée prématurément. Sans cela, _addToCache évince l'entrée la
+      // plus ancienne (FIFO), pas la moins récemment utilisée (LRU).
+      _cache.remove(cacheKey);
+      _cache[cacheKey] = cached;
       debugPrint('[OralizeService] Cache hit (${cached.value.length} chars)');
       return cached.value;
     }
 
-    // 4. Clé API
+    // 5. Clé API
     final apiKey = AppConstants.deepSeekApiKey;
     if (apiKey.isEmpty) {
       debugPrint('[OralizeService] No DeepSeek API key — skipping oralization');
       return markdown;
     }
 
-    // 5. Appel LLM
+    // 6. Appel LLM — timeout court (4s) : en mode vocal half-duplex, cet appel
+    //    bloque le tour de conversation. Mieux vaut retomber sur cleanMarkdown
+    //    rapidement que de faire attendre l'utilisateur jusqu'à 8s en silence.
     try {
       final response = await http
           .post(
@@ -83,7 +98,7 @@ class OralizeService {
               ],
             }),
           )
-          .timeout(const Duration(seconds: 8));
+          .timeout(const Duration(seconds: 4));
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body) as Map<String, dynamic>;

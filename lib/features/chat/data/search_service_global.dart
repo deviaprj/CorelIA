@@ -104,6 +104,11 @@ class SearchServiceGlobal {
   SearchServiceGlobal() : _dio = Dio(BaseOptions(
     connectTimeout: const Duration(seconds: 10),
     receiveTimeout: const Duration(seconds: 15),
+    // Soft API key gates the APK-facing backend routes (require_client_api_key).
+    // Empty in dev/transition → header omitted; backend stays transition-open.
+    headers: AppConstants.backendApiKey.isNotEmpty
+        ? <String, dynamic>{'X-API-Key': AppConstants.backendApiKey}
+        : <String, dynamic>{},
   ));
 
   String get _backendUrl => AppConstants.backendBaseUrl;
