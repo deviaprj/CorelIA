@@ -1,6 +1,52 @@
 # TASKS.md — Suivi Corely
 
-Dernière mise à jour : 2026-06-13 — Session : Infra Hetzner + Cleanup + Corrections sécurité
+Dernière mise à jour : 2026-06-27 — Session : OmniVoice TTS + Nettoyage HTML + Déploiement VPS
+
+---
+
+## Terminé — Session 2026-06-27 — OmniVoice TTS + Nettoyage HTML ✅
+
+### Problèmes résolus
+
+1. **TTS lisait du HTML** → `cleanMarkdown()` : strip HTML en étape 0 (avant : étape 11), + `decodeHtmlEntities()`
+2. **Qualité voix FR médiocre** → Intégration OmniVoice (k2-fsa) : 646 langues, 23 675h FR, Auto Voice mode
+3. **Pas de streaming TTS** → Backend `/voice/omnivoice/stream` (SSE chunks audio)
+4. **Pas de Voice Design/Cloning** → 5 endpoints REST (`/voice/status`, `/omnivoice`, `/omnivoice/stream`, `/design`, `/clone`)
+
+### Fichiers créés
+- `backend/voice/__init__.py`, `omnivoice_tts.py`, `voice_router.py`
+- `lib/features/chat/data/omnivoice_tts_service.dart`
+
+### Fichiers modifiés
+- `backend/main.py` : +voice router (graceful si package absent)
+- `backend/requirements.txt` : +omnivoice, torch, soundfile
+- `lib/features/chat/presentation/tts_natural_service.dart` : +TtsEngine.omnivoice, fallback chain, cleanMarkdown étape0
+
+### Déploiement VPS
+- OmniVoice 0.1.5 + torch 2.12.1 installés sur Hetzner (CPU, 12 cores AMD EPYC)
+- Nginx reverse proxy port 80 → 8000, UFW port 8000 ouvert
+- HF_TOKEN configuré dans .env
+
+---
+
+## RESTE À FAIRE — Session suivante
+
+### Critique
+- [ ] **Accélérer OmniVoice** — CPU trop lent (RTF 1.8x). Options : GPU Hetzner (ex: CX22 avec GPU), ou fallback flutter_tts prioritaire quand OmniVoice > 5s
+- [ ] **Mode vocal offline** — L'app dit "hors connexion" si Cloudflare Worker non configuré → fallback direct backend
+- [ ] **Smoke-test Xiaomi 12** — Test complet mode vocal V16 (5 tours + barge-in)
+- [ ] **Reverse proxy HTTPS** — Caddy/Traefik au lieu de nginx (HTTP only actuellement)
+- [ ] **Build APK release** — Signé, optimisé, sans debug
+
+### Voice Design
+- [ ] Fine-tuner OmniVoice sur voix FR (ref_audio de bonne qualité)
+- [ ] Voice cloning UI (upload ref_audio)
+- [ ] Voice Design UI pour Pro (paramètres instruct exposés)
+
+### Autres
+- [ ] Extension Chrome unpacked-load + UI Flutter render
+- [ ] Parsing vols round-trip lowercase
+- [ ] Audit Phase 2
 
 ---
 

@@ -5,6 +5,7 @@ import 'package:flutter_tts/flutter_tts.dart';
 
 import '../../../core/platform/platform_service.dart';
 import '../data/openrouter_tts_service.dart';
+import '../data/omnivoice_tts_service.dart';
 import '../data/oralize_service.dart';
 import '../data/tts_cache_service.dart';
 import 'audio_player_factory.dart';
@@ -16,6 +17,7 @@ import 'vocal_hesitation_injector.dart';
 
 /// Moteur TTS selectionne.
 enum TtsEngine {
+  omnivoice,   // OmniVoice — SOTA multilingual (via backend)
   openRouter,
   edgeTts,
   flutterTts,
@@ -184,6 +186,22 @@ class TtsNaturalService {
     _isSpeaking = true;
     _currentEmotion = emotion;
 
+    // ── Chaîne de fallback TTS ──────────────────────────────────────────
+    // 1. OmniVoice (backend) — SOTA, 646 langues, voice design/cloning
+    //    Pro  → num_step=32 (quality), Gratuit → num_step=16 (fast)
+    // 2. OpenRouter TTS (Pro + mobile + clé API) → payant
+    // 3. flutter_tts natif (universel, gratuit)
+    try {
+      final omniAvailable = await OmniVoiceTtsService.isAvailable();
+      if (omniAvailable) {
+        _activeEngine = TtsEngine.omnivoice;
+        await _speakWithOmniVoice(cleanText, emotion, isPro: isPro);
+        return;
+      }
+    } catch (e) {
+      debugPrint('[TtsNaturalService] OmniVoice check failed: $e');
+    }
+
     // OpenRouter TTS (mobile, si clé API disponible — Pro uniquement)
     // Les utilisateurs gratuits utilisent flutter_tts natif (gratuit).
     if (isPro && PlatformService.isMobile && OpenRouterTtsService.isAvailable) {
@@ -199,6 +217,59 @@ class TtsNaturalService {
     // flutter_tts (fallback universel)
     _activeEngine = TtsEngine.flutterTts;
     await _speakWithFlutterTts(cleanText);
+  }
+
+  /// Synthesize speech via OmniVoice backend (k2-fsa/OmniVoice).
+  ///
+  /// OmniVoice provides state-of-the-art TTS quality for 646 languages.
+  /// The backend handles GPU inference (CUDA/MPS/XPU/CPU).
+  ///
+  /// Non-verbal tags ([laughter], [sigh], ...) are passed through to OmniVoice
+  /// which renders them as actual sounds.
+  Future<void> _speakWithOmniVoice(
+    String text,
+    TtsEmotion emotion, {
+    required bool isPro,
+  }) async {
+    if (_audioPlayer == null) {
+      _audioPlayer = AudioPlayerFactory.create();
+    }
+
+    // NOTE: Voice Design (instruct) is trained on EN+ZH only.
+    // For French, Auto Voice is the most reliable mode.
+    // We pass emotion as metadata for logging but use auto mode.
+    try {
+      final bytes = await OmniVoiceTtsService.synthesize(
+        text,
+        mode: 'auto',  // Auto Voice — most reliable for French
+        emotion: emotion.name,
+        isPro: isPro,
+      );
+
+      if (bytes == null) {
+        throw StateError('OmniVoice returned no audio');
+      }
+
+      // Cache audio bytes and get file path for playback
+      final cachePath = await _cache.putBytes(
+        text,
+        bytes.toList(),
+        voice: 'omnivoice',
+        rate: 1.0,
+        pitch: 1.0,
+        format: 'omnivoice',
+      );
+      if (cachePath == null) {
+        throw StateError('OmniVoice: failed to cache audio');
+      }
+
+      await AudioPlayerFactory.setFilePath(_audioPlayer!, cachePath);
+      await AudioPlayerFactory.play(_audioPlayer!);
+      await AudioPlayerFactory.waitForCompletion(_audioPlayer!);
+    } catch (e) {
+      debugPrint('[TtsNaturalService] OmniVoice failed: $e');
+      rethrow;
+    }
   }
 
   Future<void> _speakWithOpenRouterTts(String text, TtsEmotion emotion,
@@ -370,8 +441,33 @@ class TtsNaturalService {
     return text.replaceAll(_citationPattern, '');
   }
 
+  /// Décode les entités HTML courantes en leurs caractères réels.
+  /// Ex: &amp; → &, &lt; → <, &gt; → >, &quot; → ", &#39; → ', &nbsp; → espace.
+  static String decodeHtmlEntities(String text) {
+    return text
+        .replaceAll('&amp;', '&')
+        .replaceAll('&lt;', '<')
+        .replaceAll('&gt;', '>')
+        .replaceAll('&quot;', '"')
+        .replaceAll('&#39;', "'")
+        .replaceAll('&apos;', "'")
+        .replaceAll('&nbsp;', ' ');
+  }
+
   static String cleanMarkdown(String text) {
     var working = _stripSourcesSection(text);
+
+    // ── ÉTAPE 0 : Stripping HTML en PREMIER ──────────────────────────────
+    // Avant toute autre transformation, on vire TOUT le HTML pour éviter que
+    // le TTS ne lise du code HTML à voix haute. Le décodage d'entités est
+    // fait d'abord pour ne pas transformer < en &lt; etc. (impossible si
+    // l'entité est déjà encodée, mais ne coûte rien).
+    working = decodeHtmlEntities(working);
+    // Balises HTML (y compris multi-lignes, <script>, <style>, commentaires)
+    working = working.replaceAll(RegExp(r'<[^>]*>', dotAll: true), '');
+    // Rattrapage : commentaires HTML malformés, entités résiduelles
+    working = working.replaceAll(RegExp(r'<!--[\s\S]*?-->'), '');
+    working = working.replaceAll(RegExp(r'&[a-zA-Z]{2,10};'), '');
 
     // 1. Strip reasoning / thinking blocks (DeepSeek R1, etc.)
     working = working.replaceAllMapped(
@@ -448,10 +544,7 @@ class TtsNaturalService {
     // 10. Blockquotes
     working = working.replaceAll(RegExp(r'^>\s+', multiLine: true), '');
 
-    // 11. HTML tags
-    working = working.replaceAll(RegExp(r'<[^>]+>'), '');
-
-    // 12. Punctuation normalization for speech
+    // 11. Punctuation normalization for speech
     working = working.replaceAll(RegExp(r'(?<=\w);(?=\s|$)'), '. ');
     working = working.replaceAll(RegExp(r'(?<=\w):(?=\s|$)'), '. ');
     working = working.replaceAll(RegExp(r'\s+#\s+'), ' ');
@@ -459,7 +552,7 @@ class TtsNaturalService {
     working = working.replaceAll(RegExp(r'(?<=\w)\/(?=\w)'), ' ');
     working = working.replaceAll(RegExp(r'(?<=\w)\\(?=\w)'), ' ');
 
-    // 14. Final aggressive pass — remove stray markdown artifacts
+    // 12. Final aggressive pass — remove stray markdown artifacts
     // Any remaining *, -, _, |, #, >, ~, ` at line start that are NOT part of words
     working = working.replaceAllMapped(
       RegExp(r'^\s*[-*_#>|~`]+\s*', multiLine: true),
@@ -483,7 +576,7 @@ class TtsNaturalService {
     // Remove any remaining single backticks
     working = working.replaceAll('`', ' ');
 
-    // 15. Collapse whitespace BUT preserve paragraph breaks (\n\n) for natural pauses
+    // 13. Collapse whitespace BUT preserve paragraph breaks (\n\n) for natural pauses
     working = working.replaceAll(RegExp(r'[ \t]+'), ' ');
     working = working.replaceAll(RegExp(r'\n{3,}'), '\n\n');
     // Keep \n\n as paragraph markers; replace single \n with space

@@ -2009,3 +2009,38 @@ DOM exec, speech_bridge STT/TTS.
 ---
 
 *Dernière mise à jour : 2026-06-17*
+
+---
+
+## ADR-033 : OmniVoice TTS — Backend Python avec fallback multi-moteur (2026-06-27)
+
+**Date** : 2026-06-27
+**Statut** : Accepté
+
+### Contexte
+Le TTS existant (flutter_tts natif, OpenRouter TTS payant Pro) produit une voix robotique en français.
+
+### Décision
+Intégration d'**OmniVoice** (k2-fsa/OmniVoice) comme moteur TTS prioritaire, exécuté côté backend Python.
+
+### Chaîne de fallback
+```
+OmniVoice (backend, SOTA 646 langues, Auto Voice)
+  → OpenRouter TTS (Pro uniquement, payant)
+  → flutter_tts (universel, gratuit)
+```
+
+### Mode choisi
+**Auto Voice** — Voice Design (`instruct`) entraîné sur EN+ZH uniquement, pas fiable pour FR.
+
+### Conséquences
+- ✅ Qualité TTS FR state-of-the-art
+- ⚠️ CPU VPS = RTF ~1.8x → besoin GPU pour perf optimales
+- ⚠️ Dépendance réseau (backend obligatoire pour OmniVoice)
+
+### Prochaine étape
+GPU Hetzner (ex: CX22 GPU) pour RTF < 0.1x, ou timeout → fallback flutter_tts.
+
+---
+
+*Dernière mise à jour : 2026-06-27*

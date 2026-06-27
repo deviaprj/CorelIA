@@ -289,3 +289,11 @@ app.include_router(agent_router)
 app.include_router(config_router)
 app.include_router(chat_router)
 app.include_router(insights_router)
+
+# Voice (OmniVoice TTS) — optional, fails gracefully if package not installed
+try:
+    from backend.voice.voice_router import router as voice_router
+    app.include_router(voice_router)
+    logger.info("Voice router loaded (OmniVoice TTS)")
+except ImportError:
+    logger.info("Voice router skipped (omnivoice package not installed)")

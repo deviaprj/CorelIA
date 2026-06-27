@@ -136,12 +136,34 @@ firebase functions:secrets:set STRIPE_WEBHOOK_SECRET
 
 ## Sessions Récentes
 
-### Session 2026-05-28 — Thème Cofely Unifié + Icônes V20
+### Session 2026-06-27 — Intégration OmniVoice TTS + Nettoyage HTML TTS
+
+#### OmniVoice TTS (k2-fsa/OmniVoice 0.1.5)
+- **Modèle** : State-of-the-art TTS 646 langues (FR : 23 675h)
+- **Backend** : `backend/voice/omnivoice_tts.py` — service Python avec GPU auto-detect (CUDA/MPS/XPU/CPU)
+- **Endpoints** : `POST /voice/omnivoice`, `/voice/omnivoice/stream`, `/voice/design`, `/voice/clone`, `GET /voice/status`
+- **Mode** : Auto Voice (le plus fiable pour FR). Voice Design uniquement EN+ZH.
+- **CPU** : `num_step=8` (rapide), RTF ~1.8x sur AMD EPYC 12 cœurs
+- **Fallback** : OmniVoice → OpenRouter (Pro) → flutter_tts (gratuit universel)
+- **Client Flutter** : `lib/features/chat/data/omnivoice_tts_service.dart` — HTTP vers backend
+
+#### Nettoyage HTML TTS
+- HTML tags strip déplacé en **étape 0** de `cleanMarkdown()` (avant : étape 11/15)
+- Ajout `decodeHtmlEntities()` : `&amp;` → `&`, `&lt;` → `<`, etc.
+- Regex `<[^>]*>` avec `dotAll: true` pour balises multi-lignes
+
+#### Déploiement VPS (Hetzner 167.233.100.132)
+- OmniVoice 0.1.5 installé dans `.venv`
+- Nginx reverse proxy port 80 → 8000
+- Port 8000 ouvert dans UFW
+- Backend lancé via `nohup uvicorn`
+
+### Session 2026-05-28 — Thème Corely Unifié + Icônes V20
 
 #### Refonte thème : login_screen + onboarding
-**Problème** : Login screen et onboarding screen utilisaient encore `#6C63FF` (violet CorelIA), pas le thème Cofely.
-**Fix login** : `build()` entièrement réécrit — en-tête dégradé `#001218→#003F5C`, logo "C" cercle gradient 72px, carte blanche arrondie, `FilledButton` en `CofelyTokens.primary`.
-**Fix onboarding** : `_pages` avec nouveaux gradients bleus Cofely, `_PageContent` : logo "C" pour page 1, icônes dans cercles semi-transparents pour pages 2-3.
+**Problème** : Login screen et onboarding screen utilisaient encore `#6C63FF` (violet CorelIA), pas le thème Corely.
+**Fix login** : `build()` entièrement réécrit — en-tête dégradé `#001218→#003F5C`, logo "C" cercle gradient 72px, carte blanche arrondie, `FilledButton` en `CorelyTokens.primary`.
+**Fix onboarding** : `_pages` avec nouveaux gradients bleus Corely, `_PageContent` : logo "C" pour page 1, icônes dans cercles semi-transparents pour pages 2-3.
 
 #### Génération icônes Python PIL
 **Design** : fond dégradé diagonal `#00121E → #003F5C`, arc "C" blanc épais centré, halo accent `#58B4D1`.
@@ -149,9 +171,9 @@ firebase functions:secrets:set STRIPE_WEBHOOK_SECRET
 **Produit** : 10 fichiers Android (mipmap-*) + 9 icônes web PWA + 5 extension Chrome.
 **Règle** : toujours vérifier `img.getpixel()` centre + zone "C" après génération pour s'assurer que le design est correct.
 
-#### CofelyTokens — design system source de vérité
+#### CorelyTokens — design system source de vérité
 - `primary = #003F5C`, `accent = #58B4D1`, `avatarGradient` LinearGradient const
-- Toujours importer `'../../../app/cofely_theme.dart'` (chemin relatif selon profondeur)
+- Toujours importer `'../../../app/corely_theme.dart'` (chemin relatif selon profondeur)
 - `DialogTheme` (PAS `DialogThemeData`), `Chip` sans `tooltip`
 
 ### Session 2026-05-27 — TTS Anti-Saccade + DocGen PNG
@@ -603,11 +625,11 @@ Session de reprise autonome. Audit critique de l'existant, correction de la dér
 - `backend/main.py` : déjà configuré avec agent_router + config_agent
 
 #### Action 4 : Corrections tests
-- `lib/app/cofely_theme.dart` : `DialogThemeData` → `DialogTheme` (API Flutter 3.41)
+- `lib/app/corely_theme.dart` : `DialogThemeData` → `DialogTheme` (API Flutter 3.41)
 - `test/core/constants_test.dart` : `Genere` → `Généré` (accent)
 
 #### État tests
-- 632 passés, 9 échecs pré-existants (login_screen refonte Cofely, chat_bubble alignment, http_client singleton)
+- 632 passés, 9 échecs pré-existants (login_screen refonte Corely, chat_bubble alignment, http_client singleton)
 - `flutter analyze` : 4695 infos (0 erreurs, 0 warnings — uniquement des lints stylistiques)
 
 #### Fichiers modifiés
@@ -619,7 +641,7 @@ Session de reprise autonome. Audit critique de l'existant, correction de la dér
 - `cloudflare-worker/wrangler.jsonc` — vars simplifiées
 - `scripts/deploy_backend.sh` — ajout secrets .env
 - `docker-compose.yml` — fix commentaire, section codewhale-agent
-- `lib/app/cofely_theme.dart` — DialogThemeData → DialogTheme
+- `lib/app/corely_theme.dart` — DialogThemeData → DialogTheme
 - `test/core/constants_test.dart` — fix accent share tagline
 
 #### Fichiers créés
@@ -663,7 +685,7 @@ Session de reprise autonome. Audit critique de l'existant, correction de la dér
 - Git config : user.name + user.email
 
 **Phase 5 — Synchronisation**
-- docker-compose.yml, Caddyfile, settings.local.json, cofely_theme.dart, scripts/ → synced vers VPS
+- docker-compose.yml, Caddyfile, settings.local.json, corely_theme.dart, scripts/ → synced vers VPS
 - Fichiers Cloudflare Worker morts supprimés
 
 #### Fichiers modifiés
@@ -1161,7 +1183,7 @@ session runtime, pas à risque de toucher l'extraction de villes).
    (scrape-script/exec/api-fetch/crawl = backend/universel, pas des
    actions navigateur). 25 tests.
 4. **`chat_bubble_test`** — test stale `find.byType(CircleAvatar)` →
-   l'avatar assistant est un `Container` circulaire brandé (dégradé Cofely
+   l'avatar assistant est un `Container` circulaire brandé (dégradé Corely
    + lettre « C », `chat_bubble.dart:41-63`), pas un `CircleAvatar`
    Material. Fix : `find.text('C')`. 11 tests.
 5. **`phonetic_liaison_service_test` + service** — **VRAI BUG** (pas test
