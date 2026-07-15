@@ -2,15 +2,15 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../app/cofely_theme.dart';
+import '../../../app/corely_theme.dart';
 import 'voice_conversation_service.dart';
 import 'voice_service.dart';
 
-/// Splash vocal repensé — thème Cofely avec visualisation sonore.
+/// Splash vocal repensé — thème Corely avec visualisation sonore.
 ///
 /// États :
 /// - listening : orbe pulsant + anneaux + icône micro verte
-/// - thinking  : points orbitaux rotatifs (bleu Cofely)
+/// - thinking  : points orbitaux rotatifs (bleu Corely)
 /// - speaking  : barres d'égaliseur animées réactives à l'amplitude simulée
 class AuroraSplash extends ConsumerStatefulWidget {
   const AuroraSplash({super.key, required this.conversationId});
@@ -69,9 +69,9 @@ class _AuroraSplashState extends ConsumerState<AuroraSplash>
       case VoiceConversationState.listening:
         return const Color(0xFF22C55E);
       case VoiceConversationState.thinking:
-        return CofelyTokens.accent;
+        return CorelyTokens.accent;
       case VoiceConversationState.speaking:
-        return CofelyTokens.accent;
+        return CorelyTokens.accent;
       case VoiceConversationState.error:
         return const Color(0xFFEF4444);
       case VoiceConversationState.idle:
@@ -190,7 +190,7 @@ class _AuroraSplashState extends ConsumerState<AuroraSplash>
                             colors: [
                               Colors.white.withOpacity(0.18),
                               accent.withOpacity(0.80),
-                              CofelyTokens.primary.withOpacity(0.95),
+                              CorelyTokens.primary.withOpacity(0.95),
                             ],
                             stops: const [0.0, 0.45, 1.0],
                           ),
@@ -203,7 +203,7 @@ class _AuroraSplashState extends ConsumerState<AuroraSplash>
                               spreadRadius: 8,
                             ),
                             BoxShadow(
-                              color: CofelyTokens.primary.withOpacity(0.4),
+                              color: CorelyTokens.primary.withOpacity(0.4),
                               blurRadius: 20,
                               spreadRadius: -6,
                             ),
@@ -299,7 +299,7 @@ class _AuroraSplashState extends ConsumerState<AuroraSplash>
             ),
           ),
 
-          // Logo Cofely en haut
+          // Logo Corely en haut
           Positioned(
             top: 64,
             left: 0,
@@ -313,7 +313,7 @@ class _AuroraSplashState extends ConsumerState<AuroraSplash>
                     height: 30,
                     decoration: const BoxDecoration(
                       shape: BoxShape.circle,
-                      gradient: CofelyTokens.avatarGradient,
+                      gradient: CorelyTokens.avatarGradient,
                     ),
                     alignment: Alignment.center,
                     child: const Text(

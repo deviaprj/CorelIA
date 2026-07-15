@@ -1,0 +1,10 @@
+flutter/ephemeral/
+flutter/ephemeral/
+**/Debug/
+**/Release/
+**/Profile/
+**/x64/
+**/x86/
+*.vcxproj*
+*.sln
+.vs/

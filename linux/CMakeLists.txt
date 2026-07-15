@@ -4,10 +4,11 @@ project(runner LANGUAGES CXX)
 
 # The name of the executable created for the application. Change this to change
 # the on-disk name of your application.
-set(BINARY_NAME "corel_ia")
+set(BINARY_NAME "corely")
 # The unique GTK application identifier for this application. See:
 # https://wiki.gnome.org/HowDoI/ChooseApplicationID
-set(APPLICATION_ID "com.corel_ia")
+set(APPLICATION_ID "com.corelia.app")
+set(APP_VERSION "1.0.0")
 
 # Explicitly opt in to modern CMake behaviors to avoid warnings with recent
 # versions of CMake.
@@ -143,3 +144,21 @@ if(NOT CMAKE_BUILD_TYPE MATCHES "Debug")
   install(FILES "${AOT_LIBRARY}" DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
     COMPONENT Runtime)
 endif()
+
+# === Packaging CPack (.deb) ===
+set(CPACK_GENERATOR "DEB;TGZ")
+set(CPACK_PACKAGE_NAME "corely")
+set(CPACK_PACKAGE_VERSION "${APP_VERSION}")
+set(CPACK_PACKAGE_VENDOR "CorelIA")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Corely — AI Desktop Assistant")
+set(CPACK_PACKAGE_CONTACT "support@corelia.app")
+set(CPACK_PACKAGE_HOMEPAGE_URL "https://corelia.app")
+set(CPACK_DEBIAN_PACKAGE_MAINTAINER "CorelIA Team <support@corelia.app>")
+set(CPACK_DEBIAN_PACKAGE_SECTION "utils")
+set(CPACK_DEBIAN_PACKAGE_PRIORITY "optional")
+set(CPACK_DEBIAN_PACKAGE_DEPENDS "libgtk-3-0, libsecret-1-0, libjsoncpp25")
+set(CPACK_DEBIAN_PACKAGE_HOMEPAGE "https://corelia.app")
+set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
+set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_SOURCE_DIR}/../LICENSE")
+set(CPACK_RESOURCE_FILE_README "${CMAKE_SOURCE_DIR}/../README.md")
+include(CPack)

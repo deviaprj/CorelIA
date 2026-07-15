@@ -3,7 +3,10 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import '../../../app/cofely_theme.dart';
+import '../../../app/corely_theme.dart';
+import '../../../shared/responsive/responsive_layout.dart' show ResponsiveLayout;
+import '../../../shared/widgets/desktop_nav_rail.dart' show DesktopNavRail;
+import '../../../shared/widgets/desktop_info_panel.dart' show DesktopInfoPanel;
 import 'chat_notifier.dart';
 import 'chat_bubble.dart';
 import 'input_bar.dart';
@@ -310,24 +313,24 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         ],
       );
 
-    // Responsive desktop/web : centrer + limiter à 400 px
-    if (kIsWeb) {
+    // Responsive : desktop → layout 3 panneaux, web/mobile → centre max 400px
+    if (kIsWeb && !PlatformService.isDesktop) {
       chatBody = Center(
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: CofelyTokens.maxChatWidth),
+          constraints: const BoxConstraints(maxWidth: CorelyTokens.maxChatWidth),
           child: chatBody,
         ),
       );
     }
 
-    return Scaffold(
-      // Header Cofely : barre fixe, logo "C" dégradé, titre + point "En ligne"
+    final scaffold = Scaffold(
+      // Header Corely : barre fixe, logo "C" dégradé, titre + point "En ligne"
       appBar: PreferredSize(
         preferredSize: const Size.fromHeight(kToolbarHeight),
         child: Container(
           decoration: const BoxDecoration(
-            color: CofelyTokens.botBubble,
-            boxShadow: CofelyTokens.headerShadow,
+            color: CorelyTokens.botBubble,
+            boxShadow: CorelyTokens.headerShadow,
           ),
           child: SafeArea(
             bottom: false,
@@ -338,26 +341,26 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                   label: 'Retour',
                   child: IconButton(
                     icon: const Icon(Icons.arrow_back_ios_new,
-                        size: 20, color: CofelyTokens.primary),
+                        size: 20, color: CorelyTokens.primary),
                     onPressed: () => context.canPop()
                         ? context.pop()
                         : context.go('/chats'),
                     tooltip: 'Retour',
                   ),
                 ),
-                // Logo "C" dégradé Cofely
+                // Logo "C" dégradé Corely
                 Container(
                   width: 28,
                   height: 28,
                   decoration: const BoxDecoration(
                     shape: BoxShape.circle,
-                    gradient: CofelyTokens.avatarGradient,
+                    gradient: CorelyTokens.avatarGradient,
                   ),
                   child: const Center(
                     child: Text(
                       'C',
                       style: TextStyle(
-                        color: CofelyTokens.onPrimary,
+                        color: CorelyTokens.onPrimary,
                         fontWeight: FontWeight.bold,
                         fontSize: 13,
                         fontFamily: 'Inter',
@@ -373,12 +376,12 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       const Text(
-                        'Assistant Cofely',
+                        'Assistant Corely',
                         style: TextStyle(
                           fontFamily: 'Inter',
                           fontSize: 15,
                           fontWeight: FontWeight.w600,
-                          color: CofelyTokens.primary,
+                          color: CorelyTokens.primary,
                         ),
                       ),
                       Row(
@@ -388,7 +391,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                             height: 7,
                             margin: const EdgeInsets.only(right: 5),
                             decoration: const BoxDecoration(
-                              color: CofelyTokens.onlineGreen,
+                              color: CorelyTokens.onlineGreen,
                               shape: BoxShape.circle,
                             ),
                           ),
@@ -397,7 +400,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                             style: TextStyle(
                               fontFamily: 'Inter',
                               fontSize: 11,
-                              color: CofelyTokens.onlineGreen,
+                              color: CorelyTokens.onlineGreen,
                               fontWeight: FontWeight.w500,
                             ),
                           ),
@@ -415,12 +418,12 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                         '${state.remainingRequests}',
                         style: const TextStyle(
                           fontSize: 11,
-                          color: CofelyTokens.primary,
+                          color: CorelyTokens.primary,
                           fontWeight: FontWeight.w600,
                         ),
                       ),
                       backgroundColor: const Color(0xFFCCE8F4),
-                      side: const BorderSide(color: CofelyTokens.accent),
+                      side: const BorderSide(color: CorelyTokens.accent),
                       visualDensity: VisualDensity.compact,
                       padding: EdgeInsets.zero,
                     ),
@@ -430,7 +433,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                   label: 'Paramètres',
                   child: IconButton(
                     icon: const Icon(Icons.tune_rounded,
-                        size: 22, color: CofelyTokens.primary),
+                        size: 22, color: CorelyTokens.primary),
                     onPressed: () => context.push('/settings'),
                     tooltip: 'Paramètres',
                   ),
@@ -442,6 +445,19 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       ),
       body: chatBody,
     );
+
+    // Desktop : wrapper avec sidebar + info panel
+    if (PlatformService.isDesktop) {
+      return ResponsiveLayout(
+        sidebar: DesktopNavRail(
+          currentRoute: '/chat/${widget.conversationId}',
+        ),
+        infoPanel: const DesktopInfoPanel(title: 'Sources'),
+        body: scaffold,
+      );
+    }
+
+    return scaffold;
   }
 
   Future<void> _handleImagePick(ChatNotifier notifier, {required bool fromCamera}) async {
@@ -633,7 +649,7 @@ class _ChatToolbar extends StatelessWidget {
           ),
           const SizedBox(width: 8),
           // Chip conversation vocale
-          // Actif  : fond #CCE8F4, bord #003F5C, icone bleu Cofely
+          // Actif  : fond #CCE8F4, bord #003F5C, icone bleu Corely
           // Inactif : fond #E8EEF4, bord #CDD8E0, icone gris
           Semantics(
             label: isVoiceActive ? 'Désactiver le mode vocal' : 'Activer le mode vocal',
@@ -642,7 +658,7 @@ class _ChatToolbar extends StatelessWidget {
                 isVoiceActive ? Icons.mic : Icons.mic_none_outlined,
                 size: 18,
                 color: isVoiceActive
-                    ? CofelyTokens.primary
+                    ? CorelyTokens.primary
                     : const Color(0xFF4A6375),
               ),
               label: Text(
@@ -650,7 +666,7 @@ class _ChatToolbar extends StatelessWidget {
                 style: TextStyle(
                   fontSize: 12,
                   color: isVoiceActive
-                      ? CofelyTokens.primary
+                      ? CorelyTokens.primary
                       : const Color(0xFF4A6375),
                   fontWeight: isVoiceActive ? FontWeight.w600 : FontWeight.normal,
                 ),
@@ -660,7 +676,7 @@ class _ChatToolbar extends StatelessWidget {
                   : const Color(0xFFE8EEF4),
               side: BorderSide(
                 color: isVoiceActive
-                    ? CofelyTokens.primary
+                    ? CorelyTokens.primary
                     : const Color(0xFFCDD8E0),
               ),
               visualDensity: VisualDensity.compact,
@@ -823,20 +839,20 @@ class _WelcomeHint extends StatelessWidget {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            // Avatar "C" dégradé Cofely (56 px)
+            // Avatar "C" dégradé Corely (56 px)
             Container(
               width: 56,
               height: 56,
               decoration: const BoxDecoration(
                 shape: BoxShape.circle,
-                gradient: CofelyTokens.avatarGradient,
-                boxShadow: CofelyTokens.bubbleShadow,
+                gradient: CorelyTokens.avatarGradient,
+                boxShadow: CorelyTokens.bubbleShadow,
               ),
               child: const Center(
                 child: Text(
                   'C',
                   style: TextStyle(
-                    color: CofelyTokens.onPrimary,
+                    color: CorelyTokens.onPrimary,
                     fontWeight: FontWeight.bold,
                     fontSize: 24,
                     fontFamily: 'Inter',
@@ -846,12 +862,12 @@ class _WelcomeHint extends StatelessWidget {
             ),
             const SizedBox(height: 20),
             const Text(
-              'Assistant Cofely',
+              'Assistant Corely',
               style: TextStyle(
                 fontFamily: 'Inter',
                 fontSize: 18,
                 fontWeight: FontWeight.w700,
-                color: CofelyTokens.primary,
+                color: CorelyTokens.primary,
               ),
             ),
             const SizedBox(height: 8),
@@ -860,7 +876,7 @@ class _WelcomeHint extends StatelessWidget {
               style: TextStyle(
                 fontFamily: 'Inter',
                 fontSize: 14,
-                color: CofelyTokens.primary.withAlpha(160),
+                color: CorelyTokens.primary.withAlpha(160),
               ),
               textAlign: TextAlign.center,
             ),

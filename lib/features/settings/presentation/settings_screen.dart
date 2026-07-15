@@ -5,7 +5,7 @@ import 'package:go_router/go_router.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import '../../../app/cofely_theme.dart';
+import '../../../app/corely_theme.dart';
 import '../../../core/language/language_service.dart';
 import '../../../core/providers/app_providers.dart';
 import '../../../core/providers/firebase_providers.dart';
@@ -86,7 +86,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final isPro = ref.watch(isProProvider).valueOrNull ?? false;
 
     return Scaffold(
-      // AppBar Cofely : logo « C » dégradé en leading, couleurs du thème
+      // AppBar Corely : logo « C » dégradé en leading, couleurs du thème
       appBar: AppBar(
         title: const Text('Paramètres'),
         leading: IconButton(
@@ -101,13 +101,13 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               height: 32,
               decoration: const BoxDecoration(
                 shape: BoxShape.circle,
-                gradient: CofelyTokens.avatarGradient,
+                gradient: CorelyTokens.avatarGradient,
               ),
               child: const Center(
                 child: Text(
                   'C',
                   style: TextStyle(
-                    color: CofelyTokens.onPrimary,
+                    color: CorelyTokens.onPrimary,
                     fontWeight: FontWeight.bold,
                     fontSize: 13,
                     fontFamily: 'Inter',

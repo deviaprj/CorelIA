@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'auth_notifier.dart';
 import '../data/mock_auth_repository.dart';
-import '../../../app/cofely_theme.dart';
+import '../../../app/corely_theme.dart';
 import '../../../core/providers/firebase_providers.dart';
 import '../../../main.dart' show isDemoMode;
 import '../../../shared/extensions/string_extensions.dart';
@@ -84,7 +84,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       body: Container(
         decoration: const BoxDecoration(
           gradient: LinearGradient(
-            colors: [Color(0xFF001218), CofelyTokens.primary],
+            colors: [Color(0xFF001218), CorelyTokens.primary],
             begin: Alignment.topCenter,
             end: Alignment.center,
           ),
@@ -92,7 +92,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         child: SafeArea(
           child: Column(
             children: [
-              // ── En-tête Cofely ─────────────────────────────────────────
+              // ── En-tête Corely ─────────────────────────────────────────
               Padding(
                 padding: const EdgeInsets.fromLTRB(24, 48, 24, 32),
                 child: Column(
@@ -103,7 +103,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                       height: 72,
                       decoration: const BoxDecoration(
                         shape: BoxShape.circle,
-                        gradient: CofelyTokens.avatarGradient,
+                        gradient: CorelyTokens.avatarGradient,
                       ),
                       alignment: Alignment.center,
                       child: const Text(
@@ -170,7 +170,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                               ?.copyWith(
                                 fontFamily: 'Inter',
                                 fontWeight: FontWeight.bold,
-                                color: CofelyTokens.primary,
+                                color: CorelyTokens.primary,
                               ),
                           textAlign: TextAlign.center,
                         ),
@@ -181,16 +181,16 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                           padding: const EdgeInsets.symmetric(
                               horizontal: 12, vertical: 8),
                           decoration: BoxDecoration(
-                            color: CofelyTokens.accent.withOpacity(0.08),
+                            color: CorelyTokens.accent.withOpacity(0.08),
                             borderRadius: BorderRadius.circular(10),
                             border: Border.all(
-                              color: CofelyTokens.accent.withOpacity(0.25),
+                              color: CorelyTokens.accent.withOpacity(0.25),
                             ),
                           ),
                           child: Row(
                             children: [
                               Icon(Icons.info_outline,
-                                  size: 15, color: CofelyTokens.accent),
+                                  size: 15, color: CorelyTokens.accent),
                               const SizedBox(width: 8),
                               Flexible(
                                 child: Text(
@@ -198,7 +198,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                   style: TextStyle(
                                     fontFamily: 'Inter',
                                     fontSize: 11.5,
-                                    color: CofelyTokens.accent,
+                                    color: CorelyTokens.accent,
                                   ),
                                 ),
                               ),
@@ -242,7 +242,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                         FilledButton(
                           onPressed: isLoading ? null : _submit,
                           style: FilledButton.styleFrom(
-                            backgroundColor: CofelyTokens.primary,
+                            backgroundColor: CorelyTokens.primary,
                             foregroundColor: Colors.white,
                             padding: const EdgeInsets.symmetric(vertical: 15),
                             shape: RoundedRectangleBorder(
@@ -279,7 +279,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                           style: OutlinedButton.styleFrom(
                             padding: const EdgeInsets.symmetric(vertical: 13),
                             side: BorderSide(
-                                color: CofelyTokens.primary.withOpacity(0.4)),
+                                color: CorelyTokens.primary.withOpacity(0.4)),
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(12),
                             ),
@@ -298,7 +298,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                   .signInAnonymously(),
                           child: Text(
                             'Continuer sans compte',
-                            style: TextStyle(color: CofelyTokens.accent),
+                            style: TextStyle(color: CorelyTokens.accent),
                           ),
                         ),
                         const SizedBox(height: 4),
@@ -343,7 +343,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                 _isRegister ? 'Se connecter' : "S'inscrire",
                                 style: const TextStyle(
                                   fontFamily: 'Inter',
-                                  color: CofelyTokens.primary,
+                                  color: CorelyTokens.primary,
                                   fontWeight: FontWeight.w600,
                                   fontSize: 13,
                                 ),

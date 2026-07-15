@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import '../../../app/cofely_theme.dart';
+import '../../../app/corely_theme.dart';
 import '../../../core/providers/app_providers.dart';
 import '../../../core/providers/firebase_providers.dart';
 
@@ -25,7 +25,7 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
       description:
           'Votre assistant personnel ultra-performant '
           '— gratuitement, sans limite de tokens.',
-      gradient: [Color(0xFF001218), CofelyTokens.primary],
+      gradient: [Color(0xFF001218), CorelyTokens.primary],
     ),
     _OnboardingPage(
       icon: Icons.sync_rounded,
@@ -33,7 +33,7 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
       description:
           'Vos conversations sont synchronisées en temps réel '
           'entre votre téléphone et votre extension Chrome.',
-      gradient: [CofelyTokens.primary, Color(0xFF0078A8)],
+      gradient: [CorelyTokens.primary, Color(0xFF0078A8)],
     ),
     _OnboardingPage(
       icon: Icons.mic_rounded,
@@ -41,7 +41,7 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
       description:
           'Dictez vos questions avec la reconnaissance vocale et '
           'laissez l\'IA vous répondre à voix haute.',
-      gradient: [Color(0xFF00263A), CofelyTokens.accent],
+      gradient: [Color(0xFF00263A), CorelyTokens.accent],
     ),
   ];
 
@@ -181,7 +181,7 @@ class _PageContent extends StatelessWidget {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            // Page 1 : logo Cofely "C", les autres : icône
+            // Page 1 : logo Corely "C", les autres : icône
             if (page.icon == Icons.chat_bubble_outline_rounded)
               Container(
                 width: 96,
