@@ -71,8 +71,11 @@ class VoiceConversationNotifier
   String? _lastProcessedTranscript;
   DateTime? _lastProcessedTime;
 
-  /// Garde contre les appels concurrents à _speakFullResponse.
-  bool _isProcessingResponse = false;
+  /// Verrou pour empecher les appels concurrents a _speakFullResponse.
+  /// Un Completer non-terminé signifie qu'un traitement est en cours.
+  /// Remplace le booleen simple qui avait une race condition entre
+  /// _handleChatState et _handleBargeInDuringSpeaking.
+  Completer<void>? _processingLock;
 
   /// Emotion du TTS en cours pour le prosody learning.
   TtsEmotion _currentSpeakingEmotion = TtsEmotion.neutral;
@@ -186,8 +189,10 @@ class VoiceConversationNotifier
   /// Appelle quand le ChatNotifier recoit des tokens du LLM.
   void _handleChatState(ChatState chatState) {
     if (state.state != VoiceConversationState.thinking) return;
-    if (_isProcessingResponse) {
-      debugPrint('[VoiceConversation] _handleChatState ignored: already processing response');
+
+    // Verrou : un traitement est deja en cours (TTS actif)
+    if (_processingLock != null && !_processingLock!.isCompleted) {
+      debugPrint('[VoiceConversation] _handleChatState ignored: lock active');
       return;
     }
 
@@ -220,17 +225,28 @@ class VoiceConversationNotifier
 
     debugPrint('[VoiceConversation] Will speak msg id=${targetMsg.id}, '
         'createdAt=${targetMsg.createdAt}, len=${targetMsg.content.length}');
-    _isProcessingResponse = true;
+
+    // Verrouiller avant de lancer le TTS (evite les appels concurrents)
+    final lock = Completer<void>();
+    _processingLock = lock;
+
+    // Lancer le TTS sans attendre — le verrou empeche les doublons.
+    // ignore: unawaited_futures
     _speakFullResponse(targetMsg.content).whenComplete(() {
-      _isProcessingResponse = false;
+      if (!lock.isCompleted) lock.complete();
+      if (_processingLock == lock) _processingLock = null;
     });
   }
 
   /// Parle la reponse complete d'un bloc (pas de streaming par phrases).
   Future<void> _speakFullResponse(String text) async {
     if (!_isActive) return;
-    if (_isProcessingResponse && state.state == VoiceConversationState.speaking) {
-      debugPrint('[VoiceConversation] _speakFullResponse skipped: already speaking');
+
+    // Verrou deja pris par un autre appel (ex: barge-in repete declenche
+    // pendant que le TTS original est encore actif).
+    if (_processingLock != null && !_processingLock!.isCompleted &&
+        state.state == VoiceConversationState.speaking) {
+      debugPrint('[VoiceConversation] _speakFullResponse skipped: lock active');
       return;
     }
 
@@ -283,6 +299,10 @@ class VoiceConversationNotifier
 
     _voice.stopSpeaking();
     ProsodyLearningService().recordBargeIn(_currentSpeakingEmotion);
+
+    // Liberer le verrou du TTS interrompu avant de relancer
+    _processingLock?.complete();
+    _processingLock = null;
 
     switch (intent) {
       case BargeInIntent.repeat:

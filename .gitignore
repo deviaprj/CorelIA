@@ -51,6 +51,7 @@ lcov.info
 *.ipa
 *.zip
 corel_ia_extension_*.zip
+*.bak
 
 # Node (functions)
 functions/node_modules/
@@ -75,8 +76,6 @@ cloudflare-worker/node_modules/
 cloudflare-worker/dist/
 cloudflare-worker/.wrangler/
 cloudflare-worker/worker-configuration.d.ts
-.env
-.env
 cloudflare-worker/.dev.vars
 android/app/google-services.json
 ios/Runner/GoogleService-Info.plist
