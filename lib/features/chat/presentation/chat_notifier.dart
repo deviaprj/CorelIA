@@ -2582,12 +2582,9 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
 
     final isPro = await ref.read(isProProvider.future).catchError((_) => false);
     if (!isPro) {
-      try {
-        final remaining =
-            await ref.read(quotaServiceProvider).checkAndDecrement();
-        state = state.copyWith(remainingRequests: remaining);
-      } on QuotaExceededException {
-        state = state.copyWith(error: 'quota_exceeded', isStreaming: false);
+      // Helper local : bloque le message avec le quota depasse.
+      // Capture les parametres de sendMessage pour eviter la duplication x6.
+      void _blockForQuota(String errorKey) {
         _pendingMessage = _PendingMessage(
           text: text,
           imageBase64: imageBase64,
@@ -2599,6 +2596,15 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
           modelOverride: modelOverride,
           bypassSlashCheck: bypassSlashCheck,
         );
+        state = state.copyWith(error: errorKey, isStreaming: false);
+      }
+
+      try {
+        final remaining =
+            await ref.read(quotaServiceProvider).checkAndDecrement();
+        state = state.copyWith(remainingRequests: remaining);
+      } on QuotaExceededException {
+        _blockForQuota('quota_exceeded');
         return;
       } on FirebaseFunctionsException catch (e) {
         debugPrint('[Quota] Cloud Function unavailable: ${e.message}');
@@ -2607,18 +2613,7 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
           final remaining = await ref.read(creditServiceProvider).decrement();
           state = state.copyWith(remainingRequests: remaining);
         } on CreditsExhaustedException {
-          state = state.copyWith(error: 'quota_exceeded', isStreaming: false);
-          _pendingMessage = _PendingMessage(
-            text: text,
-            imageBase64: imageBase64,
-            imageMimeType: imageMimeType,
-            fileName: fileName,
-            fileContent: fileContent,
-            attachments: attachments,
-            isVoiceConversation: isVoiceConversation,
-            modelOverride: modelOverride,
-            bypassSlashCheck: bypassSlashCheck,
-          );
+          _blockForQuota('quota_exceeded');
           return;
         } catch (fallbackErr) {
           debugPrint('[Credit] Fallback error: $fallbackErr');
@@ -2630,18 +2625,7 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
           final remaining = await ref.read(creditServiceProvider).decrement();
           state = state.copyWith(remainingRequests: remaining);
         } on CreditsExhaustedException {
-          state = state.copyWith(error: 'quota_exceeded', isStreaming: false);
-          _pendingMessage = _PendingMessage(
-            text: text,
-            imageBase64: imageBase64,
-            imageMimeType: imageMimeType,
-            fileName: fileName,
-            fileContent: fileContent,
-            attachments: attachments,
-            isVoiceConversation: isVoiceConversation,
-            modelOverride: modelOverride,
-            bypassSlashCheck: bypassSlashCheck,
-          );
+          _blockForQuota('quota_exceeded');
           return;
         } catch (fallbackErr) {
           debugPrint('[Credit] Fallback error: $fallbackErr');
@@ -2653,21 +2637,7 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
         try {
           await ref.read(fileQuotaServiceProvider).checkAndDecrement();
         } on FileQuotaExceededException {
-          state = state.copyWith(
-            error: 'quota_files_exceeded',
-            isStreaming: false,
-          );
-          _pendingMessage = _PendingMessage(
-            text: text,
-            imageBase64: imageBase64,
-            imageMimeType: imageMimeType,
-            fileName: fileName,
-            fileContent: fileContent,
-            attachments: attachments,
-            isVoiceConversation: isVoiceConversation,
-            modelOverride: modelOverride,
-            bypassSlashCheck: bypassSlashCheck,
-          );
+          _blockForQuota('quota_files_exceeded');
           return;
         } catch (e) {
           debugPrint('[FileQuota] Error: $e');
@@ -2679,21 +2649,7 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
         try {
           await ref.read(searchQuotaServiceProvider).checkAndDecrement();
         } on SearchQuotaExceededException {
-          state = state.copyWith(
-            error: 'quota_search_exceeded',
-            isStreaming: false,
-          );
-          _pendingMessage = _PendingMessage(
-            text: text,
-            imageBase64: imageBase64,
-            imageMimeType: imageMimeType,
-            fileName: fileName,
-            fileContent: fileContent,
-            attachments: attachments,
-            isVoiceConversation: isVoiceConversation,
-            modelOverride: modelOverride,
-            bypassSlashCheck: bypassSlashCheck,
-          );
+          _blockForQuota('quota_search_exceeded');
           return;
         } catch (e) {
           debugPrint('[SearchQuota] Error: $e');
@@ -2705,21 +2661,7 @@ class ChatNotifier extends FamilyNotifier<ChatState, String> {
         try {
           await ref.read(voiceQuotaServiceProvider).checkAndDecrement();
         } on VoiceQuotaExceededException {
-          state = state.copyWith(
-            error: 'quota_voice_exceeded',
-            isStreaming: false,
-          );
-          _pendingMessage = _PendingMessage(
-            text: text,
-            imageBase64: imageBase64,
-            imageMimeType: imageMimeType,
-            fileName: fileName,
-            fileContent: fileContent,
-            attachments: attachments,
-            isVoiceConversation: isVoiceConversation,
-            modelOverride: modelOverride,
-            bypassSlashCheck: bypassSlashCheck,
-          );
+          _blockForQuota('quota_voice_exceeded');
           return;
         } catch (e) {
           debugPrint('[VoiceQuota] Error: $e');
