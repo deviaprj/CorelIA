@@ -75,7 +75,15 @@ class Message {
       final text = att.extractedText;
       if (att.isImage || text == null || text.isEmpty) continue;
       buffer.writeln('Document : ${att.name}');
-      buffer.writeln(_truncate(text, isFull: isFull));
+      if (Attachment.isUnreadableText(text)) {
+        // Le marqueur d'échec ne doit jamais passer pour du contenu.
+        buffer.writeln(
+          'Lecture automatique impossible (PDF scanné, image ou protégé). '
+          "Préviens l'utilisateur et demande-lui de coller le texte.",
+        );
+      } else {
+        buffer.writeln(_truncate(text, isFull: isFull));
+      }
       buffer.writeln();
     }
     return buffer.isEmpty ? null : buffer.toString().trim();

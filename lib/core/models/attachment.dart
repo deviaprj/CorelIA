@@ -32,6 +32,16 @@ class Attachment {
 
   bool get isImage => type == AttachmentType.image;
 
+  /// Préfixe du texte renvoyé quand un document n'a pas pu être lu.
+  ///
+  /// Il commence par « [ » : c'est ce qui permet de distinguer un marqueur
+  /// d'échec d'un vrai contenu (voir [isUnreadableText]).
+  static const String unreadableMarkerPrefix = '[Document illisible]';
+
+  /// Vrai si [text] est un marqueur d'échec d'extraction, pas du contenu.
+  static bool isUnreadableText(String? text) =>
+      text != null && text.trimLeft().startsWith(unreadableMarkerPrefix);
+
   static AttachmentType detectType(String fileName) {
     final lower = fileName.toLowerCase();
     if (lower.endsWith('.png') ||

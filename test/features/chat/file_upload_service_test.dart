@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:archive/archive.dart';
+import 'package:corel_ia/core/models/attachment.dart';
 import 'package:corel_ia/features/chat/data/file_upload_service.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -9,6 +10,21 @@ void main() {
   final service = FileUploadService();
 
   Uint8List bytesOf(String text) => Uint8List.fromList(utf8.encode(text));
+
+  /// Encode en UTF-16 (avec BOM), comme le Bloc-notes Windows « Unicode ».
+  Uint8List utf16WithBom(String text, {required bool bigEndian}) {
+    final out = <int>[
+      if (bigEndian) ...[0xFE, 0xFF] else ...[0xFF, 0xFE],
+    ];
+    for (final unit in text.codeUnits) {
+      if (bigEndian) {
+        out..add((unit >> 8) & 0xFF)..add(unit & 0xFF);
+      } else {
+        out..add(unit & 0xFF)..add((unit >> 8) & 0xFF);
+      }
+    }
+    return Uint8List.fromList(out);
+  }
 
   group('extractText — fichiers texte', () {
     test('lit un .txt', () async {
@@ -40,6 +56,54 @@ void main() {
     test('tolère l\'encodage imparfait', () async {
       final broken = Uint8List.fromList([0x41, 0xFF, 0x42]);
       expect(await service.extractText(broken, 'txt', 'a.txt'), isNotEmpty);
+    });
+
+    test('lit un .txt UTF-16 (Bloc-notes « Unicode »)', () async {
+      const french = 'Résumé du café à Lyon';
+      expect(
+        await service.extractText(
+          utf16WithBom(french, bigEndian: false),
+          'txt',
+          'a.txt',
+        ),
+        french,
+      );
+      expect(
+        await service.extractText(
+          utf16WithBom(french, bigEndian: true),
+          'txt',
+          'a.txt',
+        ),
+        french,
+      );
+    });
+
+    test('lit un .txt « ANSI » (Latin-1) sans perdre les accents', () async {
+      const french = 'Résumé du café à Lyon, déjà vu';
+      final extracted = await service.extractText(
+        Uint8List.fromList(latin1.encode(french)),
+        'txt',
+        'a.txt',
+      );
+
+      expect(extracted, french);
+      expect(
+        extracted,
+        isNot(contains('\uFFFD')),
+        reason: 'les accents perdus faisaient passer le texte pour du binaire',
+      );
+    });
+
+    test('décode un .txt CP1252 (€, apostrophe courbe)', () async {
+      // « R’sultat : 10 € » en CP1252 : 0x92 = ’, 0x80 = €.
+      final bytes = Uint8List.fromList([
+        0x52, 0x92, 0x73, 0x75, 0x6C, 0x74, 0x61, 0x74, 0x20, 0x3A,
+        0x20, 0x31, 0x30, 0x20, 0x80,
+      ]);
+      expect(
+        await service.extractText(bytes, 'txt', 'a.txt'),
+        'R’sultat : 10 €',
+      );
     });
   });
 
@@ -120,6 +184,62 @@ void main() {
         reason: 'un flux zlib doit être décompressé, pas ignoré',
       );
       expect(extracted, contains('monde'));
+    });
+
+    test('ne lit que le flux /Contents, pas les flux de police', () async {
+      // Le vrai texte est dans l'objet référencé par /Contents ; un autre flux
+      // contient du bruit qui ressemble à du texte (cas des polices/CMap).
+      final structured = bytesOf(
+        '%PDF-1.4\n'
+        '1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n'
+        '2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n'
+        '3 0 obj << /Type /Page /Parent 2 0 R /Contents 4 0 R >> endobj\n'
+        '4 0 obj\n'
+        'stream\n'
+        'BT /F1 12 Tf 72 720 Td (Bonjour le monde) Tj ET\n'
+        'endstream\n'
+        'endobj\n'
+        '5 0 obj\n'
+        'stream\n'
+        'BT /F9 1 Tf (ZZZBRUITPOLICE) Tj ET\n'
+        'endstream\n'
+        'endobj\n'
+        '%%EOF\n',
+      );
+
+      final extracted =
+          await service.extractText(structured, 'pdf', 'page.pdf');
+
+      expect(extracted, contains('Bonjour'));
+      expect(
+        extracted,
+        isNot(contains('ZZZBRUITPOLICE')),
+        reason: 'balayer tous les flux ramassait les polices et les CMap',
+      );
+    });
+
+    test('signale un flux de contenu illisible au lieu de le restituer', () async {
+      // Polices CID sans ToUnicode : les opérandes sont des indices de glyphes,
+      // imprimables mais sans mots. Mieux vaut un échec explicite que du charabia.
+      final cidLike = bytesOf(
+        '%PDF-1.4\n'
+        '3 0 obj << /Type /Page /Contents 4 0 R >> endobj\n'
+        '4 0 obj\n'
+        'stream\n'
+        'BT /F1 1 Tf (a b c d e f g h i j k) Tj ET\n'
+        'endstream\n'
+        'endobj\n'
+        '%%EOF\n',
+      );
+
+      final extracted = await service.extractText(cidLike, 'pdf', 'cid.pdf');
+
+      expect(
+        Attachment.isUnreadableText(extracted),
+        isTrue,
+        reason: 'un amas de caractères isolés n\'est pas du texte lisible',
+      );
+      expect(extracted, isNot(contains('a b c d e')));
     });
 
     test('ne restitue jamais du bruit binaire comme du texte', () async {

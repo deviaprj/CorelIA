@@ -354,10 +354,18 @@ class ChatNotifier extends Notifier<ChatState> {
     for (final att in attachments) {
       final text = att.extractedText;
       if (att.isImage || text == null || text.isEmpty) continue;
-      buffer
-        ..writeln('Document : ${att.name}')
-        ..writeln(text)
-        ..writeln();
+      buffer.writeln('Document : ${att.name}');
+      if (Attachment.isUnreadableText(text)) {
+        // Ne jamais présenter le marqueur d'échec comme du contenu : l'IA
+        // répondrait qu'elle reçoit un « binaire illisible ».
+        buffer.writeln(
+          'Lecture automatique impossible (PDF scanné, image ou protégé). '
+          "Préviens l'utilisateur et demande-lui de coller le texte.",
+        );
+      } else {
+        buffer.writeln(text);
+      }
+      buffer.writeln();
     }
     final context = buffer.toString().trim();
     return context.isEmpty ? null : context;

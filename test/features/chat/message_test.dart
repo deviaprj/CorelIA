@@ -138,6 +138,37 @@ void main() {
       expect(buildMessage().buildFileContext(isFull: false), isNull);
     });
 
+    test('buildFileContext ne présente pas un échec comme du contenu', () {
+      final message = buildMessage(
+        attachments: const [
+          Attachment(
+            type: AttachmentType.pdf,
+            name: 'scan.pdf',
+            mimeType: 'application/pdf',
+            sizeBytes: 20,
+            extractedText:
+                '[Document illisible] PDF sans couche texte exploitable.',
+          ),
+        ],
+      );
+
+      final context = message.buildFileContext(isFull: false);
+      expect(context, contains('scan.pdf'));
+      expect(context, contains('Lecture automatique impossible'));
+      expect(
+        context,
+        isNot(contains('Document illisible')),
+        reason: 'le marqueur ne doit jamais passer pour du contenu',
+      );
+    });
+
+    test('isUnreadableText distingue un marqueur d\'un vrai contenu', () {
+      expect(Attachment.isUnreadableText('[Document illisible] PDF…'), isTrue);
+      expect(Attachment.isUnreadableText('  [Document illisible] PDF'), isTrue);
+      expect(Attachment.isUnreadableText('Le vrai contenu'), isFalse);
+      expect(Attachment.isUnreadableText(null), isFalse);
+    });
+
     test('copyWith met à jour le contenu et l\'état de streaming', () {
       final message = buildMessage(content: 'ancien');
       final updated = message.copyWith(content: 'nouveau', isStreaming: true);
