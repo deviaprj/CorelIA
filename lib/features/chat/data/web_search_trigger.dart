@@ -1,17 +1,9 @@
-/// Décide si une requête utilisateur doit déclencher une recherche web, et
-/// nettoie la requête envoyée au moteur de recherche.
+import 'search_service.dart';
+
+/// Décide si une requête utilisateur doit déclencher une recherche web, filtre
+/// la pertinence des résultats et nettoie la requête envoyée au moteur.
 ///
-/// Source unique (ADR-029, Bloc 3 cluster 2) extraite de `ChatNotifier` — ces
-/// deux fonctions pures (sans état, sans `ref`, sans IO) vivaient en méthodes
-/// privées statiques dans le god object `chat_notifier.dart`. Extraction vers
-/// une classe utilitaire dédiée pour :
-///
-/// - **Testabilité isolée** : testable sans `ProviderContainer` ni `ChatNotifier`.
-/// - **Cohésion** : toute la logique « faut-il chercher sur le web ? » au même
-///   endroit, multilingue (FR/EN/ES/DE/IT/PT).
-/// - **Décomposition** : amorce la réduction du god object (cf. ADR-029).
-///
-/// Méthodes 100% statiques et pures.
+/// Méthodes 100 % statiques et pures : testables sans `ProviderContainer`.
 class WebSearchTrigger {
   WebSearchTrigger._(); // classe utilitaire — pas d'instances
 
@@ -125,5 +117,50 @@ class WebSearchTrigger {
       query = '${query.substring(0, 200)}...';
     }
     return query;
+  }
+
+  /// Mots outils trop courants pour juger de la pertinence d'un résultat.
+  static const _stopWords = {
+    'dans', 'pour', 'avec', 'sans', 'plus', 'moins', 'mais', 'donc', 'alors',
+    'cette', 'cet', 'ces', 'leur', 'leurs', 'quoi', 'comment', 'pourquoi',
+    'quand', 'quel', 'quelle', 'quels', 'quelles', 'votre', 'notre', 'vous',
+    'nous', 'elle', 'ils', 'elles', 'tout', 'tous', 'toute', 'toutes', 'etre',
+    'être', 'avoir', 'faire', 'peut', 'sont', 'etait', 'était', 'bonjour',
+    'bonsoir', 'salut', 'coucou', 'merci', 'stp', 'svp',
+    'the', 'and', 'for', 'with', 'that', 'this', 'you', 'your', 'what', 'how',
+    'why', 'when', 'where', 'which', 'from', 'have', 'has', 'was', 'were',
+    'hello', 'thanks', 'please', 'about', 'into', 'they', 'them', 'their',
+  };
+
+  /// Termes significatifs d'une requête : mots de 4 lettres et plus, hors mots
+  /// outils.
+  static List<String> significantTerms(String query) {
+    final words = query.toLowerCase().split(RegExp(r'[^a-z0-9à-öø-ÿœ]+'));
+    final terms = <String>{};
+    for (final word in words) {
+      if (word.length < 4) continue;
+      if (_stopWords.contains(word)) continue;
+      terms.add(word);
+    }
+    return terms.toList();
+  }
+
+  /// Ne garde que les résultats qui recoupent réellement la question.
+  ///
+  /// Indispensable depuis que la recherche est active par défaut : une
+  /// recherche lancée sur une simple salutation renvoie des résultats hors
+  /// sujet, qui fausseraient la réponse du modèle. Sans terme significatif
+  /// (ou sans recoupement), on ne transmet rien.
+  static List<WebSearchResult> relevantResults(
+    String query,
+    List<WebSearchResult> results,
+  ) {
+    final terms = significantTerms(query);
+    if (terms.isEmpty) return const [];
+
+    return results.where((result) {
+      final haystack = '${result.title} ${result.snippet}'.toLowerCase();
+      return terms.any(haystack.contains);
+    }).toList();
   }
 }

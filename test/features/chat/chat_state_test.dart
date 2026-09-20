@@ -9,7 +9,8 @@ void main() {
       expect(state.messages, isEmpty);
       expect(state.isStreaming, isFalse);
       expect(state.isSearching, isFalse);
-      expect(state.useSearch, isFalse);
+      // La recherche Internet est activée par défaut.
+      expect(state.useSearch, isTrue);
       expect(state.remainingRequests, isNull);
       expect(state.quotaBlocked, isFalse);
       expect(state.error, isNull);

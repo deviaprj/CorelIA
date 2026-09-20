@@ -27,7 +27,7 @@ class ChatState {
     this.messages = const [],
     this.isStreaming = false,
     this.isSearching = false,
-    this.useSearch = false,
+    this.useSearch = true,
     this.remainingRequests,
     this.quotaBlocked = false,
     this.error,
@@ -37,7 +37,7 @@ class ChatState {
   final bool isStreaming;
   final bool isSearching;
 
-  /// Recherche Internet forcée par l'utilisateur.
+  /// Recherche Internet forcée par l'utilisateur (activée par défaut).
   final bool useSearch;
 
   /// Requêtes restantes aujourd'hui ; `null` si illimité (Agent IA Full).
@@ -209,8 +209,12 @@ class ChatNotifier extends Notifier<ChatState> {
       try {
         final searchService = ref.read(searchServiceProvider);
         final query = WebSearchTrigger.extractSearchQuery(effectiveText);
-        searchResults = await searchService.search(query);
-        if (searchResults.isNotEmpty) {
+        // La recherche est active par défaut : on ne transmet au modèle que les
+        // résultats qui recoupent réellement la question posée.
+        final found = await searchService.search(query);
+        final relevant = WebSearchTrigger.relevantResults(query, found);
+        if (relevant.isNotEmpty) {
+          searchResults = relevant;
           instantAnswer = await searchService.getInstantAnswer(query);
         }
       } catch (e) {
