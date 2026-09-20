@@ -1,3 +1,4 @@
+import 'package:corel_ia/core/models/attachment.dart';
 import 'package:corel_ia/core/models/user_role.dart';
 import 'package:corel_ia/core/providers/firebase_providers.dart';
 import 'package:corel_ia/features/chat/data/chat_repository.dart';
@@ -101,5 +102,39 @@ void main() {
     // « Bonjour » ne déclenche pas needsWebSearch : seul le réglage activé par
     // défaut peut expliquer cet appel.
     verify(() => search.search(any())).called(1);
+  });
+
+  test('le document joint est conservé pour les questions de suivi', () async {
+    final container = buildContainer('u4');
+    addTearDown(container.dispose);
+
+    await container.read(chatNotifierProvider.notifier).sendMessage(
+      'Résume ce document',
+      attachments: const [
+        Attachment(
+          type: AttachmentType.document,
+          name: 'rapport.pdf',
+          mimeType: 'application/pdf',
+          sizeBytes: 20,
+          extractedText: 'Le code secret du projet est ZORGLUB-42.',
+        ),
+      ],
+    );
+
+    final userMessage = container
+        .read(chatNotifierProvider)
+        .messages
+        .firstWhere((m) => m.isUser);
+
+    expect(
+      userMessage.attachments.single.extractedText,
+      contains('ZORGLUB-42'),
+      reason: 'le texte extrait doit être attaché au message',
+    );
+    expect(
+      userMessage.fileContext,
+      contains('ZORGLUB-42'),
+      reason: 'le document doit rester exploitable aux tours suivants',
+    );
   });
 }

@@ -314,7 +314,7 @@ class ChatNotifier extends Notifier<ChatState> {
       {'role': 'system', 'content': ref.read(systemPromptProvider)},
     ];
 
-    final fileContext = _buildFileContext(files);
+    final fileContext = _activeFileContext(window, files);
     if (fileContext != null) {
       systemMessages.add({
         'role': 'system',
@@ -361,6 +361,23 @@ class ChatNotifier extends Notifier<ChatState> {
     }
     final context = buffer.toString().trim();
     return context.isEmpty ? null : context;
+  }
+
+  /// Contexte documentaire actif pour ce tour.
+  ///
+  /// Les pièces jointes du message courant priment ; sinon on réinjecte le
+  /// document le plus récemment fourni dans la conversation. Sans cela, une
+  /// question de suivi (« et le chapitre 2 ? ») posée sans ré-attacher le
+  /// fichier perdrait tout le document.
+  String? _activeFileContext(List<Message> history, List<Attachment> current) {
+    final fromCurrent = _buildFileContext(current);
+    if (fromCurrent != null) return fromCurrent;
+
+    for (var i = history.length - 1; i >= 0; i--) {
+      final context = history[i].fileContext;
+      if (context != null && context.isNotEmpty) return context;
+    }
+    return null;
   }
 
   Stream<String> _stream(ModelEntry entry, List<Map<String, dynamic>> history) {

@@ -19,7 +19,7 @@
     }
   ],
 
-  // Workers AI (repli / vision) — aucune clé requise, facturé au neurone.
+  // Workers AI (repli texte/vision) — aucune clé requise, facturé au neurone.
   "ai": {
     "binding": "AI"
   },
@@ -27,14 +27,18 @@
   "vars": {
     "ALLOWED_ORIGINS": "https://zentic.fr,https://www.zentic.fr",
     "AI_TEXT_MODEL": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
-    // LLaVA plutôt que llama-3.2-11b-vision : la licence Meta de ce dernier
-    // interdit explicitement l'Union européenne (Moondream 3 attend une image
-    // sous forme de chaîne, que le binding Workers AI n'accepte pas encore).
-    "AI_VISION_MODEL": "@cf/llava-hf/llava-1.5-7b-hf",
+    // Repli vision (utilisé uniquement sans clé DeepSeek) : Mistral Small 3.1
+    // est multimodal (Apache-2.0) et accepte le format `messages` d'OpenAI.
+    // LLaVA est écarté (déprécié : ne répond plus) et les modèles Meta aussi
+    // (leur licence interdit explicitement l'Union européenne).
+    "AI_VISION_MODEL": "@cf/mistralai/mistral-small-3.1-24b-instruct",
     "RATE_LIMIT_PER_MINUTE": "100"
   }
 
   // Secrets à définir (jamais dans ce fichier) :
   //   npx wrangler secret put DEEPSEEK_API_KEY   # clé du fournisseur IA
   //   npx wrangler secret put CLIENT_API_KEY     # clé publique de l'app (soft gate)
+  //
+  // Variable optionnelle :
+  //   DEEPSEEK_VISION_MODEL  # modèle multimodal DeepSeek (défaut : deepseek-chat)
 }

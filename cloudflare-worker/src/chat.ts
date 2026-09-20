@@ -3,23 +3,35 @@ import type { ChatMessage, ChatRequest, Env } from './types';
 
 const DEEPSEEK_URL = 'https://api.deepseek.com/v1/chat/completions';
 const DEEPSEEK_DEFAULT_MODEL = 'deepseek-v4-flash';
+
+/**
+ * Modèle multimodal DeepSeek (analyse d'image).
+ *
+ * DeepSeek accepte nativement les parties `image_url` au format OpenAI : la
+ * même passerelle sert le texte et la vision, sans traduction de schéma ni
+ * dépendance à un modèle Workers AI qui peut être déprécié.
+ */
+const DEEPSEEK_VISION_MODEL = 'deepseek-chat';
+
+const DEFAULT_TEXT_MODEL = '@cf/meta/llama-3.3-70b-instruct-fp8-fast';
+
+/**
+ * Modèle multimodal de repli sur Workers AI (aucune clé DeepSeek configurée).
+ *
+ * Mistral Small 3.1 (Apache-2.0) accepte le format `messages` d'OpenAI avec
+ * parties `image_url`. On écarte `@cf/llava-hf/llava-1.5-7b-hf` (déprécié : la
+ * requête ne répond plus) et les modèles Meta (licence interdisant l'Union
+ * européenne).
+ */
+const DEFAULT_VISION_MODEL = '@cf/mistralai/mistral-small-3.1-24b-instruct';
+
 const MAX_MESSAGES = 30;
 const DEFAULT_MAX_TOKENS = 4096;
 const DEFAULT_TEMPERATURE = 0.7;
 const MAX_VISION_PROMPT_CHARS = 2000;
 
-/**
- * Modèle image→texte par défaut.
- *
- * LLaVA est retenu plutôt que `@cf/meta/llama-3.2-11b-vision-instruct` : ce
- * dernier exige d'accepter une licence Meta interdisant explicitement les
- * personnes et entreprises domiciliées dans l'Union européenne, ce qui est le
- * cas de ce déploiement.
- */
-const DEFAULT_VISION_MODEL = '@cf/llava-hf/llava-1.5-7b-hf';
-
 type Provider =
-  | { kind: 'deepseek' }
+  | { kind: 'deepseek'; model: string }
   | { kind: 'workers-ai'; model: string };
 
 /** POST /chat — réponse IA en streaming SSE (format OpenAI). */
@@ -55,7 +67,7 @@ export async function handleChat(request: Request, env: Env): Promise<Response> 
 
   try {
     return provider.kind === 'deepseek'
-      ? await deepSeekChat(request, env, options, stream)
+      ? await deepSeekChat(request, env, provider.model, options, stream)
       : await workersAiChat(request, env, provider.model, options, stream);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -77,14 +89,30 @@ function pickProvider(
   const requested = (payload.model ?? '').trim();
   if (requested.startsWith('@cf/')) return { kind: 'workers-ai', model: requested };
 
-  // Vision : Workers AI si disponible (les modèles texte ne lisent pas les images).
-  if (hasImage(messages) && env.AI) {
-    return { kind: 'workers-ai', model: env.AI_VISION_MODEL ?? DEFAULT_VISION_MODEL };
+  const wantsVision = hasImage(messages);
+
+  // Vision : DeepSeek accepte nativement les parties `image_url` (format
+  // OpenAI). C'est la voie primaire — pas de traduction de schéma, pas de
+  // modèle Workers AI susceptible d'être déprécié.
+  if (wantsVision && env.DEEPSEEK_API_KEY) {
+    return {
+      kind: 'deepseek',
+      model: env.DEEPSEEK_VISION_MODEL ?? DEEPSEEK_VISION_MODEL,
+    };
   }
 
-  if (env.DEEPSEEK_API_KEY) return { kind: 'deepseek' };
+  if (env.DEEPSEEK_API_KEY) {
+    return { kind: 'deepseek', model: DEEPSEEK_DEFAULT_MODEL };
+  }
+
+  // Repli Workers AI, en texte comme en vision.
   if (env.AI) {
-    return { kind: 'workers-ai', model: env.AI_TEXT_MODEL ?? '@cf/meta/llama-3.3-70b-instruct-fp8-fast' };
+    return {
+      kind: 'workers-ai',
+      model: wantsVision
+        ? (env.AI_VISION_MODEL ?? DEFAULT_VISION_MODEL)
+        : (env.AI_TEXT_MODEL ?? DEFAULT_TEXT_MODEL),
+    };
   }
   return null;
 }
@@ -92,6 +120,7 @@ function pickProvider(
 async function deepSeekChat(
   request: Request,
   env: Env,
+  model: string,
   options: ChatOptions,
   stream: boolean,
 ): Promise<Response> {
@@ -103,7 +132,7 @@ async function deepSeekChat(
       Accept: stream ? 'text/event-stream' : 'application/json',
     },
     body: JSON.stringify({
-      model: DEEPSEEK_DEFAULT_MODEL,
+      model,
       messages: options.messages,
       max_tokens: options.max_tokens,
       temperature: options.temperature,
@@ -139,10 +168,19 @@ async function workersAiChat(
     return json(request, env, { error: 'Binding Workers AI indisponible.' }, 503);
   }
 
-  // Les modèles image→texte (Moondream, LLaVA) attendent `{image, prompt}` et
-  // non le format messages : on les traite à part.
   const image = extractImage(options.messages);
-  if (image) return visionChat(request, env, model, options, image);
+  if (image) {
+    // Modèles multimodaux récents (Mistral Small 3.1, Llama 3.2 Vision) : ils
+    // acceptent le format `messages` d'OpenAI, comme DeepSeek.
+    try {
+      return await workersAiVision(request, env, model, options, stream);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      console.warn(`[chat] vision « messages » (${model}) a échoué : ${detail}`);
+      // Repli sur les modèles image→texte historiques (`{image, prompt}`).
+      return await visionChat(request, env, model, options, image);
+    }
+  }
 
   const result = (await env.AI.run(model as never, {
     messages: options.messages,
@@ -157,13 +195,58 @@ async function workersAiChat(
     });
   }
 
-  const data = result as { response?: string; choices?: Array<{ message?: { content?: string } }> };
   return json(request, env, {
-    message: {
-      role: 'assistant',
-      content: data.response ?? data.choices?.[0]?.message?.content ?? '',
-    },
+    message: { role: 'assistant', content: chatTextFrom(result) },
   });
+}
+
+/**
+ * Vision via un modèle multimodal Workers AI (format `messages` OpenAI).
+ *
+ * Ces modèles ne streament pas : la réponse complète est renvoyée sous forme
+ * d'un unique événement SSE, format que l'application sait déjà lire.
+ */
+async function workersAiVision(
+  request: Request,
+  env: Env,
+  model: string,
+  options: ChatOptions,
+  stream: boolean,
+): Promise<Response> {
+  const ai = env.AI;
+  if (!ai) throw new Error('Binding Workers AI indisponible.');
+
+  const result = (await ai.run(model as never, {
+    messages: options.messages,
+    max_tokens: options.max_tokens,
+    temperature: options.temperature,
+  } as never)) as unknown;
+
+  const text = chatTextFrom(result);
+  if (!text) throw new Error('Réponse vide du modèle vision.');
+
+  if (stream) {
+    return new Response(textToOpenAiSse(text), {
+      headers: sseHeaders(request, env),
+    });
+  }
+  return json(request, env, { message: { role: 'assistant', content: text } });
+}
+
+/** Texte renvoyé par un modèle Workers AI (`choices[].message` ou `response`). */
+function chatTextFrom(result: unknown): string {
+  if (typeof result === 'string') return result.trim();
+  if (result && typeof result === 'object') {
+    const data = result as Record<string, unknown>;
+    const choices = data['choices'] as
+      | Array<{ message?: { content?: string } }>
+      | undefined;
+    const content = choices?.[0]?.message?.content;
+    if (typeof content === 'string' && content.trim()) return content.trim();
+    const response = data['response'];
+    if (typeof response === 'string' && response.trim()) return response.trim();
+  }
+  return '';
 }
 
 /** Image extraite d'un message multimodal. */
@@ -350,14 +433,22 @@ function hasImage(messages: ChatMessage[]): boolean {
 
 function sanitizeMessages(input: ChatMessage[] | undefined): ChatMessage[] {
   if (!Array.isArray(input)) return [];
-  return input
-    .filter((message): message is ChatMessage => {
-      if (!message || typeof message !== 'object') return false;
-      const role = (message as ChatMessage).role;
-      const content = (message as ChatMessage).content;
-      const validRole = role === 'system' || role === 'user' || role === 'assistant';
-      const validContent = typeof content === 'string' || Array.isArray(content);
-      return validRole && validContent;
-    })
-    .slice(-MAX_MESSAGES);
+  const cleaned = input.filter((message): message is ChatMessage => {
+    if (!message || typeof message !== 'object') return false;
+    const role = (message as ChatMessage).role;
+    const content = (message as ChatMessage).content;
+    const validRole = role === 'system' || role === 'user' || role === 'assistant';
+    const validContent = typeof content === 'string' || Array.isArray(content);
+    return validRole && validContent;
+  });
+
+  if (cleaned.length <= MAX_MESSAGES) return cleaned;
+
+  // Les messages système portent la personnalité et le contexte documentaire :
+  // les tronquer ferait « oublier » le document fourni. On ne rogne donc que
+  // l'historique conversationnel.
+  const system = cleaned.filter((message) => message.role === 'system');
+  const rest = cleaned.filter((message) => message.role !== 'system');
+  const keep = Math.max(0, MAX_MESSAGES - system.length);
+  return [...system, ...(keep > 0 ? rest.slice(-keep) : [])];
 }

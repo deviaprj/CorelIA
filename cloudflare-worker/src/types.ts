@@ -6,6 +6,9 @@ export interface Env {
   /** Clé du fournisseur IA (secret : `wrangler secret put DEEPSEEK_API_KEY`). */
   DEEPSEEK_API_KEY?: string;
 
+  /** Modèle DeepSeek multimodal (optionnel ; `deepseek-chat` par défaut). */
+  DEEPSEEK_VISION_MODEL?: string;
+
   /** Clé publique de l'app mobile (secret : `wrangler secret put CLIENT_API_KEY`). */
   CLIENT_API_KEY?: string;
 
