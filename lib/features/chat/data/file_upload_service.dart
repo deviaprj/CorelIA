@@ -3,6 +3,7 @@ import 'package:archive/archive.dart';
 import 'package:excel/excel.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
+import 'package:pdfrx/pdfrx.dart';
 import 'package:xml/xml.dart';
 import '../../../core/models/attachment.dart';
 
@@ -76,7 +77,7 @@ class FileUploadService {
     try {
       switch (ext) {
         case 'pdf':
-          return _extractPdf(bytes);
+          return await _extractPdf(bytes);
         case 'docx':
           return _extractDocx(bytes);
         case 'xlsx':
@@ -109,10 +110,24 @@ class FileUploadService {
 
   /// Extrait le texte d'un PDF.
   ///
-  /// Les flux (décompressés si besoin) sont la source la plus fiable ; le
-  /// balayage brut sert de repli. On ne se fie plus à une taille minimale :
-  /// un document court doit aussi être lu.
-  String _extractPdf(Uint8List bytes) {
+  /// PDFium (via `pdfrx`) est la source primaire : c'est un vrai moteur PDF, il
+  /// gère les flux compressés, les polices CID et l'ordre de lecture réel. Il
+  /// n'est pas disponible sur le Web (PDF.js est chargé depuis un CDN, ce qui
+  /// violerait l'autonomie de l'extension) ni en test VM (pas de libpdfium) :
+  /// on retombe alors sur le scanner pure-Dart ci-dessous, sans dépendance
+  /// native. On ne se fie jamais à une taille minimale : un document court doit
+  /// aussi être lu.
+  Future<String> _extractPdf(Uint8List bytes) async {
+    if (!kIsWeb) {
+      try {
+        final fromPdfium = await _extractWithPdfium(bytes);
+        if (_isUsablePdfText(fromPdfium)) return fromPdfium;
+      } catch (e, st) {
+        debugPrint('[FileUploadService] PDFium extraction unavailable: $e');
+        debugPrint(st.toString());
+      }
+    }
+
     try {
       final fromStreams = _extractFromPdfStreams(bytes);
       if (_isUsablePdfText(fromStreams)) return fromStreams;
@@ -127,49 +142,77 @@ class FileUploadService {
     return '[Extraction PDF incomplete — fichier probablement scanne, protege ou vectoriel]';
   }
 
+  /// Extrait le texte de chaque page via PDFium (pdfrx).
+  ///
+  /// Renvoie une chaîne vide quand le document n'a pas de couche texte (scan,
+  /// image, vectoriel) ; lève si le moteur natif est indisponible — l'appelant
+  /// bascule alors sur le scanner pure-Dart.
+  Future<String> _extractWithPdfium(Uint8List bytes) async {
+    final document = await PdfDocument.openData(bytes, sourceName: 'upload');
+
+    try {
+      final pages = <String>[];
+      for (final page in document.pages) {
+        final text = (await page.loadText()).fullText.trim();
+        if (text.isNotEmpty) pages.add(text);
+      }
+      return pages.join('\n\n');
+    } finally {
+      await document.dispose();
+    }
+  }
+
   /// Vrai si l'extraction a produit du texte exploitable (et non un gabarit).
   static bool _isUsablePdfText(String text) {
     final trimmed = text.trim();
-    return trimmed.isNotEmpty && !trimmed.startsWith('[');
+    return trimmed.isNotEmpty &&
+        !trimmed.startsWith('[') &&
+        _looksLikeText(trimmed);
   }
 
+  /// Vrai si [text] ressemble à du texte lisible, et non à des octets binaires
+  /// (police, image, table de références) décodés en force. Un échec explicite
+  /// vaut mieux qu'une extraction silencieusement corrompue : ce garde-fou
+  /// évite d'injecter du bruit binaire dans le contexte de l'IA.
+  static bool _looksLikeText(String text) {
+    if (text.isEmpty) return false;
+    var printable = 0;
+    var total = 0;
+    for (final rune in text.runes) {
+      total++;
+      if (rune == 0xFFFD) continue;
+      if (rune < 0x20 && rune != 0x09 && rune != 0x0A && rune != 0x0D) {
+        continue;
+      }
+      printable++;
+    }
+    return total > 0 && printable / total >= 0.85;
+  }
+
+  /// Dernier recours : balayage brut du fichier entier.
+  ///
+  /// On ancre les littéraux sur un opérateur d'affichage (`Tj`/`TJ`/`T'`) pour
+  /// limiter le bruit, puis on élargit à tout littéral de taille raisonnable si
+  /// rien n'a été trouvé.
   String _extractStringsFromRawPdf(Uint8List bytes) {
     final raw = utf8.decode(bytes, allowMalformed: true);
     final results = <String>[];
-    final parenRegex = RegExp(r"\(([^\\()]*(?:\\.[^\\()]*)*)\)\s*(?:Tj|T')");
-    for (final m in parenRegex.allMatches(raw)) {
+
+    final opRegex = RegExp(r"\(((?:\\.|[^\\()])*)\)\s*(?:Tj|TJ|T')");
+    for (final m in opRegex.allMatches(raw)) {
       final t = m.group(1);
-      if (t != null && t.length > 1) results.add(_unescapePdfString(t));
+      if (t != null) results.add(_unescapePdfString(t));
     }
     if (results.isEmpty) {
-      final fallbackRegex = RegExp(r'\(([^\\()]{3,}(?:\\.[^\\()]*)*)\)');
-      for (final m in fallbackRegex.allMatches(raw)) {
+      final anyRegex = RegExp(r'\(((?:\\.|[^\\()]){3,})\)');
+      for (final m in anyRegex.allMatches(raw)) {
         final t = m.group(1);
         if (t != null) results.add(_unescapePdfString(t));
       }
     }
-    final hexRegex = RegExp(r'<([0-9A-Fa-f\s]{4,})>');
-    for (final m in hexRegex.allMatches(raw)) {
-      final hex = m.group(1)?.replaceAll(RegExp(r'\s+'), '');
-      if (hex != null && hex.length % 2 == 0) {
-        try {
-          final hexBytes = <int>[];
-          for (var i = 0; i < hex.length; i += 2) {
-            hexBytes.add(int.parse(hex.substring(i, i + 2), radix: 16));
-          }
-          final decoded = utf8.decode(hexBytes, allowMalformed: true).trim();
-          if (decoded.length > 2) results.add(decoded);
-        } catch (_) {}
-      }
-    }
-    final seen = <String>{};
-    final unique = <String>[];
-    for (final t in results) {
-      final clean = t.trim();
-      if (clean.isEmpty || seen.contains(clean)) continue;
-      seen.add(clean);
-      unique.add(clean);
-    }
+    results.addAll(_extractHexStrings(raw));
+
+    final unique = _deduplicateStrings(results).where(_looksLikeText).toList();
     return unique.isNotEmpty
         ? _groupIntoParagraphs(unique)
         : '[Extraction PDF brute incomplete — fichier complexe]';
@@ -181,22 +224,48 @@ class FileUploadService {
       if (stream.data.isEmpty) continue;
       Uint8List data = stream.data;
       if (stream.dictionary.contains('/FlateDecode')) {
-        try {
-          final decompressed = inflateBuffer(data.toList());
-          if (decompressed != null && decompressed.isNotEmpty) {
-            data = Uint8List.fromList(decompressed);
-          } else continue;
-        } catch (_) { continue; }
+        final decompressed = _inflatePdfStream(data);
+        if (decompressed == null || decompressed.isEmpty) continue;
+        data = decompressed;
       }
-      final decodedPreview = utf8.decode(data, allowMalformed: true);
-      if (decodedPreview.contains('/Type /XRef') ||
-          decodedPreview.contains('/Type /ObjStm') ||
-          decodedPreview.contains('/Type /Catalog')) continue;
-      final texts = _extractPdfStringsFromDecoded(data);
+      final decoded = utf8.decode(data, allowMalformed: true);
+      if (decoded.contains('/Type /XRef') ||
+          decoded.contains('/Type /ObjStm') ||
+          decoded.contains('/Type /Catalog')) {
+        continue;
+      }
+      // Ne garder que les flux de contenu : une police, une image ou une table
+      // de références croisées ne contient aucun opérateur d'affichage et ne
+      // produirait que du bruit binaire.
+      if (!_looksLikeContentStream(decoded)) continue;
+
+      final texts = _extractContentStreamFragments(decoded)
+          .where(_looksLikeText)
+          .toList();
       if (texts.isNotEmpty) allTexts.addAll(texts);
     }
     if (allTexts.isEmpty) return '';
     return _groupIntoParagraphs(_deduplicateStrings(allTexts));
+  }
+
+  /// Décompresse un flux PDF `/FlateDecode`.
+  ///
+  /// Le format PDF embarque du zlib (RFC 1950, en-tête + Adler-32), alors que
+  /// `inflateBuffer` de `archive` attend du deflate brut : il échoue sur tous
+  /// les vrais PDF. On utilise donc [ZLibDecoder], avec un repli deflate brut
+  /// pour les producteurs non conformes. Renvoie `null` si rien n'aboutit.
+  static Uint8List? _inflatePdfStream(Uint8List data) {
+    try {
+      final out = const ZLibDecoder().decodeBytes(data);
+      if (out.isNotEmpty) return Uint8List.fromList(out);
+    } catch (_) {}
+
+    try {
+      final out = inflateBuffer(data);
+      if (out != null && out.isNotEmpty) return Uint8List.fromList(out);
+    } catch (_) {}
+
+    return null;
   }
 
   List<_PdfStream> _findPdfStreams(Uint8List bytes) {
@@ -232,32 +301,49 @@ class FileUploadService {
     return streams;
   }
 
-  List<String> _extractPdfStringsFromDecoded(Uint8List bytes) {
+  /// Vrai si [decoded] contient un opérateur d'affichage de texte : signature
+  /// d'un flux de contenu, par opposition à une police ou une image.
+  static bool _looksLikeContentStream(String decoded) {
+    return decoded.contains('Tj') ||
+        decoded.contains('TJ') ||
+        decoded.contains("T'");
+  }
+
+  /// Extrait les fragments de texte d'un flux de contenu PDF déjà décodé.
+  ///
+  /// Couvre les opérandes littéraux `(…)` (`Tj`, `TJ`, `'`) et hexadécimaux
+  /// `<…>` (polices CID). Tout `(…)` d'un flux de contenu est un fragment de
+  /// texte : la validation du flux est faite en amont.
+  static List<String> _extractContentStreamFragments(String content) {
     final results = <String>[];
-    final raw = utf8.decode(bytes, allowMalformed: true);
-    final parenRegex = RegExp(r"\(([^\\()]*(?:\\.[^\\()]*)*)\)\s*(?:Tj|T')");
-    for (final m in parenRegex.allMatches(raw)) {
+
+    final parenRegex = RegExp(r'\(((?:\\.|[^\\()])*)\)');
+    for (final m in parenRegex.allMatches(content)) {
       final t = m.group(1);
-      if (t != null && t.length > 1) results.add(_unescapePdfString(t));
+      if (t == null) continue;
+      final clean = _unescapePdfString(t);
+      if (clean.isNotEmpty) results.add(clean);
     }
-    if (results.isEmpty) {
-      final fallbackRegex = RegExp(r'\(([^\\()]{3,}(?:\\.[^\\()]*)*)\)');
-      for (final m in fallbackRegex.allMatches(raw)) {
-        final t = m.group(1);
-        if (t != null) results.add(_unescapePdfString(t));
-      }
-    }
-    final hexRegex = RegExp(r'<([0-9A-Fa-f\s]{4,})>');
+
+    results.addAll(_extractHexStrings(content));
+    return results;
+  }
+
+  /// Décode les littéraux hexadécimaux `<…>` (polices CID / sous-ensembles).
+  static List<String> _extractHexStrings(String raw) {
+    final results = <String>[];
+    final hexRegex = RegExp(r'<([0-9A-Fa-f\s]+)>');
     for (final m in hexRegex.allMatches(raw)) {
       final hex = m.group(1)?.replaceAll(RegExp(r'\s+'), '');
-      if (hex != null && hex.length % 2 == 0) {
-        try {
-          final hexBytes = <int>[];
-          for (var i = 0; i < hex.length; i += 2) hexBytes.add(int.parse(hex.substring(i, i + 2), radix: 16));
-          final decoded = utf8.decode(hexBytes, allowMalformed: true).trim();
-          if (decoded.length > 2) results.add(decoded);
-        } catch (_) {}
-      }
+      if (hex == null || hex.isEmpty || hex.length.isOdd) continue;
+      try {
+        final hexBytes = <int>[];
+        for (var i = 0; i < hex.length; i += 2) {
+          hexBytes.add(int.parse(hex.substring(i, i + 2), radix: 16));
+        }
+        final decoded = utf8.decode(hexBytes, allowMalformed: true).trim();
+        if (decoded.length > 2) results.add(decoded);
+      } catch (_) {}
     }
     return results;
   }
@@ -488,7 +574,7 @@ class FileUploadService {
     return 'text/plain';
   }
 
-  String _unescapePdfString(String s) {
+  static String _unescapePdfString(String s) {
     return s
         .replaceAll(r'\n', '\n')
         .replaceAll(r'\r', '\r')

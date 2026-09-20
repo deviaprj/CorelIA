@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:archive/archive.dart';
 import 'package:corel_ia/features/chat/data/file_upload_service.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -55,6 +56,33 @@ void main() {
           '%%EOF\n',
         );
 
+    /// Même PDF, mais avec l'opérateur de tableau `TJ` (forme la plus répandue).
+    Uint8List pdfWithTjArray(String text) => bytesOf(
+          '%PDF-1.4\n'
+          '1 0 obj << /Length 60 >>\n'
+          'stream\n'
+          'BT /F1 12 Tf 72 720 Td [($text)] TJ ET\n'
+          'endstream\n'
+          'endobj\n'
+          '%%EOF\n',
+        );
+
+    /// PDF dont le flux de contenu est réellement compressé (zlib/FlateDecode).
+    Uint8List pdfWithFlateStream(String text) {
+      final content = 'BT /F1 12 Tf 72 720 Td [($text)] TJ ET';
+      final compressed =
+          Uint8List.fromList(const ZLibEncoder().encode(utf8.encode(content)));
+      return Uint8List.fromList([
+        ...bytesOf(
+          '%PDF-1.4\n'
+          '1 0 obj << /Filter /FlateDecode /Length ${compressed.length} >>\n'
+          'stream\n',
+        ),
+        ...compressed,
+        ...bytesOf('\nendstream\nendobj\n%%EOF\n'),
+      ]);
+    }
+
     test('extrait le texte d\'un PDF non compressé', () async {
       final extracted =
           await service.extractText(pdfWith('Bonjour le monde'), 'pdf', 'a.pdf');
@@ -66,6 +94,52 @@ void main() {
       );
       // Une interpolation cassée produirait ceci à la place du texte :
       expect(extracted, isNot(contains(r'$fragment')));
+    });
+
+    test('extrait le texte d\'un opérateur TJ (tableau)', () async {
+      final extracted = await service.extractText(
+        pdfWithTjArray('Bonjour le monde'),
+        'pdf',
+        'tj.pdf',
+      );
+
+      expect(extracted, contains('Bonjour'));
+      expect(extracted, contains('monde'));
+    });
+
+    test('décompresse un flux FlateDecode (zlib)', () async {
+      final extracted = await service.extractText(
+        pdfWithFlateStream('Bonjour le monde'),
+        'pdf',
+        'flate.pdf',
+      );
+
+      expect(
+        extracted,
+        contains('Bonjour'),
+        reason: 'un flux zlib doit être décompressé, pas ignoré',
+      );
+      expect(extracted, contains('monde'));
+    });
+
+    test('ne restitue jamais du bruit binaire comme du texte', () async {
+      // Flux binaire qui, décodé en force, produirait du charabia : mieux vaut
+      // un échec explicite qu'un contexte IA pollué par des octets de police.
+      final noise = bytesOf(
+        '%PDF-1.4\n'
+        '1 0 obj << /Length 40 >>\n'
+        'stream\n'
+        '<000102030405060708090A0B0C0D0E0F>\n'
+        'endstream\n'
+        'endobj\n'
+        '%%EOF\n',
+      );
+
+      final extracted = await service.extractText(noise, 'pdf', 'noise.pdf');
+
+      expect(extracted, startsWith('['));
+      expect(extracted, contains('PDF'));
+      expect(extracted, isNot(contains('\uFFFD')));
     });
 
     test('signale un PDF sans texte exploitable', () async {
