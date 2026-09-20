@@ -395,8 +395,20 @@ class ChatNotifier extends Notifier<ChatState> {
         apiKey: AppConfig.clientApiKey,
       ).streamChat(messages: history, model: entry.modelId);
     }
+
+    // Repli « accès direct » : développement uniquement. En production c'est le
+    // Worker qui détient les clés : un build compilé sans `CLOUDFLARE_WORKER_URL`
+    // n'en a donc aucune. On le dit explicitement — « clé DeepSeek manquante »
+    // enverrait chercher une clé à un endroit où elle ne doit jamais être.
     final key = AppConfig.deepSeekApiKey;
-    if (key.isEmpty) throw const AiException('Clé API DeepSeek manquante');
+    if (key.isEmpty) {
+      throw const AiException(
+        'Service IA non configuré dans ce build : '
+        'CLOUDFLARE_WORKER_URL est absent. Recompilez avec '
+        '--dart-define=CLOUDFLARE_WORKER_URL=… et '
+        '--dart-define=CLIENT_API_KEY=…',
+      );
+    }
     return DeepSeekClient(apiKey: key).streamChat(
       messages: history,
       model: entry.modelId,
