@@ -32,10 +32,23 @@ npx wrangler secret put CLIENT_API_KEY     # clé publique de l'app (openssl ran
 npx wrangler deploy
 ```
 
-`wrangler.jsonc` déclare `routes: [{ pattern: "api.zentic.fr", custom_domain: true }]` :
-Cloudflare **crée automatiquement** l'enregistrement DNS et le certificat TLS
-pour `api.zentic.fr`. Aucun VPS, aucune modification des enregistrements
+`wrangler.jsonc` déclare une **route** :
+`routes: [{ pattern: "api.zentic.fr/*", zone_name: "zentic.fr" }]`.
+Elle rattache le Worker au hostname sans créer d'enregistrement DNS (le
+hostname est déjà couvert par la zone, qui héberge d'autres routes comme
+`nei.zentic.fr`). Aucun VPS, aucune modification des enregistrements
 existants (`MX`, `SPF`, `DKIM`, `DMARC`, `mail`, `www`…) n'est nécessaire.
+
+> Prérequis : le token wrangler doit avoir `workers_routes:write` et la zone
+> `zentic.fr` dans le compte. Le déploiement crée aussi une URL de secours
+> `https://corelia-api.<sous-domaine>.workers.dev`.
+>
+> Si `deploy` échoue avec `A request to ... /domains/records failed`
+> (code API `10405`), c'est que le token ne permet pas les **domaines
+> personnalisés** : la route ci-dessus fonctionne sans ce droit.
+>
+> Autre piège : si `esbuild` ou `workerd` ne sont pas exécutables
+> (`EACCES`), exécuter `chmod +x node_modules/.bin/* node_modules/@esbuild/*/bin/* node_modules/workerd/bin/*`.
 
 ## Développement local
 

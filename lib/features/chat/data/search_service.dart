@@ -107,15 +107,19 @@ class SearchService {
 
   /// Recherche via `GET $WORKER_URL/search`.
   Future<List<WebSearchResult>> _searchViaWorker(String query) async {
-    final response = await _dio.get<Map<String, dynamic>>(
+    final response = await _dio.get<dynamic>(
       '${AppConfig.workerBaseUrl}/search',
       queryParameters: {'q': query, 'limit': AppConfig.searchResultsLimit},
       options: Options(
+        responseType: ResponseType.json,
         headers: {if (AppConfig.clientApiKey.isNotEmpty) 'X-API-Key': AppConfig.clientApiKey},
       ),
     );
 
-    final results = response.data?['results'] as List<dynamic>? ?? const [];
+    final data = response.data;
+    if (data is! Map) return const [];
+
+    final results = data['results'] as List<dynamic>? ?? const [];
     return results
         .whereType<Map<String, dynamic>>()
         .map(
@@ -164,7 +168,7 @@ class SearchService {
   /// Réponse instantanée DuckDuckGo (définitions, faits rapides).
   Future<InstantAnswer?> getInstantAnswer(String query) async {
     try {
-      final response = await _dio.get<Map<String, dynamic>>(
+      final response = await _dio.get<dynamic>(
         AppConfig.duckDuckGoInstantAnswerEndpoint,
         queryParameters: {
           'q': query,
@@ -172,14 +176,20 @@ class SearchService {
           'no_html': '1',
           'skip_disambig': '1',
         },
+        options: Options(responseType: ResponseType.json),
       );
-      final abstractText = response.data?['AbstractText'] as String? ?? '';
+
+      // DuckDuckGo peut répondre en HTML : on ignore alors la réponse.
+      final data = response.data;
+      if (data is! Map) return null;
+
+      final abstractText = data['AbstractText'] as String? ?? '';
       if (abstractText.isEmpty) return null;
       return InstantAnswer(
-        title: response.data?['Heading'] as String? ?? query,
+        title: data['Heading'] as String? ?? query,
         abstractText: abstractText,
-        source: response.data?['AbstractSource'] as String? ?? 'DuckDuckGo',
-        url: response.data?['AbstractURL'] as String? ?? '',
+        source: data['AbstractSource'] as String? ?? 'DuckDuckGo',
+        url: data['AbstractURL'] as String? ?? '',
       );
     } catch (e) {
       debugPrint('[SearchService] Instant Answer indisponible : $e');

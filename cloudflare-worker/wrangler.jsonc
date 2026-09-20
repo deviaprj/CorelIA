@@ -3,17 +3,19 @@
   "name": "corelia-api",
   "main": "src/index.ts",
   "compatibility_date": "2026-01-01",
-  "workers_dev": false,
+  "workers_dev": true,
   "observability": {
     "enabled": true
   },
 
-  // Domaine personnalisé : Cloudflare crée automatiquement l'enregistrement DNS
-  // et le certificat TLS pour api.zentic.fr (zone zentic.fr déjà sur Cloudflare).
+  // Route Worker sur la zone zentic.fr (déjà sur Cloudflare).
+  // `api.zentic.fr` est couvert par un enregistrement de la zone : la route
+  // rattache le Worker au hostname sans avoir à créer d'enregistrement DNS.
+  // La zone héberge déjà d'autres routes (nei.zentic.fr) — elles sont conservées.
   "routes": [
     {
-      "pattern": "api.zentic.fr",
-      "custom_domain": true
+      "pattern": "api.zentic.fr/*",
+      "zone_name": "zentic.fr"
     }
   ],
 
