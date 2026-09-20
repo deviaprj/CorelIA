@@ -1,6 +1,7 @@
 import 'dart:ui';
 
 import 'package:corel_ia/features/chat/data/speech_text.dart';
+import 'package:corel_ia/features/chat/data/tts_service.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -99,6 +100,15 @@ void main() {
     test('languageTag construit une balise BCP-47', () {
       expect(languageTag(const Locale('fr', 'FR')), 'fr-FR');
       expect(languageTag(const Locale('en')), 'en');
+    });
+  });
+
+  group('réglages de lecture', () {
+    test('le débit est très légèrement au-dessus du débit normal', () {
+      // flutter_tts transmet `rate × 2` à Android : 0.5 = débit normal.
+      // Un débit franchement supérieur rendrait la lecture désagréable.
+      expect(TtsService.speechRate, greaterThan(0.5));
+      expect(TtsService.speechRate, lessThan(0.7));
     });
   });
 }

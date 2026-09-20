@@ -14,6 +14,13 @@ class TtsService {
   final FlutterTts _engine;
   bool _ready = false;
 
+  /// Débit de lecture.
+  ///
+  /// `flutter_tts` transmet `rate × 2` à Android : 0.5 équivaut donc au débit
+  /// normal du système (1.0), et 0.5 est aussi la valeur normale sur iOS.
+  /// 0.55 lit environ 10 % plus vite, sans paraître précipité.
+  static const speechRate = 0.55;
+
   /// Déclenché à la fin de la lecture (fin normale, arrêt ou erreur).
   VoidCallback? onDone;
 
@@ -38,7 +45,7 @@ class TtsService {
 
   Future<void> _prepare() async {
     if (_ready) return;
-    await _engine.setSpeechRate(0.5);
+    await _engine.setSpeechRate(speechRate);
     await _engine.setPitch(1.0);
     await _engine.setVolume(1.0);
     await _engine.awaitSpeakCompletion(true);
