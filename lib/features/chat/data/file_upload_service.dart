@@ -4,7 +4,7 @@ import 'package:excel/excel.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:xml/xml.dart';
-import '../domain/attachment.dart';
+import '../../../core/models/attachment.dart';
 
 /// Exception specifique au service d'upload de fichiers.
 class FileUploadException implements Exception {

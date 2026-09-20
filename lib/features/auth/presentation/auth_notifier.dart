@@ -1,124 +1,71 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../data/firebase_auth_repository.dart';
-import '../data/mock_auth_repository.dart';
-import '../../../core/providers/firebase_providers.dart';
-import '../../../main.dart' show isDemoMode;
 
-/// Auth notifier avec fallback automatique sur mock auth si Firebase echoue.
-/// Garantit que les boutons login/inscription fonctionnent meme sans backend.
+import '../../../core/config/app_config.dart';
+import '../../../core/providers/firebase_providers.dart';
+import '../data/auth_repository.dart';
+import '../data/mock_auth_repository.dart';
+
+/// Authentification avec repli automatique sur le mock si Firebase échoue,
+/// afin que les boutons de connexion restent fonctionnels hors ligne.
 class AuthNotifier extends AsyncNotifier<void> {
   @override
   Future<void> build() async {}
 
-  Future<void> signInWithEmail(String email, String password) async {
+  /// Exécute [firebaseAction], ou [demoAction] en mode démo / si Firebase échoue.
+  Future<void> _run(
+    Future<void> Function() firebaseAction,
+    Future<void> Function() demoAction,
+  ) async {
     state = const AsyncLoading();
     state = await AsyncValue.guard(() async {
       if (isDemoMode) {
-        await mockAuthRepository.signInWithEmail(email, password);
-        ref.invalidate(authStateProvider);
-        return;
+        await demoAction();
+      } else {
+        try {
+          await firebaseAction();
+        } catch (e) {
+          debugPrint('[AuthNotifier] Firebase indisponible, repli démo : $e');
+          isDemoMode = true;
+          await demoAction();
+        }
       }
-      try {
-        await ref.read(authRepositoryProvider).signInWithEmail(email, password);
-      } catch (e) {
-        debugPrint('[AuthNotifier] Firebase email echoue, fallback mock : $e');
-        isDemoMode = true;
-        await mockAuthRepository.signInWithEmail(email, password);
-        ref.invalidate(authStateProvider);
-      }
+      ref.invalidate(authStateProvider);
     });
   }
 
-  Future<void> registerWithEmail(
-      String email, String password, String name) async {
-    state = const AsyncLoading();
-    state = await AsyncValue.guard(() async {
-      if (isDemoMode) {
-        await mockAuthRepository.registerWithEmail(email, password, name);
-        ref.invalidate(authStateProvider);
-        return;
-      }
-      try {
-        await ref.read(authRepositoryProvider).registerWithEmail(email, password, name);
-      } catch (e) {
-        debugPrint('[AuthNotifier] Firebase register echoue, fallback mock : $e');
-        isDemoMode = true;
-        await mockAuthRepository.registerWithEmail(email, password, name);
-        ref.invalidate(authStateProvider);
-      }
-    });
-  }
+  Future<void> signInWithEmail(String email, String password) => _run(
+        () => ref.read(authRepositoryProvider).signInWithEmail(email, password),
+        () => mockAuthRepository.signInWithEmail(email, password),
+      );
 
-  Future<void> signInWithGoogle() async {
-    state = const AsyncLoading();
-    state = await AsyncValue.guard(() async {
-      if (isDemoMode) {
-        await mockAuthRepository.signInWithGoogle();
-        ref.invalidate(authStateProvider);
-        return;
-      }
-      try {
-        await ref.read(authRepositoryProvider).signInWithGoogle();
-      } catch (e) {
-        debugPrint('[AuthNotifier] Firebase Google echoue, fallback mock : $e');
-        isDemoMode = true;
-        await mockAuthRepository.signInWithGoogle();
-        ref.invalidate(authStateProvider);
-      }
-    });
-  }
+  Future<void> registerWithEmail(String email, String password, String name) =>
+      _run(
+        () => ref
+            .read(authRepositoryProvider)
+            .registerWithEmail(email, password, name),
+        () => mockAuthRepository.registerWithEmail(email, password, name),
+      );
 
-  Future<void> signInAnonymously() async {
-    state = const AsyncLoading();
-    state = await AsyncValue.guard(() async {
-      if (isDemoMode) {
-        await mockAuthRepository.signInAnonymously();
-        ref.invalidate(authStateProvider);
-        return;
-      }
-      try {
-        await ref.read(authRepositoryProvider).signInAnonymously();
-      } catch (e) {
-        debugPrint('[AuthNotifier] Firebase anonyme echoue, fallback mock : $e');
-        isDemoMode = true;
-        await mockAuthRepository.signInAnonymously();
-        ref.invalidate(authStateProvider);
-      }
-    });
-  }
+  Future<void> signInWithGoogle() => _run(
+        () => ref.read(authRepositoryProvider).signInWithGoogle(),
+        () => mockAuthRepository.signInWithGoogle(),
+      );
 
-  Future<void> signOut() async {
-    state = const AsyncLoading();
-    state = await AsyncValue.guard(() async {
-      if (isDemoMode) {
-        await mockAuthRepository.signOut();
-        return;
-      }
-      try {
-        await ref.read(authRepositoryProvider).signOut();
-      } catch (e) {
-        debugPrint('[AuthNotifier] Firebase signOut echoue, fallback mock : $e');
-        await mockAuthRepository.signOut();
-      }
-    });
-  }
+  Future<void> signInAnonymously() => _run(
+        () => ref.read(authRepositoryProvider).signInAnonymously(),
+        () => mockAuthRepository.signInAnonymously(),
+      );
 
-  Future<void> deleteAccount() async {
-    state = const AsyncLoading();
-    state = await AsyncValue.guard(() async {
-      if (isDemoMode) {
-        await mockAuthRepository.deleteAccount();
-        return;
-      }
-      try {
-        await ref.read(authRepositoryProvider).deleteAccount();
-      } catch (e) {
-        debugPrint('[AuthNotifier] Firebase delete echoue, fallback mock : $e');
-        await mockAuthRepository.deleteAccount();
-      }
-    });
-  }
+  Future<void> signOut() => _run(
+        () => ref.read(authRepositoryProvider).signOut(),
+        () => mockAuthRepository.signOut(),
+      );
+
+  Future<void> deleteAccount() => _run(
+        () => ref.read(authRepositoryProvider).deleteAccount(),
+        () => mockAuthRepository.deleteAccount(),
+      );
 }
 
 final authNotifierProvider =

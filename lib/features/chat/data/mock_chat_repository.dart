@@ -1,22 +1,23 @@
 import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:uuid/uuid.dart';
-import '../domain/conversation.dart';
-import '../domain/message.dart';
-import '../domain/attachment.dart';
 
-/// Mock repository pour le chat - mode DEMO sans Firebase
-/// Stocke les données en mémoire locale
+import '../../../core/models/attachment.dart';
+import '../../../core/models/conversation.dart';
+import '../../../core/models/message.dart';
+
+/// Repository de chat en mémoire — mode démo sans Firebase et tests.
 class MockChatRepository {
   final _uuid = const Uuid();
 
-  // Stockage en mémoire
   final Map<String, Conversation> _conversations = {};
   final Map<String, List<Message>> _messages = {};
 
-  // Streams pour la réactivité
-  final _conversationsController = StreamController<List<Conversation>>.broadcast();
-  final _messagesController = StreamController<Map<String, List<Message>>>.broadcast();
+  final _conversationsController =
+      StreamController<List<Conversation>>.broadcast();
+  final _messagesController =
+      StreamController<Map<String, List<Message>>>.broadcast();
 
   // ── Conversations ──────────────────────────────────────────────────────────
   Stream<List<Conversation>> watchConversations(String userId) async* {
@@ -25,78 +26,50 @@ class MockChatRepository {
         .map((_) => List.unmodifiable(getConversations(userId)));
   }
 
-  List<Conversation> getConversations(String userId) {
-    return _conversations.values
-        .where((c) => c.userId == userId)
-        .toList()
-      ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
-  }
+  List<Conversation> getConversations(String userId) =>
+      _conversations.values.where((c) => c.userId == userId).toList()
+        ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
 
   Future<Conversation> createConversation({
     required String userId,
     String title = 'Nouvelle conversation',
-    String? projectId,
   }) async {
     final now = DateTime.now();
     final conv = Conversation(
       id: _uuid.v4(),
       userId: userId,
       title: title,
-      projectId: projectId,
       createdAt: now,
       updatedAt: now,
     );
     _conversations[conv.id] = conv;
     _messages[conv.id] = [];
     _conversationsController.add(_conversations.values.toList());
-    debugPrint('[MockChat] Conversation créée: ${conv.id}');
     return conv;
   }
 
   Future<void> updateConversation(String convId, Map<String, dynamic> data) async {
-    if (_conversations.containsKey(convId)) {
-      final conv = _conversations[convId]!;
-      final updated = conv.copyWith(
-        title: data['title'] as String? ?? conv.title,
-        projectId: data['projectId'] as String? ?? conv.projectId,
-        updatedAt: DateTime.now(),
-      );
-      _conversations[convId] = updated;
-      _conversationsController.add(_conversations.values.toList());
-      debugPrint('[MockChat] Conversation mise à jour: $convId');
-    }
+    final conv = _conversations[convId];
+    if (conv == null) return;
+    _conversations[convId] = conv.copyWith(
+      title: data['title'] as String? ?? conv.title,
+      updatedAt: DateTime.now(),
+    );
+    _conversationsController.add(_conversations.values.toList());
   }
 
   Future<void> deleteConversation(String convId) async {
     _conversations.remove(convId);
     _messages.remove(convId);
     _conversationsController.add(_conversations.values.toList());
-    debugPrint('[MockChat] Conversation supprimée: $convId');
   }
 
   // ── Messages ───────────────────────────────────────────────────────────────
   Stream<List<Message>> watchMessages(String convId) async* {
-    yield List.unmodifiable(_messages[convId] ?? []);
+    yield List.unmodifiable(_messages[convId] ?? const <Message>[]);
     yield* _messagesController.stream
         .where((_) => _messages.containsKey(convId))
-        .map((_) => List.unmodifiable(_messages[convId] ?? []));
-  }
-
-  /// Charge les messages plus anciens que [before] (mock = tous les messages).
-  Future<List<Message>> loadOlderMessages(
-    String convId,
-    DateTime before, {
-    int limit = 20,
-  }) async {
-    final all = _messages[convId] ?? [];
-    final older = all
-        .where((m) => m.createdAt.isBefore(before))
-        .toList()
-      ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
-    if (older.length > limit) {
-      return older.sublist(older.length - limit);
-    }
-    return older;
+        .map((_) => List.unmodifiable(_messages[convId] ?? const <Message>[]));
   }
 
   Future<Message> addMessage({
@@ -104,10 +77,6 @@ class MockChatRepository {
     required Role role,
     required String content,
     String? model,
-    String? imageBase64,
-    String? imageMimeType,
-    String? fileName,
-    String? fileContent,
     List<Attachment>? attachments,
     String? fileContext,
     List<String>? searchSources,
@@ -119,26 +88,18 @@ class MockChatRepository {
       content: content,
       model: model,
       createdAt: DateTime.now(),
-      imageBase64: imageBase64,
-      imageMimeType: imageMimeType,
-      fileName: fileName,
-      fileContent: fileContent,
-      attachments: attachments ?? [],
+      attachments: attachments ?? const [],
       fileContext: fileContext,
       searchSources: searchSources,
     );
 
-    if (!_messages.containsKey(conversationId)) {
-      _messages[conversationId] = [];
-    }
-    _messages[conversationId]!.add(msg);
+    final messages = _messages.putIfAbsent(conversationId, () => []);
+    messages.add(msg);
     _messagesController.add(_messages);
 
-    // Mettre à jour le compteur + titre
     await updateConversation(conversationId, {
-      'messageCount': (_messages[conversationId]!.length),
-      if (role == Role.user && content.length > 3)
-        'title': _extractTitle(content),
+      'messageCount': messages.length,
+      if (role == Role.user && content.length > 3) 'title': _extractTitle(content),
     });
 
     debugPrint('[MockChat] Message ajouté: ${msg.id}');
@@ -146,39 +107,19 @@ class MockChatRepository {
   }
 
   Future<void> updateMessageContent(
-      String convId, String msgId, String content) async {
-    if (_messages.containsKey(convId)) {
-      final msgs = _messages[convId]!;
-      final idx = msgs.indexWhere((m) => m.id == msgId);
-      if (idx != -1) {
-        msgs[idx] = msgs[idx].copyWith(content: content, isStreaming: false);
-        _messagesController.add(_messages);
-        debugPrint('[MockChat] Message mis à jour: $msgId');
-      }
-    }
-  }
-
-  // Créer un message placeholder pour le streaming
-  Future<String> createStreamingMessage(String conversationId) async {
-    final msgId = _uuid.v4();
-    final msg = Message(
-      id: msgId,
-      conversationId: conversationId,
-      role: Role.assistant,
-      content: '',
-      isStreaming: true,
-      createdAt: DateTime.now(),
-    );
-
-    if (!_messages.containsKey(conversationId)) {
-      _messages[conversationId] = [];
-    }
-    _messages[conversationId]!.add(msg);
+    String convId,
+    String msgId,
+    String content,
+  ) async {
+    final messages = _messages[convId];
+    if (messages == null) return;
+    final idx = messages.indexWhere((m) => m.id == msgId);
+    if (idx == -1) return;
+    messages[idx] = messages[idx].copyWith(content: content, isStreaming: false);
     _messagesController.add(_messages);
-    return msgId;
   }
 
-  String _extractTitle(String text) {
+  static String _extractTitle(String text) {
     final t = text.replaceAll('\n', ' ').trim();
     return t.length > 60 ? '${t.substring(0, 57)}...' : t;
   }
@@ -189,5 +130,4 @@ class MockChatRepository {
   }
 }
 
-// Instance globale pour le mode DEMO
 final mockChatRepository = MockChatRepository();

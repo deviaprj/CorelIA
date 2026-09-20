@@ -1,165 +1,117 @@
 import 'dart:async';
+
 import 'package:flutter/foundation.dart';
-import '../domain/app_user.dart';
-import '../../../core/secure_storage.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
-/// Mock repository pour tests locaux sans Firebase
-/// Permet de tester l'application en mode DEMO sur Linux desktop
+import '../../../core/models/app_user.dart';
+
+/// Repository d'authentification simulé — utilisé en mode démo (sans Firebase)
+/// et par les tests.
 class MockAuthRepository {
-  final SecureStorageService _storage = SecureStorageService();
+  static const _emailKey = 'demo_user_email';
+
   final _authStateController = StreamController<AppUser?>.broadcast();
-
-  // Utilisateur courant simulé
-  AppUser? _currentUser;
-
-  // Base de données simulée en mémoire
   final Map<String, AppUser> _users = {};
 
-  // Stream pour écouter les changements d'auth
-  // Utilise async* pour réémettre la valeur courante à chaque nouvel abonné
+  AppUser? _currentUser;
+
+  AppUser? get currentUser => _currentUser;
+
+  /// Réémet la valeur courante à chaque nouvel abonné.
   Stream<AppUser?> get authStateChanges async* {
     yield _currentUser;
     yield* _authStateController.stream;
   }
 
-  // Utilisateur courant
-  AppUser? get currentUser => _currentUser;
-
-  /// Initialisation du mock
   Future<void> initialize() async {
-    debugPrint('[MockAuth] Initialisé - mode DEMO');
-    // Tenter de restaurer une session précédente
-    final savedEmail = await _storage.read('demo_user_email');
+    final prefs = await SharedPreferences.getInstance();
+    final savedEmail = prefs.getString(_emailKey);
     if (savedEmail != null && _users.containsKey(savedEmail)) {
       _currentUser = _users[savedEmail];
       _authStateController.add(_currentUser);
-      debugPrint('[MockAuth] Session restaurée: $savedEmail');
     }
+    debugPrint('[MockAuth] initialisé (mode démo)');
   }
 
-  /// Inscription avec email/password
-  Future<AppUser> registerWithEmail(
-    String email,
-    String password,
-    String name,
-  ) async {
-    await Future<void>.delayed(const Duration(milliseconds: 500)); // Simulation réseau
-
+  Future<AppUser> registerWithEmail(String email, String password, String name) async {
+    await Future<void>.delayed(const Duration(milliseconds: 300));
     if (_users.containsKey(email)) {
       throw Exception('Cet email est déjà utilisé');
     }
-
     final user = AppUser(
       uid: 'demo_${DateTime.now().millisecondsSinceEpoch}',
       email: email,
       displayName: name,
-      plan: 'free',
       createdAt: DateTime.now(),
     );
-
     _users[email] = user;
-    _currentUser = user;
-    await _storage.write('demo_user_email', email);
-    _authStateController.add(user);
-
-    debugPrint('[MockAuth] Inscription réussie: ${user.email}');
+    await _setCurrent(user);
     return user;
   }
 
-  /// Connexion avec email/password
   Future<AppUser> signInWithEmail(String email, String password) async {
-    await Future<void>.delayed(const Duration(milliseconds: 300)); // Simulation réseau
-
-    // En mode demo, on accepte n'importe quel mot de passe (≥ 6 caractères)
+    await Future<void>.delayed(const Duration(milliseconds: 200));
     if (password.length < 6) {
       throw Exception('Le mot de passe doit faire au moins 6 caractères');
     }
-
-    // Si l'utilisateur existe, on le retourne
-    if (_users.containsKey(email)) {
-      _currentUser = _users[email];
-    } else {
-      // Création automatique pour la démo
-      _currentUser = AppUser(
-        uid: 'demo_${DateTime.now().millisecondsSinceEpoch}',
-        email: email,
-        displayName: email.split('@').first,
-        plan: 'free',
-        createdAt: DateTime.now(),
-      );
-      _users[email] = _currentUser!;
-    }
-
-    await _storage.write('demo_user_email', email);
-    _authStateController.add(_currentUser);
-
-    debugPrint('[MockAuth] Connexion réussie: ${_currentUser!.email}');
-    return _currentUser!;
+    final user = _users[email] ??
+        AppUser(
+          uid: 'demo_${DateTime.now().millisecondsSinceEpoch}',
+          email: email,
+          displayName: email.split('@').first,
+          createdAt: DateTime.now(),
+        );
+    _users[email] = user;
+    await _setCurrent(user);
+    return user;
   }
 
-  /// Connexion avec Google (simulée)
   Future<AppUser> signInWithGoogle() async {
-    await Future<void>.delayed(const Duration(milliseconds: 500));
-
-    _currentUser = AppUser(
+    await Future<void>.delayed(const Duration(milliseconds: 300));
+    final user = AppUser(
       uid: 'google_demo_${DateTime.now().millisecondsSinceEpoch}',
       email: 'demo.google@gmail.com',
-      displayName: 'Demo Google User',
-      plan: 'free',
+      displayName: 'Utilisateur Google démo',
       createdAt: DateTime.now(),
     );
-
-    await _storage.write('demo_user_email', _currentUser!.email!);
-    _authStateController.add(_currentUser);
-
-    debugPrint('[MockAuth] Google Sign-In réussi');
-    return _currentUser!;
+    await _setCurrent(user);
+    return user;
   }
 
-  /// Connexion anonyme (simulée)
   Future<AppUser> signInAnonymously() async {
-    await Future<void>.delayed(const Duration(milliseconds: 200));
-
-    _currentUser = AppUser(
+    await Future<void>.delayed(const Duration(milliseconds: 150));
+    final user = AppUser(
       uid: 'anon_${DateTime.now().millisecondsSinceEpoch}',
-      email: null,
-      displayName: 'Utilisateur Anonyme',
-      plan: 'free',
+      displayName: 'Invité',
       createdAt: DateTime.now(),
     );
-
-    _authStateController.add(_currentUser);
-
-    debugPrint('[MockAuth] Connexion anonyme réussie');
-    return _currentUser!;
+    _currentUser = user;
+    _authStateController.add(user);
+    return user;
   }
 
-  /// Déconnexion
   Future<void> signOut() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_emailKey);
     _currentUser = null;
-    await _storage.delete('demo_user_email');
     _authStateController.add(null);
-
-    debugPrint('[MockAuth] Déconnexion');
   }
 
-  /// Suppression du compte
   Future<void> deleteAccount() async {
-    if (_currentUser?.email != null) {
-      _users.remove(_currentUser!.email);
-      await _storage.delete('demo_user_email');
-    }
-    _currentUser = null;
-    _authStateController.add(null);
-
-    debugPrint('[MockAuth] Compte supprimé');
+    final email = _currentUser?.email;
+    if (email != null) _users.remove(email);
+    await signOut();
   }
 
-  /// Nettoyage
-  void dispose() {
-    _authStateController.close();
+  Future<void> _setCurrent(AppUser user) async {
+    _currentUser = user;
+    final prefs = await SharedPreferences.getInstance();
+    if (user.email != null) await prefs.setString(_emailKey, user.email!);
+    _authStateController.add(user);
   }
+
+  void dispose() => _authStateController.close();
 }
 
-// Instance globale pour le mode DEMO
+/// Instance globale pour le mode démo.
 final mockAuthRepository = MockAuthRepository();

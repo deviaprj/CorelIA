@@ -1,34 +1,32 @@
+import '../../../core/config/app_config.dart';
 
-/// Types de tâches influençant le choix du modèle.
-enum TaskType {
-  general,
-  reasoning,
-  vision,
-  document,
-  code,
-  longFile,
-  vocal,      // conversation vocale (jovial, rapide)
-  vocalFast,   // conversation vocale rapide
-}
+/// Types de tâches qui influencent le choix du modèle.
+enum TaskType { general, reasoning, vision }
 
 /// Métadonnées d'un modèle dans la table de routage.
 class ModelEntry {
-  final String modelId;
-  final String provider; // 'deepseek' ou 'openrouter'
-  final bool isFree;
-  final bool supportsVision;
-  final bool supportsSearch;
-
   const ModelEntry({
     required this.modelId,
     required this.provider,
     this.isFree = false,
     this.supportsVision = false,
-    this.supportsSearch = false,
   });
+
+  final String modelId;
+  final String provider; // 'deepseek' | 'openrouter'
+  final bool isFree;
+  final bool supportsVision;
 }
 
-/// Suivi des cooldowns de rate-limit par modèle.
+/// Paramètres de génération recommandés pour un type de tâche.
+class ModelParams {
+  const ModelParams({this.temperature = 0.7, this.maxTokens = AppConfig.maxTokens});
+
+  final double temperature;
+  final int maxTokens;
+}
+
+/// Suivi des cooldowns après un rate-limit (HTTP 429).
 class RateLimitTracker {
   final Map<String, DateTime> _cooldownUntil = {};
 
@@ -45,413 +43,115 @@ class RateLimitTracker {
   void setCooldown(String modelId, {Duration duration = const Duration(minutes: 5)}) {
     _cooldownUntil[modelId] = DateTime.now().add(duration);
   }
-
-  /// Retourne le temps restant en secondes, ou 0 si pas en cooldown.
-  int remainingSeconds(String modelId) {
-    final until = _cooldownUntil[modelId];
-    if (until == null) return 0;
-    final diff = until.difference(DateTime.now());
-    return diff.isNegative ? 0 : diff.inSeconds;
-  }
 }
 
-/// Paramètres recommandés pour un modèle selon le type de tâche.
-class ModelParams {
-  final double temperature;
-  final int maxTokens;
-  final bool enableThinking;
-
-  const ModelParams({
-    this.temperature = 0.7,
-    this.maxTokens = 4096,
-    this.enableThinking = false,
-  });
-}
-
-/// Routage intelligent des modèles IA.
-class ModelRouter {
+/// Routage du modèle selon la tâche et le rôle de l'utilisateur.
+abstract class ModelRouter {
   static final rateLimiter = RateLimitTracker();
 
-  /// Registre de tous les modèles disponibles.
-  /// [isFree] = true signifie "gratuit ou assez économique pour les utilisateurs gratuits"
-  /// (DeepSeek direct API ou OpenRouter free tier).
   static const _registry = <String, ModelEntry>{
-    // DeepSeek direct API (économique, notre clé)
-    'deepseek-v4-flash': ModelEntry(
-      modelId: 'deepseek-v4-flash',
-      provider: 'deepseek',
-      isFree: true,
-      supportsSearch: true,
-    ),
-    'deepseek-v4-pro': ModelEntry(
-      modelId: 'deepseek-v4-pro',
-      provider: 'deepseek',
-      isFree: true,
-      supportsSearch: true,
-    ),
-    'deepseek-reasoner': ModelEntry(
-      modelId: 'deepseek-reasoner',
+    AppConfig.deepSeekModel: ModelEntry(
+      modelId: AppConfig.deepSeekModel,
       provider: 'deepseek',
       isFree: true,
     ),
-    'deepseek-chat': ModelEntry(
-      modelId: 'deepseek-chat',
+    AppConfig.deepSeekProModel: ModelEntry(
+      modelId: AppConfig.deepSeekProModel,
+      provider: 'deepseek',
+      isFree: true,
+    ),
+    AppConfig.deepSeekReasonerModel: ModelEntry(
+      modelId: AppConfig.deepSeekReasonerModel,
+      provider: 'deepseek',
+      isFree: true,
+    ),
+    AppConfig.deepSeekVisionModel: ModelEntry(
+      modelId: AppConfig.deepSeekVisionModel,
       provider: 'deepseek',
       isFree: true,
       supportsVision: true,
     ),
-    'deepseek-coder': ModelEntry(
-      modelId: 'deepseek-coder',
-      provider: 'deepseek',
-      isFree: true,
-    ),
-    // OpenRouter free
-    'deepseek/deepseek-r1:free': ModelEntry(
-      modelId: 'deepseek/deepseek-r1:free',
-      provider: 'openrouter',
-      isFree: true,
-    ),
-    'qwen/qwen3-coder:free': ModelEntry(
-      modelId: 'qwen/qwen3-coder:free',
-      provider: 'openrouter',
-      isFree: true,
-    ),
-    'mistral/mistral-7b-instruct:free': ModelEntry(
-      modelId: 'mistral/mistral-7b-instruct:free',
-      provider: 'openrouter',
-      isFree: true,
-    ),
-    // OpenRouter vocal (free)
-    'arcee/trinity': ModelEntry(
-      modelId: 'arcee/trinity',
-      provider: 'openrouter',
-      isFree: true,
-    ),
-    'neversleep/ring-2.6-1t': ModelEntry(
-      modelId: 'neversleep/ring-2.6-1t',
-      provider: 'openrouter',
-      isFree: true,
-    ),
-    // OpenRouter paid — réservés aux utilisateurs Pro
-    'google/gemini-flash-1.5': ModelEntry(
-      modelId: 'google/gemini-flash-1.5',
+    AppConfig.openRouterVisionModel: ModelEntry(
+      modelId: AppConfig.openRouterVisionModel,
       provider: 'openrouter',
       supportsVision: true,
     ),
-    'openai/gpt-4o-mini': ModelEntry(
-      modelId: 'openai/gpt-4o-mini',
+    AppConfig.openRouterGpt4oMini: ModelEntry(
+      modelId: AppConfig.openRouterGpt4oMini,
       provider: 'openrouter',
       supportsVision: true,
-    ),
-    'mistralai/mistral-large-2407': ModelEntry(
-      modelId: 'mistralai/mistral-large-2407',
-      provider: 'openrouter',
     ),
   };
 
-  /// Table de routage : tâche → chaîne de fallback ordonnée.
-  /// Pour les utilisateurs gratuits, les modèles payants sont filtrés par [resolveModel].
   static const _routingTable = <TaskType, List<String>>{
-    TaskType.general: [
-      'deepseek-v4-flash',
-      'mistral/mistral-7b-instruct:free',
-    ],
+    TaskType.general: [AppConfig.deepSeekModel, AppConfig.deepSeekProModel],
     TaskType.reasoning: [
-      'deepseek-reasoner',
-      'deepseek/deepseek-r1:free',
-      'deepseek-v4-pro',
+      AppConfig.deepSeekReasonerModel,
+      AppConfig.deepSeekProModel,
     ],
     TaskType.vision: [
-      'deepseek-chat',
-      'google/gemini-flash-1.5',
-      'openai/gpt-4o-mini',
-    ],
-    TaskType.document: [
-      'deepseek-v4-pro',
-      'deepseek-v4-flash',
-    ],
-    TaskType.code: [
-      'deepseek-coder',
-      'deepseek-v4-pro',
-      'qwen/qwen3-coder:free',
-      'deepseek-v4-flash',
-    ],
-    TaskType.longFile: [
-      'deepseek-v4-pro',
-      'mistral/mistral-7b-instruct:free',
-    ],
-    TaskType.vocal: [
-      'arcee/trinity',
-      'neversleep/ring-2.6-1t',
-      'deepseek/deepseek-r1:free',
-      'openai/gpt-4o-mini',
-    ],
-    TaskType.vocalFast: [
-      'neversleep/ring-2.6-1t',
-      'arcee/trinity',
-      'deepseek/deepseek-r1:free',
-      'openai/gpt-4o-mini',
+      AppConfig.deepSeekVisionModel,
+      AppConfig.openRouterVisionModel,
+      AppConfig.openRouterGpt4oMini,
     ],
   };
 
-  /// Classifie le message utilisateur en type de tâche.
-  static TaskType classifyTask(
-    String message, {
-    bool hasImage = false,
-    bool hasFile = false,
-    bool isDocGen = false,
-    List<String>? attachmentTypes,
-  }) {
-    // Routage prioritaire par type de pièce jointe
-    if (attachmentTypes != null && attachmentTypes.isNotEmpty) {
-      if (attachmentTypes.any((t) => t == 'image')) return TaskType.vision;
-      if (attachmentTypes.any((t) => t == 'pdf' || t == 'document' || t == 'spreadsheet' || t == 'presentation')) {
-        return TaskType.document;
-      }
-      if (attachmentTypes.any((t) => t == 'text')) return TaskType.longFile;
-    }
-
+  /// Classe le message utilisateur en type de tâche.
+  static TaskType classifyTask(String message, {bool hasImage = false}) {
     if (hasImage) return TaskType.vision;
-    if (isDocGen) return TaskType.document;
-    if (hasFile) return TaskType.longFile;
-
     final lower = message.toLowerCase();
-    if (_containsCodeKeywords(lower)) return TaskType.code;
-    if (_containsReasoningKeywords(lower)) return TaskType.reasoning;
+    if (_reasoningMarkers.any(lower.contains)) return TaskType.reasoning;
     return TaskType.general;
   }
 
-  /// Résout le meilleur modèle disponible pour une tâche.
-  /// [isPro] : si false, les modèles payants (isFree == false) sont exclus.
+  /// Meilleur modèle disponible pour une tâche.
+  ///
+  /// [isFull] : si faux, les modèles payants sont exclus de la chaîne.
   static ModelEntry? resolveModel(
     TaskType taskType, {
     String? userOverride,
-    bool isPro = true,
+    bool isFull = true,
   }) {
-    // Si l'utilisateur a sélectionné un modèle explicite (pas 'auto'/'task:*')
-    if (userOverride != null &&
-        !userOverride.startsWith('auto') &&
-        !userOverride.startsWith('task:')) {
-      final entry = _registry[userOverride];
-      if (entry != null && !rateLimiter.isCoolingDown(userOverride)) {
-        // Les utilisateurs gratuits ne peuvent pas forcer un modèle payant
-        if (!isPro && !entry.isFree) {
-          print('[ModelRouter] Free user tried to force paid model: $userOverride');
-        } else {
-          return entry;
-        }
+    if (userOverride != null && _registry.containsKey(userOverride)) {
+      final entry = _registry[userOverride]!;
+      if (!rateLimiter.isCoolingDown(userOverride) && (isFull || entry.isFree)) {
+        return entry;
       }
     }
 
-    // Si l'utilisateur a forcé un type de tâche
-    // NOTE : task:vocal et task:vocalFast étaient auparavant silencieusement
-    // ignorés (mappings manquants) — la chaîne vocale (arcee/trinity, neversleep/
-    // ring-2.6-1t) était morte et le mode vocal routait via deepseek-v4-flash
-    // (chaîne générale). Restauration des mappings pour utiliser les modèles
-    // joviaux/rapides conçus pour la conversation vocale.
-    TaskType effectiveTask = taskType;
-    if (userOverride == 'task:code') effectiveTask = TaskType.code;
-    if (userOverride == 'task:vision') effectiveTask = TaskType.vision;
-    if (userOverride == 'task:reasoning') effectiveTask = TaskType.reasoning;
-    if (userOverride == 'task:document') effectiveTask = TaskType.document;
-    if (userOverride == 'task:vocal') effectiveTask = TaskType.vocal;
-    if (userOverride == 'task:vocalFast') effectiveTask = TaskType.vocalFast;
-
-    final chain = _routingTable[effectiveTask] ?? _routingTable[TaskType.general]!;
+    final chain = _routingTable[taskType] ?? _routingTable[TaskType.general]!;
     for (final modelId in chain) {
       final entry = _registry[modelId];
-      if (entry == null) continue;
-      if (rateLimiter.isCoolingDown(modelId)) continue;
-      // Utilisateurs gratuits : sauter les modèles payants
-      if (!isPro && !entry.isFree) {
-        print('[ModelRouter] Skipping paid model for free user: $modelId');
-        continue;
-      }
+      if (entry == null || rateLimiter.isCoolingDown(modelId)) continue;
+      if (!isFull && !entry.isFree) continue;
       return entry;
     }
-
-    // Dernier recours : deepseek-v4-pro (toujours accessible, même pour les gratuits).
-    // Exception : pour la vision, ne JAMAIS retourner un modèle non-vision —
-    // sinon l'image est envoyée à un modèle qui ne la comprend pas (réponse
-    // cassée). On retourne null pour que l'appelant (_getVisionStream) déclenche
-    // le message d'erreur propre "Analyse d'image indisponible, réessayez dans
-    // quelques minutes" plutôt qu'une erreur opaque ou un contenu garbage.
-    final lastResort = _registry['deepseek-v4-pro'];
-    if (effectiveTask == TaskType.vision && !(lastResort?.supportsVision ?? false)) {
-      return null;
-    }
-    return lastResort;
+    return null;
   }
 
-  /// Marque un modèle comme rate-limited après un 429.
+  static ModelParams resolveParams(TaskType taskType) => switch (taskType) {
+        TaskType.reasoning =>
+          const ModelParams(temperature: 0.7, maxTokens: AppConfig.maxTokens),
+        TaskType.vision =>
+          const ModelParams(temperature: 0.5, maxTokens: AppConfig.maxTokens),
+        TaskType.general =>
+          const ModelParams(temperature: 0.7, maxTokens: AppConfig.maxTokens),
+      };
+
   static void markRateLimited(String modelId) {
     final entry = _registry[modelId];
-    final duration = (entry?.isFree ?? false)
-        ? const Duration(minutes: 5)
-        : const Duration(minutes: 1);
-    rateLimiter.setCooldown(modelId, duration: duration);
+    rateLimiter.setCooldown(
+      modelId,
+      duration: (entry?.isFree ?? false)
+          ? const Duration(minutes: 5)
+          : const Duration(minutes: 1),
+    );
   }
 
-  /// Retourne l'entrée du registre pour un modelId.
-  static ModelEntry? getEntry(String modelId) => _registry[modelId];
-
-  // ── Complex task detection (cost optimization) ───────────────────────────
-
-  /// Version enrichie de [classifyTask] qui détecte les tâches complexes
-  /// nécessitant deepseek-v4-pro ou le mode thinking.
-  static TaskType classifyTaskEnhanced(
-    String message, {
-    bool hasImage = false,
-    bool hasFile = false,
-    bool isDocGen = false,
-    List<String>? attachmentTypes,
-  }) {
-    // Routage prioritaire inchangé (pièces jointes)
-    if (attachmentTypes != null && attachmentTypes.isNotEmpty) {
-      if (attachmentTypes.any((t) => t == 'image')) return TaskType.vision;
-      if (attachmentTypes.any((t) => t == 'pdf' || t == 'document' || t == 'spreadsheet' || t == 'presentation')) {
-        return TaskType.document;
-      }
-      if (attachmentTypes.any((t) => t == 'text')) return TaskType.longFile;
-    }
-
-    if (hasImage) return TaskType.vision;
-    if (isDocGen) return TaskType.document;
-    if (hasFile) return TaskType.longFile;
-
-    final lower = message.toLowerCase();
-
-    // Deep reasoning → thinking ON (deepseek-reasoner)
-    if (_isDeepReasoningPrompt(lower)) return TaskType.reasoning;
-
-    // Complex tasks → deepseek-v4-pro (document routing)
-    if (_isDocumentGenerationPrompt(lower) ||
-        _isExtractionPrompt(lower) ||
-        _isMultiStepAction(lower)) {
-      return TaskType.document;
-    }
-
-    // Fallback sur la classification existante
-    if (_containsCodeKeywords(lower)) return TaskType.code;
-    if (_containsReasoningKeywords(lower)) return TaskType.reasoning;
-    return TaskType.general;
-  }
-
-  /// Résout les paramètres (température, tokens, thinking) pour un type de tâche.
-  static ModelParams resolveParams(TaskType taskType) {
-    switch (taskType) {
-      case TaskType.reasoning:
-        return const ModelParams(
-          temperature: 0.7,
-          maxTokens: 4096,
-          enableThinking: true,
-        );
-      case TaskType.document:
-      case TaskType.longFile:
-      case TaskType.code:
-        return const ModelParams(
-          temperature: 0.7,
-          maxTokens: 4096,
-          enableThinking: false,
-        );
-      case TaskType.vocal:
-      case TaskType.vocalFast:
-        return const ModelParams(
-          temperature: 0.95,
-          maxTokens: 2048,
-          enableThinking: false,
-        );
-      case TaskType.vision:
-        return const ModelParams(
-          temperature: 0.7,
-          maxTokens: 4096,
-          enableThinking: false,
-        );
-      case TaskType.general:
-        return const ModelParams(
-          temperature: 0.7,
-          maxTokens: 4096,
-          enableThinking: false,
-        );
-    }
-  }
-
-  static bool _isDocumentGenerationPrompt(String text) {
-    const markers = [
-      'genere un document', 'génère un document', 'generate a document',
-      'redige un document', 'rédige un document', 'write a document',
-      'docgen', 'document complet', 'complete document',
-      'rapport detaille', 'rapport détaillé', 'detailed report',
-      'mémoire', 'memoire', 'these', 'thèse', 'dissertation',
-    ];
-    return markers.any((m) => text.contains(m));
-  }
-
-  static bool _isExtractionPrompt(String text) {
-    const markers = [
-      'nettoie et structure le texte extrait', 'clean and structure the extracted text',
-      'extrait suivant', 'extracted text', '/extract',
-      'analyse ce contenu', 'analyze this content',
-      'resume et structure', 'résume et structure',
-      'synthese de', 'synthèse de', 'summary of',
-    ];
-    return markers.any((m) => text.contains(m));
-  }
-
-  static bool _isMultiStepAction(String text) {
-    const stepMarkers = [
-      'etape 1', 'étape 1', 'step 1', 'phase 1',
-      'd\'abord', 'ensuite', 'puis', 'finalement',
-      'first', 'then', 'next', 'after that', 'finally',
-      'planifie', 'organise', 'coordonne',
-      'multi-step', 'plusieurs etapes', 'plusieurs étapes',
-    ];
-    final hasSteps = stepMarkers.any((m) => text.contains(m));
-
-    const actionVerbs = [
-      'trouve', 'cherche', 'recherche', 'reserve', 'réserve', 'achete', 'achète',
-      'planifie', 'organise', 'coordonne', 'genere', 'génère', 'redige', 'rédige',
-      'find', 'search', 'book', 'buy', 'plan', 'organize', 'generate', 'write',
-    ];
-    var verbCount = 0;
-    for (final verb in actionVerbs) {
-      if (text.contains(verb)) verbCount++;
-    }
-
-    return hasSteps || verbCount >= 3;
-  }
-
-  static bool _isDeepReasoningPrompt(String text) {
-    const markers = [
-      'prouve', 'prove', 'démonstration', 'demonstration',
-      'theorem', 'théorème', 'axiome', 'proof',
-      'raisonnement pas a pas', 'raisonnement pas à pas', 'step by step reasoning',
-      'chaine de pensee', 'chaîne de pensée', 'chain of thought',
-      'explique ton raisonnement', 'explain your reasoning',
-      'démontre', 'demontre', 'démontrer', 'demontrer',
-    ];
-    return markers.any((m) => text.contains(m));
-  }
-
-  static bool _containsCodeKeywords(String text) {
-    const keywords = [
-      'code', 'fonction', 'function', 'bug', 'debug', 'programmer',
-      'compile', 'refactor', 'script', 'python', 'dart', 'javascript',
-      'html', 'css', 'sql', 'api', 'endpoint', 'écrire un programme',
-      'write a function', 'algorithme', 'algorithm', 'coder', 'codez',
-      'class ', 'void ', 'async ', 'import ', 'def ', 'fn ',
-    ];
-    return keywords.any((k) => text.contains(k));
-  }
-
-  static bool _containsReasoningKeywords(String text) {
-    const keywords = [
-      'analyser', 'analyze', 'raisonner', 'reason', 'logique', 'logic',
-      'prouver', 'prove', 'démontrer', 'démonstration', 'mathématique',
-      'equation', 'résoudre', 'solve', 'calculer', 'pourquoi',
-      'expliquer pourquoi', 'hypothèse', 'hypothesis', 'comparer',
-      'compare', 'contraste', 'déduire', 'infer', 'raisonnement',
-    ];
-    return keywords.any((k) => text.contains(k));
-  }
+  static const _reasoningMarkers = [
+    'analyse', 'analyser', 'raisonne', 'raisonnement', 'démontre', 'demontre',
+    'prouve', 'preuve', 'logique', 'étape par étape', 'etape par etape',
+    'compare', 'compare ces', 'pourquoi', 'explique pourquoi',
+    'analyze', 'reason', 'prove', 'step by step', 'compare', 'why',
+  ];
 }

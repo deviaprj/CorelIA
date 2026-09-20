@@ -1,9 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import '../prefs/local_pref_timestamp.dart';
 
-// ── Theme ─────────────────────────────────────────────────────────────────────
+// ── Thème ─────────────────────────────────────────────────────────────────────
 final themeModeProvider = StateNotifierProvider<ThemeModeNotifier, ThemeMode>(
   (ref) => ThemeModeNotifier(),
 );
@@ -13,51 +12,57 @@ class ThemeModeNotifier extends StateNotifier<ThemeMode> {
     _load();
   }
 
+  static const _prefsKey = 'theme_mode';
+
   Future<void> _load() async {
     final prefs = await SharedPreferences.getInstance();
-    final stored = prefs.getString('theme_mode');
-    if (stored == 'dark') state = ThemeMode.dark;
-    if (stored == 'light') state = ThemeMode.light;
+    switch (prefs.getString(_prefsKey)) {
+      case 'dark':
+        state = ThemeMode.dark;
+      case 'light':
+        state = ThemeMode.light;
+    }
   }
 
   Future<void> setTheme(ThemeMode mode) async {
     state = mode;
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('theme_mode', mode.name);
-    // Horodate l'édition locale pour le last-write-wins multi-appareils.
-    await LocalPrefTimestamp.markUpdated();
+    await prefs.setString(_prefsKey, mode.name);
   }
 }
 
-// ── Onboarding ────────────────────────────────────────────────────────────────
-final onboardingDoneProvider = FutureProvider<bool>((ref) async {
-  final prefs = await SharedPreferences.getInstance();
-  return prefs.getBool('onboarding_done') ?? false;
-});
+// ── Prompt système ────────────────────────────────────────────────────────────
+const _systemPromptKey = 'corelia_system_prompt';
 
-// ── TTS Speed ─────────────────────────────────────────────────────────────────
-final ttsSpeedProvider = StateNotifierProvider<TtsSpeedNotifier, double>(
-  (ref) => TtsSpeedNotifier(),
+const kDefaultSystemPrompt =
+    'Tu es CorelIA, un assistant IA conversationnel chaleureux et intelligent. '
+    'Tu réponds en français par défaut, de façon directe, utile et concise. '
+    'Tu tutoies par défaut et tu ne dis jamais « en tant que modèle de langage ».';
+
+final systemPromptProvider = StateNotifierProvider<SystemPromptNotifier, String>(
+  (ref) => SystemPromptNotifier(),
 );
 
-class TtsSpeedNotifier extends StateNotifier<double> {
-  TtsSpeedNotifier() : super(0.65) {
+class SystemPromptNotifier extends StateNotifier<String> {
+  SystemPromptNotifier() : super(kDefaultSystemPrompt) {
     _load();
   }
 
   Future<void> _load() async {
     final prefs = await SharedPreferences.getInstance();
-    final stored = prefs.getDouble('tts_speed');
-    if (stored != null) {
-      state = stored.clamp(0.5, 2.0);
-    }
+    final saved = prefs.getString(_systemPromptKey);
+    if (saved != null && saved.isNotEmpty) state = saved;
   }
 
-  Future<void> setSpeed(double speed) async {
-    state = speed.clamp(0.5, 2.0);
+  Future<void> save(String prompt) async {
+    state = prompt.trim().isEmpty ? kDefaultSystemPrompt : prompt;
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setDouble('tts_speed', state);
-    // Horodate l'édition locale pour le last-write-wins multi-appareils.
-    await LocalPrefTimestamp.markUpdated();
+    await prefs.setString(_systemPromptKey, state);
+  }
+
+  Future<void> reset() async {
+    state = kDefaultSystemPrompt;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_systemPromptKey);
   }
 }
