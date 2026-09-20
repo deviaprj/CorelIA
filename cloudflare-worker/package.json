@@ -1,0 +1,18 @@
+{
+  "name": "corelia-cloudflare-worker",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Passerelle IA CorelIA (chat SSE + recherche web) pour zentic.fr",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit",
+    "types": "wrangler types"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250109.0",
+    "typescript": "^5.7.2",
+    "wrangler": "^4.0.0"
+  }
+}

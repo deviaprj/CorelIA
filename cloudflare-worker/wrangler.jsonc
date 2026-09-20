@@ -1,0 +1,35 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "corelia-api",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-01-01",
+  "workers_dev": false,
+  "observability": {
+    "enabled": true
+  },
+
+  // Domaine personnalisé : Cloudflare crée automatiquement l'enregistrement DNS
+  // et le certificat TLS pour api.zentic.fr (zone zentic.fr déjà sur Cloudflare).
+  "routes": [
+    {
+      "pattern": "api.zentic.fr",
+      "custom_domain": true
+    }
+  ],
+
+  // Workers AI (repli / vision) — aucune clé requise, facturé au neurone.
+  "ai": {
+    "binding": "AI"
+  },
+
+  "vars": {
+    "ALLOWED_ORIGINS": "https://zentic.fr,https://www.zentic.fr",
+    "AI_TEXT_MODEL": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+    "AI_VISION_MODEL": "@cf/meta/llama-3.2-11b-vision-instruct",
+    "RATE_LIMIT_PER_MINUTE": "100"
+  }
+
+  // Secrets à définir (jamais dans ce fichier) :
+  //   npx wrangler secret put DEEPSEEK_API_KEY   # clé du fournisseur IA
+  //   npx wrangler secret put CLIENT_API_KEY     # clé publique de l'app (soft gate)
+}

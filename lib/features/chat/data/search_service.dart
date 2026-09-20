@@ -71,21 +71,61 @@ class SearchService {
     final cached = searchCache.get(query, lang: lang);
     if (cached != null) return cached;
 
+    // 1. Worker Cloudflare (recherche côté serveur, sans contrainte CORS).
+    if (AppConfig.isWorkerConfigured) {
+      try {
+        final results = await _searchViaWorker(query);
+        if (results.isNotEmpty) return _remember(query, results, lang);
+      } catch (e) {
+        debugPrint('[SearchService] Recherche via Worker échouée : $e');
+      }
+    }
+
+    // 2. Repli : DuckDuckGo direct depuis le client.
     try {
       final results = await searchDirect(query);
-      if (results.isNotEmpty) {
-        searchCache.put(query, results, lang: lang);
-        _lastSearchQuery = query;
-        _lastSearchResults = results;
-        _lastSearchTime = DateTime.now();
-        return results;
-      }
+      if (results.isNotEmpty) return _remember(query, results, lang);
     } catch (e) {
       debugPrint('[SearchService] Recherche directe échouée : $e');
     }
 
     // Dernier recours : cache expiré (mode hors-ligne).
     return searchCache.getExpired(query, lang: lang) ?? const [];
+  }
+
+  List<WebSearchResult> _remember(
+    String query,
+    List<WebSearchResult> results,
+    String? lang,
+  ) {
+    searchCache.put(query, results, lang: lang);
+    _lastSearchQuery = query;
+    _lastSearchResults = results;
+    _lastSearchTime = DateTime.now();
+    return results;
+  }
+
+  /// Recherche via `GET $WORKER_URL/search`.
+  Future<List<WebSearchResult>> _searchViaWorker(String query) async {
+    final response = await _dio.get<Map<String, dynamic>>(
+      '${AppConfig.workerBaseUrl}/search',
+      queryParameters: {'q': query, 'limit': AppConfig.searchResultsLimit},
+      options: Options(
+        headers: {if (AppConfig.clientApiKey.isNotEmpty) 'X-API-Key': AppConfig.clientApiKey},
+      ),
+    );
+
+    final results = response.data?['results'] as List<dynamic>? ?? const [];
+    return results
+        .whereType<Map<String, dynamic>>()
+        .map(
+          (r) => WebSearchResult(
+            title: r['title'] as String? ?? 'Sans titre',
+            url: r['url'] as String? ?? '',
+            snippet: r['snippet'] as String? ?? '',
+          ),
+        )
+        .toList();
   }
 
   /// Recherche DuckDuckGo en cascade sur plusieurs endpoints.

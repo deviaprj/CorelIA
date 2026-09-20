@@ -1,0 +1,8 @@
+# À copier en `.dev.vars` pour le développement local (`npx wrangler dev`).
+# `.dev.vars` est ignoré par git — ne jamais committer de vraies clés.
+
+# Clé du fournisseur IA (facultatif : Workers AI prend le relais sans clé)
+DEEPSEEK_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+# Clé publique de l'app mobile (soft gate). Vide = Worker ouvert.
+CLIENT_API_KEY=
