@@ -22,8 +22,9 @@ if [ ! -f "$ENV_FILE" ]; then
 fi
 
 read_env() {
+  # `|| true` : une clé absente ne doit pas faire sortir le script (`set -e`).
   grep -E "^$1=" "$ENV_FILE" 2>/dev/null | head -1 | cut -d= -f2- \
-    | tr -d '"' | tr -d '\r' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//'
+    | tr -d '"' | tr -d '\r' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' || true
 }
 
 WORKER_URL="$(read_env CLOUDFLARE_WORKER_URL)"

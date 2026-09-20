@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../../app/theme.dart';
 import '../../../core/config/app_config.dart';
-import '../../../shared/extensions/string_extensions.dart';
+import '../domain/auth_error_text.dart';
+import '../domain/auth_validators.dart';
 import 'auth_notifier.dart';
 
 /// Écran de connexion / inscription.
@@ -17,7 +19,6 @@ class LoginScreen extends ConsumerStatefulWidget {
 class _LoginScreenState extends ConsumerState<LoginScreen> {
   final _emailCtrl = TextEditingController();
   final _passCtrl = TextEditingController();
-  bool _isRegister = false;
   bool _obscurePass = true;
 
   @override
@@ -34,27 +35,21 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
   Future<void> _submit() async {
     final email = _emailCtrl.text.trim();
-    final pass = _passCtrl.text;
+    final password = _passCtrl.text;
 
-    if (email.isEmpty || pass.isEmpty) {
-      _notify('Veuillez remplir tous les champs');
+    final emailError = AuthValidators.email(email);
+    if (emailError != null) {
+      _notify(emailError);
       return;
     }
-    if (!email.isValidEmail) {
-      _notify('Email invalide');
-      return;
-    }
-    if (_isRegister && pass.length < 6) {
-      _notify('Le mot de passe doit faire au moins 6 caractères');
+    if (password.isEmpty) {
+      _notify('Saisis ton mot de passe.');
       return;
     }
 
-    final auth = ref.read(authNotifierProvider.notifier);
-    if (_isRegister) {
-      await auth.registerWithEmail(email, pass, 'Utilisateur');
-    } else {
-      await auth.signInWithEmail(email, pass);
-    }
+    await ref
+        .read(authNotifierProvider.notifier)
+        .signInWithEmail(email, password);
   }
 
   Future<void> _signInWithGoogle() =>
@@ -68,7 +63,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     final isLoading = ref.watch(authNotifierProvider).isLoading;
 
     ref.listen(authNotifierProvider, (_, next) {
-      if (next.hasError) _notify(next.error.toString());
+      if (next.hasError) _notify(authErrorMessage(next.error));
     });
 
     return Scaffold(
@@ -97,13 +92,13 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        Text(
-                          _isRegister ? 'Créer un compte' : 'Bon retour',
+                        const Text(
+                          'Bon retour',
                           textAlign: TextAlign.center,
-                          style: Theme.of(context)
-                              .textTheme
-                              .headlineSmall
-                              ?.copyWith(fontWeight: FontWeight.bold),
+                          style: TextStyle(
+                            fontSize: 24,
+                            fontWeight: FontWeight.bold,
+                          ),
                         ),
                         const SizedBox(height: 28),
                         TextField(
@@ -154,7 +149,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                     color: Colors.white,
                                   ),
                                 )
-                              : Text(_isRegister ? "S'inscrire" : 'Se connecter'),
+                              : const Text('Se connecter'),
                         ),
                         const SizedBox(height: 12),
                         OutlinedButton.icon(
@@ -170,18 +165,14 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                         Row(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            Text(
-                              _isRegister
-                                  ? 'Déjà un compte ? '
-                                  : 'Pas encore de compte ? ',
-                              style: const TextStyle(fontSize: 13),
+                            const Text(
+                              'Pas encore de compte ? ',
+                              style: TextStyle(fontSize: 13),
                             ),
                             GestureDetector(
-                              onTap: () => setState(
-                                () => _isRegister = !_isRegister,
-                              ),
-                              child: Text(
-                                _isRegister ? 'Se connecter' : "S'inscrire",
+                              onTap: () => context.go('/register'),
+                              child: const Text(
+                                "S'inscrire",
                                 style: TextStyle(
                                   fontSize: 13,
                                   fontWeight: FontWeight.w600,
@@ -191,10 +182,14 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                             ),
                           ],
                         ),
-                        if (isDemoMode) ...[
+                        if (isDemoMode || firebaseUnavailable) ...[
                           const SizedBox(height: 16),
                           Text(
-                            'Mode démo : Firebase désactivé',
+                            firebaseUnavailable
+                                ? 'Comptes en ligne indisponibles : Firebase '
+                                    "n'est pas configuré dans ce build.\n"
+                                    'Les conversations restent locales.'
+                                : 'Mode démo : Firebase désactivé',
                             textAlign: TextAlign.center,
                             style: TextStyle(
                               fontSize: 11,

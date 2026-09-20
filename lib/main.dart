@@ -24,14 +24,17 @@ Future<void> main() async {
     debugPrint('[dotenv] .env non embarqué (attendu en release)');
   }
 
-  // Firebase : tenter, basculer en mode démo si indisponible.
+  // Firebase : indispensable aux comptes et à l'historique en ligne. S'il manque
+  // dans ce build, on continue en local — mais l'interface doit l'annoncer,
+  // sinon l'utilisateur croit s'être inscrit alors que rien n'est enregistré.
   if (!isDemoMode) {
     try {
       await Firebase.initializeApp(
         options: DefaultFirebaseOptions.currentPlatform,
       );
     } catch (e) {
-      debugPrint('[Firebase] Indisponible : $e — bascule en mode démo');
+      debugPrint('[Firebase] Indisponible : $e');
+      firebaseUnavailable = true;
       isDemoMode = true;
     }
   }

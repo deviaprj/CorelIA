@@ -4,6 +4,13 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 /// Activé par `--dart-define=DEMO_MODE=true` (désactivé par défaut).
 bool isDemoMode = const bool.fromEnvironment('DEMO_MODE', defaultValue: false);
 
+/// Vrai quand Firebase n'a pas pu s'initialiser dans ce build.
+///
+/// L'appli reste utilisable en local, mais **aucun compte réel ni historique en
+/// ligne** n'est disponible : l'interface doit le dire clairement plutôt que de
+/// laisser croire à une inscription réussie.
+bool firebaseUnavailable = false;
+
 /// Lecture d'une clé : priorité au `--dart-define` (compilé dans le binaire),
 /// puis au fichier `.env` (facultatif, jamais embarqué en release).
 String? _env(String key) {

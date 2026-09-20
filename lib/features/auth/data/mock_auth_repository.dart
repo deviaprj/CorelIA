@@ -4,9 +4,13 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../core/models/app_user.dart';
+import 'auth_repository.dart';
 
-/// Repository d'authentification simulé — utilisé en mode démo (sans Firebase)
-/// et par les tests.
+/// Repository d'authentification simulé — mode démo (sans Firebase) et tests.
+///
+/// Il reproduit les méthodes de [AuthRepository] sans réseau. L'e-mail de
+/// vérification est simulé et le compte est considéré vérifié immédiatement :
+/// sans serveur, il n'y a aucune boîte mail à consulter.
 class MockAuthRepository {
   static const _emailKey = 'demo_user_email';
 
@@ -16,6 +20,8 @@ class MockAuthRepository {
   AppUser? _currentUser;
 
   AppUser? get currentUser => _currentUser;
+
+  bool get isEmailVerified => true;
 
   /// Réémet la valeur courante à chaque nouvel abonné.
   Stream<AppUser?> get authStateChanges async* {
@@ -33,23 +39,25 @@ class MockAuthRepository {
     debugPrint('[MockAuth] initialisé (mode démo)');
   }
 
-  Future<AppUser> registerWithEmail(String email, String password, String name) async {
+  Future<void> registerWithEmail(RegistrationData data) async {
     await Future<void>.delayed(const Duration(milliseconds: 300));
-    if (_users.containsKey(email)) {
-      throw Exception('Cet email est déjà utilisé');
+    if (_users.containsKey(data.email)) {
+      throw Exception('Cet e-mail est déjà utilisé');
     }
     final user = AppUser(
       uid: 'demo_${DateTime.now().millisecondsSinceEpoch}',
-      email: email,
-      displayName: name,
+      email: data.email,
+      displayName: data.fullName,
+      firstName: data.firstName,
+      lastName: data.lastName,
+      birthDate: data.birthDate,
       createdAt: DateTime.now(),
     );
-    _users[email] = user;
+    _users[data.email] = user;
     await _setCurrent(user);
-    return user;
   }
 
-  Future<AppUser> signInWithEmail(String email, String password) async {
+  Future<void> signInWithEmail(String email, String password) async {
     await Future<void>.delayed(const Duration(milliseconds: 200));
     if (password.length < 6) {
       throw Exception('Le mot de passe doit faire au moins 6 caractères');
@@ -63,22 +71,22 @@ class MockAuthRepository {
         );
     _users[email] = user;
     await _setCurrent(user);
-    return user;
   }
 
-  Future<AppUser> signInWithGoogle() async {
+  Future<void> signInWithGoogle() async {
     await Future<void>.delayed(const Duration(milliseconds: 300));
     final user = AppUser(
       uid: 'google_demo_${DateTime.now().millisecondsSinceEpoch}',
       email: 'demo.google@gmail.com',
       displayName: 'Utilisateur Google démo',
+      firstName: 'Utilisateur',
+      lastName: 'Google démo',
       createdAt: DateTime.now(),
     );
     await _setCurrent(user);
-    return user;
   }
 
-  Future<AppUser> signInAnonymously() async {
+  Future<void> signInAnonymously() async {
     await Future<void>.delayed(const Duration(milliseconds: 150));
     final user = AppUser(
       uid: 'anon_${DateTime.now().millisecondsSinceEpoch}',
@@ -87,8 +95,13 @@ class MockAuthRepository {
     );
     _currentUser = user;
     _authStateController.add(user);
-    return user;
   }
+
+  Future<void> sendEmailVerification() async {
+    debugPrint('[MockAuth] e-mail de vérification simulé (mode démo)');
+  }
+
+  Future<void> reloadCurrentUser() async {}
 
   Future<void> signOut() async {
     final prefs = await SharedPreferences.getInstance();

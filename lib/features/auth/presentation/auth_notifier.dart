@@ -1,69 +1,79 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/config/app_config.dart';
 import '../../../core/providers/firebase_providers.dart';
 import '../data/auth_repository.dart';
 import '../data/mock_auth_repository.dart';
+import '../data/user_profile_sync.dart';
 
-/// Authentification avec repli automatique sur le mock si Firebase échoue,
-/// afin que les boutons de connexion restent fonctionnels hors ligne.
+/// Authentification de l'utilisateur.
+///
+/// Les erreurs remontent telles quelles à l'interface : un mot de passe erroné,
+/// un e-mail déjà utilisé ou un réseau coupé ne doivent **jamais** être
+/// transformés en session locale factice. C'est précisément ce repli silencieux
+/// qui empêchait de rattacher l'historique à un vrai compte.
 class AuthNotifier extends AsyncNotifier<void> {
   @override
   Future<void> build() async {}
 
-  /// Exécute [firebaseAction], ou [demoAction] en mode démo / si Firebase échoue.
+  /// Exécute l'action distante, ou l'équivalent simulé en mode démo.
   Future<void> _run(
-    Future<void> Function() firebaseAction,
-    Future<void> Function() demoAction,
+    Future<void> Function(AuthRepository repository) online,
+    Future<void> Function() offline,
   ) async {
     state = const AsyncLoading();
     state = await AsyncValue.guard(() async {
       if (isDemoMode) {
-        await demoAction();
+        await offline();
       } else {
-        try {
-          await firebaseAction();
-        } catch (e) {
-          debugPrint('[AuthNotifier] Firebase indisponible, repli démo : $e');
-          isDemoMode = true;
-          await demoAction();
-        }
+        await online(ref.read(authRepositoryProvider));
       }
       ref.invalidate(authStateProvider);
+      ref.invalidate(userProfileProvider);
     });
   }
 
   Future<void> signInWithEmail(String email, String password) => _run(
-        () => ref.read(authRepositoryProvider).signInWithEmail(email, password),
+        (repository) => repository.signInWithEmail(email, password),
         () => mockAuthRepository.signInWithEmail(email, password),
       );
 
-  Future<void> registerWithEmail(String email, String password, String name) =>
-      _run(
-        () => ref
-            .read(authRepositoryProvider)
-            .registerWithEmail(email, password, name),
-        () => mockAuthRepository.registerWithEmail(email, password, name),
+  Future<void> register(RegistrationData data) => _run(
+        (repository) => repository.registerWithEmail(data),
+        () => mockAuthRepository.registerWithEmail(data),
       );
 
   Future<void> signInWithGoogle() => _run(
-        () => ref.read(authRepositoryProvider).signInWithGoogle(),
+        (repository) => repository.signInWithGoogle(),
         () => mockAuthRepository.signInWithGoogle(),
       );
 
   Future<void> signInAnonymously() => _run(
-        () => ref.read(authRepositoryProvider).signInAnonymously(),
+        (repository) => repository.signInAnonymously(),
         () => mockAuthRepository.signInAnonymously(),
       );
 
+  /// Renvoie l'e-mail de confirmation de l'adresse.
+  Future<void> resendVerificationEmail() => _run(
+        (repository) => repository.sendEmailVerification(),
+        () => mockAuthRepository.sendEmailVerification(),
+      );
+
+  /// Recharge le compte puis rafraîchit l'état d'authentification — à appeler
+  /// quand l'utilisateur déclare avoir cliqué sur le lien reçu.
+  Future<void> refreshVerificationStatus() async {
+    if (isDemoMode) return;
+    await ref.read(authRepositoryProvider).reloadCurrentUser();
+    ref.invalidate(authStateProvider);
+  }
+
   Future<void> signOut() => _run(
-        () => ref.read(authRepositoryProvider).signOut(),
+        (repository) => repository.signOut(),
         () => mockAuthRepository.signOut(),
       );
 
   Future<void> deleteAccount() => _run(
-        () => ref.read(authRepositoryProvider).deleteAccount(),
+        (repository) => repository.deleteAccount(),
         () => mockAuthRepository.deleteAccount(),
       );
 }
