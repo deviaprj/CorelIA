@@ -1,3 +1,8 @@
+# Règles ProGuard/R8 — CorelIA (chatbot mobile)
+# Ne conserver que ce qui est réellement embarqué : Flutter, Firebase,
+# Google Sign-In, RevenueCat, image_picker, file_picker, shared_preferences,
+# url_launcher, share_plus.
+
 # Flutter
 -keep class io.flutter.app.** { *; }
 -keep class io.flutter.plugin.** { *; }
@@ -6,13 +11,9 @@
 -keep class io.flutter.** { *; }
 -keep class io.flutter.plugins.** { *; }
 
-# Firebase
+# Firebase / Google Play Services (auth, sign-in)
 -keep class com.google.firebase.** { *; }
 -keep class com.google.android.gms.** { *; }
-
-# Google Services
--keep class com.google.android.gms.auth.** { *; }
--keep class com.google.android.gms.common.** { *; }
 
 # Kotlin
 -keep class kotlin.** { *; }
@@ -25,12 +26,16 @@
     public <methods>;
 }
 
-# Keep native methods
+# Génériques et annotations (utilisés par la sérialisation Firestore)
+-keepattributes Signature
+-keepattributes *Annotation*
+
+# Méthodes natives
 -keepclasseswithmembernames class * {
     native <methods>;
 }
 
-# Keep custom view constructors
+# Constructeurs de vues personnalisées
 -keepclasseswithmembers class * {
     public <init>(android.content.Context, android.util.AttributeSet);
 }
@@ -38,24 +43,20 @@
     public <init>(android.content.Context, android.util.AttributeSet, int);
 }
 
-# Keep setters
+# Accesseurs et énumérations (sérialisation par réflexion)
 -keepclassmembers class * {
     void set*(***);
     *** get*();
 }
-
-# Keep enum
 -keepclassmembers enum * {
     public static **[] values();
     public static ** valueOf(java.lang.String);
 }
 
-# Keep parcelable
+# Parcelable / Serializable
 -keep class * implements android.os.Parcelable {
     public static final android.os.Parcelable$Creator *;
 }
-
-# Keep Serializable
 -keepclassmembers class * implements java.io.Serializable {
     static final long serialVersionUID;
     private static final java.io.ObjectStreamField[] serialPersistentFields;
@@ -65,63 +66,23 @@
     java.lang.Object readResolve();
 }
 
-# Keep Lottie
--keep class com.airbnb.lottie.** { *; }
+# RevenueCat (purchases_flutter)
+-keep class com.revenuecat.purchases.** { *; }
+-dontwarn com.revenuecat.purchases.**
 
-# Keep Gson
--keepattributes Signature
--keepattributes *Annotation*
--dontwarn sun.misc.**
--keep class com.google.gson.** { *; }
--keep class * implements com.google.gson.TypeAdapterFactory
--keep class * implements com.google.gson.JsonSerializer
--keep class * implements com.google.gson.JsonDeserializer
-
-# Keep models for JSON serialization
--keepclassmembers,allowobfuscation class * {
-    @com.google.gson.annotations.SerializedName <fields>;
-}
-
-# Keep AdMob
--keep class com.google.android.gms.ads.** { *; }
-
-# Keep image_picker
+# image_picker / file_picker
 -keep class io.flutter.plugins.imagepicker.** { *; }
+-keep class com.mr.flutter.plugin.filepicker.** { *; }
 
-# Keep shared_preferences
+# flutter_image_compress
+-keep class com.fluttercandies.** { *; }
+
+# shared_preferences / url_launcher / share_plus
 -keep class io.flutter.plugins.sharedpreferences.** { *; }
-
-# Keep path_provider
--keep class io.flutter.plugins.pathprovider.** { *; }
-
-# Keep url_launcher
 -keep class io.flutter.plugins.urllauncher.** { *; }
-
-# Keep video_player
--keep class io.flutter.plugins.videoplayer.** { *; }
-
-# Keep wakelock
--keep class io.flutter.plugins.wakelock.** { *; }
-
-# Keep connectivity_plus
--keep class io.flutter.plugins.connectivity.** { *; }
-
-# Keep package_info
--keep class io.flutter.plugins.packageinfo.** { *; }
-
-# Keep device_info
--keep class io.flutter.plugins.deviceinfo.** { *; }
-
-# Keep share_plus
 -keep class io.flutter.plugins.share.** { *; }
 
-# Keep speech_to_text
--keep class com.csdcorp.speech_to_text.** { *; }
-
-# Keep flutter_tts
--keep class com.babylonhealth.** { *; }
-
-# Flutter Play Store Split - ignore missing classes (optional feature)
+# Flutter Play Store Split — classes optionnelles absentes
 -dontwarn com.google.android.play.core.splitinstall.**
 -dontwarn com.google.android.play.core.splitcompat.**
 -dontwarn com.google.android.play.core.tasks.**
