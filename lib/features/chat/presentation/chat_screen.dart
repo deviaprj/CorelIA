@@ -15,6 +15,7 @@ import '../data/image_upload_service.dart';
 import 'chat_bubble.dart';
 import 'chat_notifier.dart';
 import 'input_bar.dart';
+import 'speech_controller.dart';
 
 /// Écran de chat unique et épuré : liste de messages + champ de saisie.
 class ChatScreen extends ConsumerStatefulWidget {
@@ -39,6 +40,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
 
   @override
   void dispose() {
+    ref.read(speechProvider.notifier).stop();
     _scrollController.dispose();
     super.dispose();
   }
@@ -165,6 +167,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     });
 
     final messages = state.messages;
+    final speakingId = ref.watch(speechProvider);
 
     return Scaffold(
       appBar: AppBar(
@@ -323,6 +326,12 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                       final msg = messages[i];
                       return ChatBubble(
                         message: msg,
+                        isSpeaking: speakingId == msg.id,
+                        onSpeak: msg.isAssistant && msg.content.isNotEmpty
+                            ? () => ref
+                                .read(speechProvider.notifier)
+                                .toggle(msg.id, msg.content)
+                            : null,
                         onEdit: msg.isUser && msg.content.isNotEmpty
                             ? () => _inputBarKey.currentState?.setText(msg.content)
                             : null,

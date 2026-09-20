@@ -54,6 +54,7 @@ dependencies:
 
   # Variables d'environnement
   flutter_dotenv: ^5.2.1
+  flutter_tts: ^4.2.5
 
 dev_dependencies:
   flutter_test:

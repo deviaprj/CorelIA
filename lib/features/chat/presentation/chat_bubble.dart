@@ -12,10 +12,22 @@ import '../../../core/models/message.dart';
 
 /// Bulle de message (utilisateur ou assistant).
 class ChatBubble extends StatelessWidget {
-  const ChatBubble({super.key, required this.message, this.onEdit});
+  const ChatBubble({
+    super.key,
+    required this.message,
+    this.onEdit,
+    this.onSpeak,
+    this.isSpeaking = false,
+  });
 
   final Message message;
   final VoidCallback? onEdit;
+
+  /// Lecture à voix haute de la réponse (assistant uniquement).
+  final VoidCallback? onSpeak;
+
+  /// Vrai si cette réponse est en cours de lecture.
+  final bool isSpeaking;
 
   @override
   Widget build(BuildContext context) {
@@ -83,6 +95,8 @@ class ChatBubble extends StatelessWidget {
                     content: message.content,
                     isUser: isUser,
                     onEdit: onEdit,
+                    onSpeak: onSpeak,
+                    isSpeaking: isSpeaking,
                   ),
                 if (message.hasSearchSources)
                   _SourcesRow(sources: message.searchSources!),
@@ -203,17 +217,33 @@ class _MarkdownBody extends StatelessWidget {
 }
 
 class _ActionRow extends StatelessWidget {
-  const _ActionRow({required this.content, required this.isUser, this.onEdit});
+  const _ActionRow({
+    required this.content,
+    required this.isUser,
+    this.onEdit,
+    this.onSpeak,
+    this.isSpeaking = false,
+  });
 
   final String content;
   final bool isUser;
   final VoidCallback? onEdit;
+  final VoidCallback? onSpeak;
+  final bool isSpeaking;
 
   @override
   Widget build(BuildContext context) {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
+        if (!isUser && onSpeak != null)
+          _ActionButton(
+            icon: isSpeaking
+                ? Icons.stop_circle_outlined
+                : Icons.volume_up_outlined,
+            tooltip: isSpeaking ? 'Arrêter la lecture' : 'Lire à haute voix',
+            onTap: onSpeak!,
+          ),
         _ActionButton(
           icon: Icons.copy_outlined,
           tooltip: 'Copier',
