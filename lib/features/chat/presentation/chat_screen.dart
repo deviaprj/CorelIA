@@ -12,10 +12,12 @@ import '../../subscription/domain/quota_policy.dart';
 import '../../subscription/presentation/quota_exceeded_dialog.dart';
 import '../data/file_upload_service.dart';
 import '../data/image_upload_service.dart';
+import '../data/speech_text.dart';
 import 'chat_bubble.dart';
 import 'chat_notifier.dart';
 import 'input_bar.dart';
 import 'speech_controller.dart';
+import 'voice_setup_dialog.dart';
 
 /// Écran de chat unique et épuré : liste de messages + champ de saisie.
 class ChatScreen extends ConsumerStatefulWidget {
@@ -262,6 +264,12 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                             ? ThemeMode.light
                             : ThemeMode.dark,
                       );
+                case 'voice':
+                  await suggestVoiceSetupIfNeeded(
+                    context,
+                    language: resolveSpeechLanguage(''),
+                    force: true,
+                  );
                 case 'logout':
                   await ref.read(authNotifierProvider.notifier).signOut();
               }
@@ -272,6 +280,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                 child: Text(
                   role.isFull ? 'Mon abonnement' : 'Passer à l\'Agent IA Full',
                 ),
+              ),
+              const PopupMenuItem(
+                value: 'voice',
+                child: Text('Améliorer la voix'),
               ),
               PopupMenuItem(
                 value: 'theme',
@@ -328,9 +340,16 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                         message: msg,
                         isSpeaking: speakingId == msg.id,
                         onSpeak: msg.isAssistant && msg.content.isNotEmpty
-                            ? () => ref
-                                .read(speechProvider.notifier)
-                                .toggle(msg.id, msg.content)
+                            ? () async {
+                                await ref
+                                    .read(speechProvider.notifier)
+                                    .toggle(msg.id, msg.content);
+                                if (!context.mounted) return;
+                                await suggestVoiceSetupIfNeeded(
+                                  context,
+                                  language: resolveSpeechLanguage(msg.content),
+                                );
+                              }
                             : null,
                         onEdit: msg.isUser && msg.content.isNotEmpty
                             ? () => _inputBarKey.currentState?.setText(msg.content)
