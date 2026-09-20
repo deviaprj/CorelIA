@@ -36,6 +36,31 @@ void main() {
     test('ne renvoie rien pour un contenu vide ou du code seul', () {
       expect(stripMarkdownForSpeech('```\ncode\n```').trim(), isEmpty);
     });
+
+    test('supprime les emojis', () {
+      expect(stripMarkdownForSpeech('Bonjour 😀 !'), 'Bonjour !');
+      expect(stripMarkdownForSpeech('Bravo 🎉🎊'), 'Bravo');
+      expect(stripMarkdownForSpeech('C\'est fait ✅'), 'C\'est fait');
+      expect(stripMarkdownForSpeech('Attention ⚠️ au feu'), 'Attention au feu');
+    });
+
+    test('supprime les drapeaux et les séquences composées', () {
+      expect(stripMarkdownForSpeech('Vive la 🇫🇷 !'), 'Vive la !');
+      expect(stripMarkdownForSpeech('Famille 👨‍👩‍👧 ici'), 'Famille ici');
+      expect(stripMarkdownForSpeech('touche 1️⃣ active'), 'touche 1 active');
+    });
+
+    test('supprime les flèches et puces symboliques', () {
+      expect(stripMarkdownForSpeech('→ première étape'), 'première étape');
+      expect(stripMarkdownForSpeech('résultat ➜ gagné'), 'résultat gagné');
+    });
+
+    test('conserve les accents, la ponctuation et les chiffres', () {
+      expect(
+        stripMarkdownForSpeech('Où ça ? 12,50 € — bien sûr !'),
+        'Où ça ? 12,50 € — bien sûr !',
+      );
+    });
   });
 
   group('resolveSpeechLanguage', () {

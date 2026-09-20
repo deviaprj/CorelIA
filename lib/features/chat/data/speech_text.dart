@@ -4,7 +4,26 @@ import 'dart:ui';
 ///
 /// Fonctions pures, testables sans moteur de synthèse vocale.
 
-/// Retire la syntaxe Markdown : on ne lit que le texte prononçable.
+/// Emojis, pictogrammes et symboles non prononçables.
+///
+/// Dart ne propose pas les classes Unicode `\p{Emoji}` : on cible les plages
+/// concernées, plus les sélecteurs de variation, le liant ZWJ et les marques
+/// combinantes utilisées par les séquences emoji.
+final _emojiRanges = RegExp(
+  '['
+  r'\u{1F000}-\u{1FAFF}' // pictogrammes, visages, drapeaux, symboles
+  r'\u{2600}-\u{27BF}' // symboles divers, dingbats (☀ ✅ ✨ ➜…)
+  r'\u{2B00}-\u{2BFF}' // flèches et symboles divers
+  r'\u{2190}-\u{21FF}' // flèches
+  r'\u{20D0}-\u{20FF}' // marques combinantes
+  r'\u{20E3}' // touche encadrante (1️⃣)
+  r'\u{FE0E}\u{FE0F}' // sélecteurs de variation
+  r'\u{200D}' // liant ZWJ (👨‍👩‍👧)
+  ']',
+  unicode: true,
+);
+
+/// Retire la syntaxe Markdown et les emojis : on ne lit que le prononçable.
 String stripMarkdownForSpeech(String markdown) {
   var text = markdown;
 
@@ -36,9 +55,13 @@ String stripMarkdownForSpeech(String markdown) {
   text = text.replaceAll(RegExp(r'\*\*|__|\*|_|~~'), '');
   // Délimiteurs de tableaux.
   text = text.replaceAll(RegExp(r'^\s*\|.*\|\s*$', multiLine: true), ' ');
+  // Emojis : jamais lus à voix haute.
+  text = text.replaceAll(_emojiRanges, ' ');
   // Espaces et lignes excédentaires.
   text = text.replaceAll(RegExp(r'[ \t]+'), ' ');
   text = text.replaceAll(RegExp(r'\n{2,}'), '\n');
+  // Espaces restés en début/fin de ligne après suppression.
+  text = text.replaceAll(RegExp(r' *\n *'), '\n');
 
   return text.trim();
 }
