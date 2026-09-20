@@ -11,7 +11,7 @@ class FileUploadException implements Exception {
   final String message;
   const FileUploadException(this.message);
   @override
-  String toString() => 'FileUploadException: \$message';
+  String toString() => 'FileUploadException: $message';
 }
 
 /// Service d'upload et extraction de texte depuis fichiers — 100% autonome.
@@ -41,18 +41,18 @@ class FileUploadService {
       if (bytes == null) continue;
 
       if (bytes.length > maxSingleBytes) {
-        debugPrint('[FileUploadService] \${file.name} ignoree (\${bytes.length ~/ 1024}KB > \${maxSingleBytes ~/ 1024}KB)');
+        debugPrint('[FileUploadService] ${file.name} ignoree (${bytes.length ~/ 1024}KB > ${maxSingleBytes ~/ 1024}KB)');
         continue;
       }
 
       if (totalSize + bytes.length > maxTotalBytes) {
-        debugPrint('[FileUploadService] Limite 5MB atteinte, \${result.files.length - attachments.length} fichier(s) ignore(s)');
+        debugPrint('[FileUploadService] Limite 5MB atteinte, ${result.files.length - attachments.length} fichier(s) ignore(s)');
         break;
       }
 
       final ext = _getExtension(file.name);
       final mime = _detectMimeType(file.name);
-      final text = await _extractText(bytes, ext, file.name);
+      final text = await extractText(bytes, ext, file.name);
 
       attachments.add(Attachment(
         type: Attachment.detectType(file.name),
@@ -68,7 +68,11 @@ class FileUploadService {
     return attachments;
   }
 
-  Future<String> _extractText(Uint8List bytes, String ext, String name) async {
+  /// Extrait le texte d'un fichier déjà en mémoire.
+  ///
+  /// Public pour être testable sans passer par le sélecteur de fichiers :
+  /// c'est ici que se joue la capacité de l'assistant à lire un document.
+  Future<String> extractText(Uint8List bytes, String ext, String name) async {
     try {
       switch (ext) {
         case 'pdf':
@@ -84,12 +88,12 @@ class FileUploadService {
         case 'md':
           return _decodeTextFile(bytes);
         default:
-          throw FileUploadException('Format non supporte: .\$ext');
+          throw FileUploadException('Format non supporte: .$ext');
       }
     } catch (e) {
       if (e is FileUploadException) rethrow;
-      debugPrint('[FileUploadService] Extraction error: \$e');
-      throw FileUploadException('Erreur extraction \$name: \$e');
+      debugPrint('[FileUploadService] Extraction error: $e');
+      throw FileUploadException('Erreur extraction $name: $e');
     }
   }
 
@@ -103,17 +107,30 @@ class FileUploadService {
     return utf8.decode(bytes, allowMalformed: true);
   }
 
+  /// Extrait le texte d'un PDF.
+  ///
+  /// Les flux (décompressés si besoin) sont la source la plus fiable ; le
+  /// balayage brut sert de repli. On ne se fie plus à une taille minimale :
+  /// un document court doit aussi être lu.
   String _extractPdf(Uint8List bytes) {
-    final direct = _extractStringsFromRawPdf(bytes);
-    if (direct.length > 80 && !direct.startsWith('[')) return direct;
     try {
       final fromStreams = _extractFromPdfStreams(bytes);
-      if (fromStreams.length > 80) return fromStreams;
+      if (_isUsablePdfText(fromStreams)) return fromStreams;
     } catch (e, st) {
-      debugPrint('[FileUploadService] PDF stream extraction error: \$e');
+      debugPrint('[FileUploadService] PDF stream extraction error: $e');
       debugPrint(st.toString());
     }
+
+    final direct = _extractStringsFromRawPdf(bytes);
+    if (_isUsablePdfText(direct)) return direct;
+
     return '[Extraction PDF incomplete — fichier probablement scanne, protege ou vectoriel]';
+  }
+
+  /// Vrai si l'extraction a produit du texte exploitable (et non un gabarit).
+  static bool _isUsablePdfText(String text) {
+    final trimmed = text.trim();
+    return trimmed.isNotEmpty && !trimmed.startsWith('[');
   }
 
   String _extractStringsFromRawPdf(Uint8List bytes) {
@@ -281,7 +298,7 @@ class FileUploadService {
         buffer.writeln();
         currentLine.clear();
       } else {
-        currentLine.write('\$fragment ');
+        currentLine.write('$fragment ');
       }
     }
     if (currentLine.isNotEmpty) buffer.writeln(currentLine.toString().trim());
@@ -342,7 +359,7 @@ class FileUploadService {
     final buffer = StringBuffer();
     for (final table in excel.tables.keys) {
       final sheet = excel.tables[table]!;
-      buffer.writeln('--- \$table ---');
+      buffer.writeln('--- $table ---');
       for (final row in sheet.rows) {
         final cells = row.map((cell) => cell?.value?.toString() ?? '').join('\t');
         if (cells.trim().isNotEmpty) buffer.writeln(cells);

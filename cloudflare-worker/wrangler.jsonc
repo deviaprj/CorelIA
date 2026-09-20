@@ -27,7 +27,10 @@
   "vars": {
     "ALLOWED_ORIGINS": "https://zentic.fr,https://www.zentic.fr",
     "AI_TEXT_MODEL": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
-    "AI_VISION_MODEL": "@cf/meta/llama-3.2-11b-vision-instruct",
+    // LLaVA plutôt que llama-3.2-11b-vision : la licence Meta de ce dernier
+    // interdit explicitement l'Union européenne (Moondream 3 attend une image
+    // sous forme de chaîne, que le binding Workers AI n'accepte pas encore).
+    "AI_VISION_MODEL": "@cf/llava-hf/llava-1.5-7b-hf",
     "RATE_LIMIT_PER_MINUTE": "100"
   }
 

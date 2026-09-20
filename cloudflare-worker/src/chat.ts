@@ -6,6 +6,17 @@ const DEEPSEEK_DEFAULT_MODEL = 'deepseek-v4-flash';
 const MAX_MESSAGES = 30;
 const DEFAULT_MAX_TOKENS = 4096;
 const DEFAULT_TEMPERATURE = 0.7;
+const MAX_VISION_PROMPT_CHARS = 2000;
+
+/**
+ * Modèle image→texte par défaut.
+ *
+ * LLaVA est retenu plutôt que `@cf/meta/llama-3.2-11b-vision-instruct` : ce
+ * dernier exige d'accepter une licence Meta interdisant explicitement les
+ * personnes et entreprises domiciliées dans l'Union européenne, ce qui est le
+ * cas de ce déploiement.
+ */
+const DEFAULT_VISION_MODEL = '@cf/llava-hf/llava-1.5-7b-hf';
 
 type Provider =
   | { kind: 'deepseek' }
@@ -68,7 +79,7 @@ function pickProvider(
 
   // Vision : Workers AI si disponible (les modèles texte ne lisent pas les images).
   if (hasImage(messages) && env.AI) {
-    return { kind: 'workers-ai', model: env.AI_VISION_MODEL ?? '@cf/meta/llama-3.2-11b-vision-instruct' };
+    return { kind: 'workers-ai', model: env.AI_VISION_MODEL ?? DEFAULT_VISION_MODEL };
   }
 
   if (env.DEEPSEEK_API_KEY) return { kind: 'deepseek' };
@@ -128,6 +139,11 @@ async function workersAiChat(
     return json(request, env, { error: 'Binding Workers AI indisponible.' }, 503);
   }
 
+  // Les modèles image→texte (Moondream, LLaVA) attendent `{image, prompt}` et
+  // non le format messages : on les traite à part.
+  const image = extractImage(options.messages);
+  if (image) return visionChat(request, env, model, options, image);
+
   const result = (await env.AI.run(model as never, {
     messages: options.messages,
     max_tokens: options.max_tokens,
@@ -148,6 +164,116 @@ async function workersAiChat(
       content: data.response ?? data.choices?.[0]?.message?.content ?? '',
     },
   });
+}
+
+/** Image extraite d'un message multimodal. */
+interface InlineImage {
+  bytes: number[];
+}
+
+/**
+ * Analyse d'image via un modèle image→texte de Workers AI.
+ *
+ * Ces modèles attendent `{ image, prompt }` et ne streament pas : la réponse
+ * est renvoyée sous forme d'un unique événement SSE, format que l'application
+ * sait déjà lire.
+ */
+async function visionChat(
+  request: Request,
+  env: Env,
+  model: string,
+  options: ChatOptions,
+  image: InlineImage,
+): Promise<Response> {
+  if (!env.AI) {
+    return json(request, env, { error: 'Binding Workers AI indisponible.' }, 503);
+  }
+
+  const result = (await env.AI.run(model as never, {
+    image: image.bytes,
+    prompt: conversationPrompt(options.messages),
+  } as never)) as unknown;
+
+  const text = visionTextFrom(result);
+  if (!text) {
+    return json(
+      request,
+      env,
+      { error: "Le modèle n'a pas pu analyser cette image." },
+      502,
+    );
+  }
+
+  return new Response(textToOpenAiSse(text), { headers: sseHeaders(request, env) });
+}
+
+/** Récupère le texte renvoyé par un modèle image→texte, quel que soit le champ. */
+function visionTextFrom(result: unknown): string {
+  if (typeof result === 'string') return result.trim();
+  if (result && typeof result === 'object') {
+    const data = result as Record<string, unknown>;
+    for (const key of ['response', 'description', 'caption', 'text', 'answer']) {
+      const value = data[key];
+      if (typeof value === 'string' && value.trim()) return value.trim();
+    }
+  }
+  return '';
+}
+
+/** Première image trouvée dans les messages (parcours du plus récent). */
+function extractImage(messages: ChatMessage[]): InlineImage | null {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const content = messages[i].content;
+    if (!Array.isArray(content)) continue;
+
+    for (const part of content) {
+      if (part['type'] !== 'image_url') continue;
+      const url = (part['image_url'] as { url?: string } | undefined)?.url;
+      if (typeof url !== 'string') continue;
+
+      const match = /^data:([^;]+);base64,(.+)$/s.exec(url);
+      if (!match || !match[1].startsWith('image/')) continue;
+
+      try {
+        const binary = atob(match[2]);
+        const bytes = Array.from(binary, (char) => char.charCodeAt(0));
+        if (bytes.length > 0) return { bytes };
+      } catch {
+        // Image illisible : on ignore cette partie.
+      }
+    }
+  }
+  return null;
+}
+
+/** Réduit la conversation à une consigne texte pour un modèle image→texte. */
+function conversationPrompt(messages: ChatMessage[]): string {
+  const lines: string[] = [];
+
+  for (const message of messages) {
+    const content = message.content;
+    const text = typeof content === 'string'
+      ? content
+      : content
+          .filter((part) => part['type'] === 'text')
+          .map((part) => String(part['text'] ?? ''))
+          .join(' ');
+
+    const trimmed = text.trim();
+    if (!trimmed) continue;
+
+    lines.push(message.role === 'assistant' ? `Assistant : ${trimmed}` : trimmed);
+  }
+
+  const prompt = lines.join('\n').trim();
+  return prompt.length > MAX_VISION_PROMPT_CHARS
+    ? prompt.slice(-MAX_VISION_PROMPT_CHARS)
+    : prompt;
+}
+
+/** Emballe un texte complet dans un flux SSE au format OpenAI. */
+function textToOpenAiSse(text: string): string {
+  return `${toSseChunk(text)}\ndata: [DONE]\n\n`;
 }
 
 /**
