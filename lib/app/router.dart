@@ -7,6 +7,7 @@ import '../core/providers/firebase_providers.dart';
 import '../features/auth/data/mock_auth_repository.dart';
 import '../features/auth/presentation/login_screen.dart';
 import '../features/chat/presentation/chat_screen.dart';
+import '../features/subscription/presentation/subscription_screen.dart';
 
 /// Clé du Navigator racine (accès au contexte depuis les callbacks).
 final rootNavigatorKey = GlobalKey<NavigatorState>();
@@ -31,6 +32,10 @@ final routerProvider = Provider<GoRouter>((ref) {
     routes: [
       GoRoute(path: '/login', builder: (_, __) => const LoginScreen()),
       GoRoute(path: '/chat', builder: (_, __) => const ChatScreen()),
+      GoRoute(
+        path: '/subscription',
+        builder: (_, __) => const SubscriptionScreen(),
+      ),
     ],
   );
 });

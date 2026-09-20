@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../../app/theme.dart';
 import '../../../core/config/app_config.dart';
@@ -154,6 +155,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
           context,
           role: role,
           dailyLimit: policy.dailyRequests ?? 0,
+          onUpgrade: () => context.push('/subscription'),
         );
         notifier.clearError();
       } else if (error != null) {
@@ -249,6 +251,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
           PopupMenuButton<String>(
             onSelected: (value) async {
               switch (value) {
+                case 'subscription':
+                  context.push('/subscription');
                 case 'theme':
                   await ref.read(themeModeProvider.notifier).setTheme(
                         themeMode == ThemeMode.dark
@@ -260,6 +264,12 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
               }
             },
             itemBuilder: (_) => [
+              PopupMenuItem(
+                value: 'subscription',
+                child: Text(
+                  role.isFull ? 'Mon abonnement' : 'Passer à l\'Agent IA Full',
+                ),
+              ),
               PopupMenuItem(
                 value: 'theme',
                 child: Text(
