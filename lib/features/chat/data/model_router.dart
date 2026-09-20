@@ -13,7 +13,7 @@ class ModelEntry {
   });
 
   final String modelId;
-  final String provider; // 'deepseek' | 'openrouter'
+  final String provider; // 'cloudflare' | 'deepseek'
   final bool isFree;
   final bool supportsVision;
 }
@@ -46,8 +46,21 @@ class RateLimitTracker {
 }
 
 /// Routage du modèle selon la tâche et le rôle de l'utilisateur.
+///
+/// En production, un Worker Cloudflare est configuré : il centralise le choix
+/// des modèles (et détient les clés). La table locale ci-dessous ne sert qu'au
+/// mode direct hors Worker (développement / tests).
 abstract class ModelRouter {
   static final rateLimiter = RateLimitTracker();
+
+  /// Entrée unique lorsqu'on passe par le Worker : le modèle est choisi côté
+  /// serveur (`auto`).
+  static const workerEntry = ModelEntry(
+    modelId: AppConfig.workerAutoModel,
+    provider: 'cloudflare',
+    isFree: true,
+    supportsVision: true,
+  );
 
   static const _registry = <String, ModelEntry>{
     AppConfig.deepSeekModel: ModelEntry(
@@ -71,16 +84,6 @@ abstract class ModelRouter {
       isFree: true,
       supportsVision: true,
     ),
-    AppConfig.openRouterVisionModel: ModelEntry(
-      modelId: AppConfig.openRouterVisionModel,
-      provider: 'openrouter',
-      supportsVision: true,
-    ),
-    AppConfig.openRouterGpt4oMini: ModelEntry(
-      modelId: AppConfig.openRouterGpt4oMini,
-      provider: 'openrouter',
-      supportsVision: true,
-    ),
   };
 
   static const _routingTable = <TaskType, List<String>>{
@@ -89,11 +92,7 @@ abstract class ModelRouter {
       AppConfig.deepSeekReasonerModel,
       AppConfig.deepSeekProModel,
     ],
-    TaskType.vision: [
-      AppConfig.deepSeekVisionModel,
-      AppConfig.openRouterVisionModel,
-      AppConfig.openRouterGpt4oMini,
-    ],
+    TaskType.vision: [AppConfig.deepSeekVisionModel],
   };
 
   /// Classe le message utilisateur en type de tâche.
@@ -112,6 +111,9 @@ abstract class ModelRouter {
     String? userOverride,
     bool isFull = true,
   }) {
+    // Worker Cloudflare configuré : il gère le routage et le fallback.
+    if (AppConfig.isWorkerConfigured) return workerEntry;
+
     if (userOverride != null && _registry.containsKey(userOverride)) {
       final entry = _registry[userOverride]!;
       if (!rateLimiter.isCoolingDown(userOverride) && (isFull || entry.isFree)) {
@@ -151,7 +153,7 @@ abstract class ModelRouter {
   static const _reasoningMarkers = [
     'analyse', 'analyser', 'raisonne', 'raisonnement', 'démontre', 'demontre',
     'prouve', 'preuve', 'logique', 'étape par étape', 'etape par etape',
-    'compare', 'compare ces', 'pourquoi', 'explique pourquoi',
-    'analyze', 'reason', 'prove', 'step by step', 'compare', 'why',
+    'compare', 'pourquoi', 'explique pourquoi',
+    'analyze', 'reason', 'prove', 'step by step', 'why',
   ];
 }

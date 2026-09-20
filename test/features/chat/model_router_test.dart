@@ -36,6 +36,11 @@ void main() {
       expect(entry!.supportsVision, isTrue);
     });
 
+    test('expose une entrée dédiée au Worker Cloudflare', () {
+      expect(ModelRouter.workerEntry.provider, 'cloudflare');
+      expect(ModelRouter.workerEntry.supportsVision, isTrue);
+    });
+
     test('accepte un modèle explicite du registre', () {
       final entry = ModelRouter.resolveModel(
         TaskType.general,

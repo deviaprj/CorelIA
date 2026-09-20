@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/api/ai_client.dart';
+import '../../../core/api/cloudflare_client.dart';
 import '../../../core/config/app_config.dart';
 import '../../../core/models/attachment.dart';
 import '../../../core/models/message.dart';
@@ -359,17 +360,15 @@ class ChatNotifier extends Notifier<ChatState> {
   }
 
   Stream<String> _stream(ModelEntry entry, List<Map<String, dynamic>> history) {
-    if (entry.provider == 'deepseek') {
-      final key = AppConfig.deepSeekApiKey;
-      if (key.isEmpty) throw const AiException('Clé API DeepSeek manquante');
-      return DeepSeekClient(apiKey: key).streamChat(
-        messages: history,
-        model: entry.modelId,
-      );
+    if (entry.provider == 'cloudflare') {
+      return CloudflareWorkerClient(
+        chatUrl: AppConfig.workerChatUrl,
+        apiKey: AppConfig.clientApiKey,
+      ).streamChat(messages: history, model: entry.modelId);
     }
-    final key = AppConfig.openRouterApiKey;
-    if (key.isEmpty) throw const AiException('Clé API OpenRouter manquante');
-    return OpenRouterClient(apiKey: key).streamChat(
+    final key = AppConfig.deepSeekApiKey;
+    if (key.isEmpty) throw const AiException('Clé API DeepSeek manquante');
+    return DeepSeekClient(apiKey: key).streamChat(
       messages: history,
       model: entry.modelId,
     );

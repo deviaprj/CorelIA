@@ -16,8 +16,10 @@ String? _env(String key) {
 String? _dartDefineValue(String key) => switch (key) {
       'DEEPSEEK_API_KEY' =>
         const String.fromEnvironment('DEEPSEEK_API_KEY', defaultValue: ''),
-      'OPENROUTER_API_KEY' =>
-        const String.fromEnvironment('OPENROUTER_API_KEY', defaultValue: ''),
+      'CLOUDFLARE_WORKER_URL' =>
+        const String.fromEnvironment('CLOUDFLARE_WORKER_URL', defaultValue: ''),
+      'CLIENT_API_KEY' =>
+        const String.fromEnvironment('CLIENT_API_KEY', defaultValue: ''),
       'REVENUECAT_API_KEY_ANDROID' =>
         const String.fromEnvironment('REVENUECAT_API_KEY_ANDROID', defaultValue: ''),
       'REVENUECAT_API_KEY_IOS' =>
@@ -35,19 +37,33 @@ abstract class AppConfig {
   static const appVersion = '2.0.0';
   static const shareTagline = '— Généré par CorelIA';
 
-  // ── Fournisseurs IA ────────────────────────────────────────────────────────
+  // ── Cloudflare Worker (passerelle IA) ──────────────────────────────────────
+  // URL de base du Worker, ex. `https://api.zentic.fr`.
+  static String get workerBaseUrl => _env('CLOUDFLARE_WORKER_URL') ?? '';
+
+  /// Clé publique (soft gate) envoyée dans `X-API-Key` au Worker.
+  static String get clientApiKey => _env('CLIENT_API_KEY') ?? '';
+
+  /// Endpoint de chat streaming du Worker.
+  static String get workerChatUrl {
+    final base = workerBaseUrl.replaceFirst(RegExp(r'/+$'), '');
+    return base.isEmpty ? '' : '$base/chat';
+  }
+
+  static bool get isWorkerConfigured => workerBaseUrl.isNotEmpty;
+
+  static const workerAutoModel = 'auto';
+  static const workerTimeout = Duration(seconds: 120);
+
+  // ── Fallback IA direct (développement, hors Worker) ────────────────────────
   static String get deepSeekApiKey => _env('DEEPSEEK_API_KEY') ?? '';
-  static String get openRouterApiKey => _env('OPENROUTER_API_KEY') ?? '';
 
   static const deepSeekBaseUrl = 'https://api.deepseek.com/v1/chat/completions';
-  static const openRouterBaseUrl = 'https://openrouter.ai/api/v1/chat/completions';
 
   static const deepSeekModel = 'deepseek-v4-flash';
   static const deepSeekProModel = 'deepseek-v4-pro';
   static const deepSeekReasonerModel = 'deepseek-reasoner';
   static const deepSeekVisionModel = 'deepseek-chat';
-  static const openRouterVisionModel = 'google/gemini-flash-1.5';
-  static const openRouterGpt4oMini = 'openai/gpt-4o-mini';
 
   /// Nombre de messages d'historique envoyés au modèle.
   static const maxContextMessages = 20;
