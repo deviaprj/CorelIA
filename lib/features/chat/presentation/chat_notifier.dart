@@ -9,10 +9,16 @@ import '../../../core/models/attachment.dart';
 import '../../../core/models/message.dart';
 import '../../../core/providers/app_providers.dart';
 import '../../../core/providers/firebase_providers.dart';
+import '../../subscription/data/quota_service.dart';
+import '../../subscription/data/role_providers.dart';
+import '../../subscription/domain/quota_policy.dart';
 import '../data/chat_repository.dart';
 import '../data/model_router.dart';
 import '../data/search_service.dart';
 import '../data/web_search_trigger.dart';
+
+/// Code d'erreur signalant un quota journalier épuisé.
+const kQuotaExceededError = 'quota_exceeded';
 
 /// État de l'écran de chat.
 class ChatState {
@@ -21,6 +27,8 @@ class ChatState {
     this.isStreaming = false,
     this.isSearching = false,
     this.useSearch = false,
+    this.remainingRequests,
+    this.quotaBlocked = false,
     this.error,
   });
 
@@ -30,6 +38,13 @@ class ChatState {
 
   /// Recherche Internet forcée par l'utilisateur.
   final bool useSearch;
+
+  /// Requêtes restantes aujourd'hui ; `null` si illimité (Agent IA Full).
+  final int? remainingRequests;
+
+  /// Vrai lorsqu'un envoi a été bloqué par le quota.
+  final bool quotaBlocked;
+
   final String? error;
 
   ChatState copyWith({
@@ -37,6 +52,8 @@ class ChatState {
     bool? isStreaming,
     bool? isSearching,
     bool? useSearch,
+    int? remainingRequests,
+    bool? quotaBlocked,
     String? error,
     bool clearError = false,
   }) =>
@@ -45,14 +62,27 @@ class ChatState {
         isStreaming: isStreaming ?? this.isStreaming,
         isSearching: isSearching ?? this.isSearching,
         useSearch: useSearch ?? this.useSearch,
+        remainingRequests: remainingRequests ?? this.remainingRequests,
+        quotaBlocked: quotaBlocked ?? this.quotaBlocked,
         error: clearError ? null : (error ?? this.error),
       );
 }
 
-/// Orchestre une conversation unique : persistance, recherche web et streaming IA.
+/// Message conservé le temps que l'utilisateur débloque son quota.
+class _PendingMessage {
+  const _PendingMessage({required this.text, this.attachments = const []});
+
+  final String text;
+  final List<Attachment> attachments;
+}
+
+/// Orchestre une conversation unique : persistance, quotas, recherche web et
+/// streaming IA.
 class ChatNotifier extends Notifier<ChatState> {
   String? _conversationId;
   StreamSubscription<List<Message>>? _subscription;
+  _PendingMessage? _pending;
+  String? _lastModel;
 
   @override
   ChatState build() {
@@ -77,11 +107,21 @@ class ChatNotifier extends Notifier<ChatState> {
     _subscription = repository.watchMessages(conversation.id).listen((messages) {
       if (!state.isStreaming) state = state.copyWith(messages: messages);
     });
+
+    await refreshQuota();
+  }
+
+  /// Recharge le compteur de requêtes restantes pour le rôle courant.
+  Future<void> refreshQuota() async {
+    final role = ref.read(userRoleProvider);
+    final remaining = await ref.read(quotaServiceProvider).remaining(role);
+    state = state.copyWith(remainingRequests: remaining);
   }
 
   void toggleSearch() => state = state.copyWith(useSearch: !state.useSearch);
 
-  void clearError() => state = state.copyWith(clearError: true);
+  void clearError() =>
+      state = state.copyWith(clearError: true, quotaBlocked: false);
 
   /// Envoie un message et streame la réponse de l'IA.
   Future<void> sendMessage(
@@ -96,20 +136,39 @@ class ChatNotifier extends Notifier<ChatState> {
     final conversationId = _conversationId;
     if (conversationId == null) return;
 
+    final role = ref.read(userRoleProvider);
+    final policy = QuotaPolicies.forRole(role);
+
     final totalSize = attachments.fold<int>(0, (sum, a) => sum + a.sizeBytes);
-    if (totalSize > AppConfig.maxAttachmentBytes) {
+    if (totalSize > policy.maxAttachmentBytes) {
       state = state.copyWith(
         error: 'Pièce jointe trop volumineuse '
-            '(${AppConfig.maxAttachmentBytes ~/ (1024 * 1024)} Mo max).',
+            '(${policy.maxAttachmentBytes ~/ (1024 * 1024)} Mo max).',
       );
       return;
     }
 
-    final effectiveText =
-        trimmed.isEmpty ? 'Analyse ce document' : trimmed;
+    // 1. Vérifier le quota journalier (Free uniquement).
+    if (policy.limited) {
+      try {
+        final remaining = await ref.read(quotaServiceProvider).consume(role);
+        state = state.copyWith(remainingRequests: remaining);
+      } on QuotaExceededException {
+        _pending = _PendingMessage(text: text, attachments: attachments);
+        state = state.copyWith(
+          error: kQuotaExceededError,
+          quotaBlocked: true,
+          isStreaming: false,
+        );
+        return;
+      }
+    }
+
+    _pending = null;
+    final effectiveText = trimmed.isEmpty ? 'Analyse ce document' : trimmed;
     final repository = ref.read(chatRepositoryProvider);
 
-    // 1. Persister le message utilisateur.
+    // 2. Persister le message utilisateur.
     final userMessage = await repository.addMessage(
       conversationId: conversationId,
       role: Role.user,
@@ -118,7 +177,7 @@ class ChatNotifier extends Notifier<ChatState> {
       fileContext: _buildFileContext(attachments),
     );
 
-    // 2. Placeholder de streaming (local, non persisté).
+    // 3. Placeholder de streaming (local, non persisté).
     final placeholderId = '${userMessage.id}_stream';
     final baseMessages = state.messages.any((m) => m.id == userMessage.id)
         ? state.messages
@@ -139,11 +198,11 @@ class ChatNotifier extends Notifier<ChatState> {
       clearError: true,
     );
 
-    // 3. Recherche Internet éventuelle.
+    // 4. Recherche Internet éventuelle.
     List<WebSearchResult>? searchResults;
     InstantAnswer? instantAnswer;
-    final shouldSearch =
-        state.useSearch || WebSearchTrigger.needsWebSearch(effectiveText);
+    final shouldSearch = policy.searchEnabled &&
+        (state.useSearch || WebSearchTrigger.needsWebSearch(effectiveText));
     if (shouldSearch) {
       state = state.copyWith(isSearching: true);
       try {
@@ -160,7 +219,7 @@ class ChatNotifier extends Notifier<ChatState> {
       }
     }
 
-    // 4. Streaming IA.
+    // 5. Streaming IA.
     final buffer = StringBuffer();
     try {
       final history = _buildHistory(
@@ -168,7 +227,7 @@ class ChatNotifier extends Notifier<ChatState> {
         searchResults: searchResults,
         instantAnswer: instantAnswer,
       );
-      final entry = _resolveEntry(effectiveText, attachments);
+      final entry = _resolveEntry(effectiveText, attachments, isFull: role.isFull);
       _lastModel = entry.modelId;
 
       await for (final token in _stream(entry, history)) {
@@ -182,11 +241,7 @@ class ChatNotifier extends Notifier<ChatState> {
           ? null
           : ref.read(searchServiceProvider).formatSourcesAsList(searchResults);
 
-      _replacePlaceholder(
-        placeholderId,
-        finalContent,
-        sources: sources,
-      );
+      _replacePlaceholder(placeholderId, finalContent, sources: sources);
 
       await repository.addMessage(
         conversationId: conversationId,
@@ -212,14 +267,28 @@ class ChatNotifier extends Notifier<ChatState> {
     }
   }
 
-  String? _lastModel;
+  /// Relance le message bloqué par le quota (après passage en Full).
+  Future<void> retryPendingMessage() async {
+    final pending = _pending;
+    if (pending == null) return;
+    _pending = null;
+    state = state.copyWith(quotaBlocked: false, clearError: true);
+    await sendMessage(pending.text, attachments: pending.attachments);
+  }
+
+  /// Abandonne le message bloqué.
+  void clearPendingMessage() => _pending = null;
 
   // ── Helpers internes ───────────────────────────────────────────────────────
 
-  ModelEntry _resolveEntry(String text, List<Attachment> attachments) {
+  ModelEntry _resolveEntry(
+    String text,
+    List<Attachment> attachments, {
+    required bool isFull,
+  }) {
     final hasImage = attachments.any((a) => a.isImage);
     final task = ModelRouter.classifyTask(text, hasImage: hasImage);
-    return ModelRouter.resolveModel(task, isFull: false) ??
+    return ModelRouter.resolveModel(task, isFull: isFull) ??
         (throw const AiException('Aucun modèle IA disponible'));
   }
 
@@ -262,8 +331,9 @@ class ChatNotifier extends Notifier<ChatState> {
   ) {
     final buffer = StringBuffer();
     if (instant != null) {
-      buffer.writeln(ref.read(searchServiceProvider).formatInstantAnswerForAi(instant));
-      buffer.writeln();
+      buffer
+        ..writeln(ref.read(searchServiceProvider).formatInstantAnswerForAi(instant))
+        ..writeln();
     }
     if (results != null && results.isNotEmpty) {
       buffer.write(
@@ -342,7 +412,7 @@ class ChatNotifier extends Notifier<ChatState> {
     );
   }
 
-  /// Modèle utilisé pour le dernier échange (utile aux tests/diagnostics).
+  /// Modèle utilisé pour le dernier échange (diagnostics).
   String? get lastModel => _lastModel;
 }
 

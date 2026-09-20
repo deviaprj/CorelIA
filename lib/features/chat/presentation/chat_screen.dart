@@ -6,6 +6,9 @@ import '../../../core/config/app_config.dart';
 import '../../../core/models/attachment.dart';
 import '../../../core/providers/app_providers.dart';
 import '../../auth/presentation/auth_notifier.dart';
+import '../../subscription/data/role_providers.dart';
+import '../../subscription/domain/quota_policy.dart';
+import '../../subscription/presentation/quota_exceeded_dialog.dart';
 import '../data/file_upload_service.dart';
 import '../data/image_upload_service.dart';
 import 'chat_bubble.dart';
@@ -140,11 +143,20 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     final state = ref.watch(chatNotifierProvider);
     final notifier = ref.read(chatNotifierProvider.notifier);
     final themeMode = ref.watch(themeModeProvider);
+    final role = ref.watch(userRoleProvider);
+    final policy = QuotaPolicies.forRole(role);
 
     ref.listen(chatNotifierProvider, (_, next) {
       _scrollToBottom();
       final error = next.error;
-      if (error != null) {
+      if (error == kQuotaExceededError) {
+        showQuotaExceededDialog(
+          context,
+          role: role,
+          dailyLimit: policy.dailyRequests ?? 0,
+        );
+        notifier.clearError();
+      } else if (error != null) {
         _showError(error);
         notifier.clearError();
       }
@@ -210,6 +222,20 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
           ],
         ),
         actions: [
+          if (policy.limited && state.remainingRequests != null)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              child: Tooltip(
+                message: 'Requêtes restantes aujourd\'hui',
+                child: Chip(
+                  visualDensity: VisualDensity.compact,
+                  label: Text(
+                    '${state.remainingRequests}',
+                    style: const TextStyle(fontSize: 11),
+                  ),
+                ),
+              ),
+            ),
           IconButton(
             tooltip: state.useSearch
                 ? 'Recherche Internet activée'
