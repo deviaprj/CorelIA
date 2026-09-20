@@ -364,8 +364,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
             pendingAttachments: _pendingAttachments,
             onRemoveAttachment: () =>
                 setState(() => _pendingAttachments.clear()),
-            searchEnabled: state.useSearch,
-            onToggleSearch: notifier.toggleSearch,
             onAttach: _showAttachmentSheet,
             onSend: (text) {
               final attachments = List<Attachment>.from(_pendingAttachments);

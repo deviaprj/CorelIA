@@ -6,7 +6,14 @@ import '../../../core/models/attachment.dart';
 /// Callback d'envoi : texte seul (les pièces jointes sont gérées par l'écran).
 typedef SendCallback = void Function(String text);
 
-/// Barre de saisie : texte, pièce jointe, recherche Internet et envoi.
+/// Zone de saisie pleine largeur.
+///
+/// Au repos, tout tient sur une seule ligne dans le bloc : bouton pièce jointe
+/// à gauche, champ au centre, bouton d'envoi à droite.
+///
+/// Dès que le clavier s'ouvre (champ actif), le bloc gagne une ligne au-dessus :
+/// le texte et le curseur occupent la ligne du haut, les deux boutons restent
+/// sur la ligne du bas.
 class InputBar extends StatefulWidget {
   const InputBar({
     super.key,
@@ -15,8 +22,6 @@ class InputBar extends StatefulWidget {
     this.isLoading = false,
     this.pendingAttachments = const [],
     this.onRemoveAttachment,
-    this.searchEnabled = false,
-    this.onToggleSearch,
   });
 
   final SendCallback onSend;
@@ -24,8 +29,6 @@ class InputBar extends StatefulWidget {
   final bool isLoading;
   final List<Attachment> pendingAttachments;
   final VoidCallback? onRemoveAttachment;
-  final bool searchEnabled;
-  final VoidCallback? onToggleSearch;
 
   @override
   State<InputBar> createState() => InputBarState();
@@ -34,7 +37,12 @@ class InputBar extends StatefulWidget {
 class InputBarState extends State<InputBar> {
   final _controller = TextEditingController();
   final _focusNode = FocusNode();
+
+  /// Conserve l'état du champ lorsqu'il change de disposition (1 ou 2 lignes).
+  final _fieldKey = GlobalKey();
+
   bool _hasText = false;
+  bool _isFocused = false;
 
   @override
   void initState() {
@@ -42,6 +50,10 @@ class InputBarState extends State<InputBar> {
     _controller.addListener(() {
       final hasText = _controller.text.trim().isNotEmpty;
       if (hasText != _hasText) setState(() => _hasText = hasText);
+    });
+    _focusNode.addListener(() {
+      if (_focusNode.hasFocus == _isFocused) return;
+      setState(() => _isFocused = _focusNode.hasFocus);
     });
   }
 
@@ -72,11 +84,9 @@ class InputBarState extends State<InputBar> {
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-
     return SafeArea(
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(12, 6, 12, 8),
+        padding: const EdgeInsets.fromLTRB(8, 4, 8, 8),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -85,66 +95,129 @@ class InputBarState extends State<InputBar> {
                 attachments: widget.pendingAttachments,
                 onRemove: widget.onRemoveAttachment,
               ),
-            Row(
-              children: [
-                IconButton(
-                  onPressed: widget.onAttach,
-                  tooltip: 'Joindre un fichier',
-                  icon: const Icon(Icons.attach_file),
-                ),
-                IconButton(
-                  onPressed: widget.onToggleSearch,
-                  tooltip: widget.searchEnabled
-                      ? 'Recherche Internet activée'
-                      : 'Activer la recherche Internet',
-                  icon: Icon(
-                    widget.searchEnabled ? Icons.public : Icons.public_off,
-                    color: widget.searchEnabled ? AppColors.primary : null,
-                  ),
-                ),
-                Expanded(
-                  child: TextField(
-                    controller: _controller,
-                    focusNode: _focusNode,
-                    minLines: 1,
-                    maxLines: 6,
-                    textCapitalization: TextCapitalization.sentences,
-                    textInputAction: TextInputAction.send,
-                    onSubmitted: (_) => _send(),
-                    decoration: const InputDecoration(
-                      hintText: 'Posez votre question...',
-                      isDense: true,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                FilledButton(
-                  onPressed: widget.isLoading ? null : _send,
-                  style: FilledButton.styleFrom(
-                    shape: const CircleBorder(),
-                    padding: const EdgeInsets.all(14),
-                    minimumSize: const Size(48, 48),
-                  ),
-                  child: widget.isLoading
-                      ? const SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: Colors.white,
-                          ),
-                        )
-                      : Icon(
-                          Icons.send_rounded,
-                          size: 20,
-                          color: colorScheme.onPrimary,
-                        ),
-                ),
-              ],
-            ),
+            _composer(context),
           ],
         ),
       ),
+    );
+  }
+
+  Widget _composer(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return Container(
+      key: const ValueKey('input-composer'),
+      width: double.infinity,
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: colorScheme.surface,
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(
+          color: _isFocused ? AppColors.accent : colorScheme.outlineVariant,
+          width: _isFocused ? 1.4 : 1,
+        ),
+      ),
+      child: _isFocused ? _expandedLayout() : _singleLineLayout(),
+    );
+  }
+
+  /// Une seule ligne : pièce jointe · champ · envoi.
+  Widget _singleLineLayout() {
+    return Row(
+      children: [
+        _attachButton(),
+        Expanded(child: _field()),
+        _sendButton(),
+      ],
+    );
+  }
+
+  /// Deux lignes : le champ au-dessus, les boutons en dessous.
+  Widget _expandedLayout() {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(left: 6, right: 6, top: 2),
+          child: _field(),
+        ),
+        Row(
+          children: [
+            _attachButton(),
+            const Spacer(),
+            _sendButton(),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _field() {
+    return TextField(
+      key: _fieldKey,
+      controller: _controller,
+      focusNode: _focusNode,
+      minLines: 1,
+      maxLines: 4,
+      keyboardType: TextInputType.multiline,
+      textInputAction: TextInputAction.newline,
+      textCapitalization: TextCapitalization.sentences,
+      style: const TextStyle(fontSize: 15, height: 1.3),
+      decoration: const InputDecoration(
+        hintText: 'Posez votre question...',
+        // Le bloc (voir _composer) fournit le cadre : on neutralise le style
+        // du thème pour éviter un champ imbriqué.
+        filled: false,
+        border: InputBorder.none,
+        enabledBorder: InputBorder.none,
+        focusedBorder: InputBorder.none,
+        disabledBorder: InputBorder.none,
+        errorBorder: InputBorder.none,
+        focusedErrorBorder: InputBorder.none,
+        isDense: true,
+        contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+      ),
+    );
+  }
+
+  Widget _attachButton() {
+    return IconButton(
+      onPressed: widget.onAttach,
+      tooltip: 'Ajouter un fichier',
+      iconSize: 22,
+      visualDensity: VisualDensity.compact,
+      color: Theme.of(context).colorScheme.onSurfaceVariant,
+      icon: const Icon(Icons.attach_file),
+    );
+  }
+
+  Widget _sendButton() {
+    final colorScheme = Theme.of(context).colorScheme;
+    final enabled = _canSend && !widget.isLoading;
+
+    return FilledButton(
+      onPressed: enabled ? _send : null,
+      style: FilledButton.styleFrom(
+        shape: const CircleBorder(),
+        padding: const EdgeInsets.all(10),
+        minimumSize: const Size(40, 40),
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      ),
+      child: widget.isLoading
+          ? SizedBox(
+              width: 18,
+              height: 18,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: colorScheme.onPrimary,
+              ),
+            )
+          : Icon(
+              Icons.send_rounded,
+              size: 18,
+              color: colorScheme.onPrimary,
+            ),
     );
   }
 }
